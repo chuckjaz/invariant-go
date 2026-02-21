@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"invariant/internal/identity"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,9 +15,14 @@ type StorageServer struct {
 }
 
 func NewStorageServer(storage Storage) *StorageServer {
-	idBytes := make([]byte, 32)
-	rand.Read(idBytes)
-	id := hex.EncodeToString(idBytes)
+	var id string
+	if idStorage, ok := storage.(identity.Provider); ok {
+		id = idStorage.ID()
+	} else {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+	}
 
 	return &StorageServer{
 		id:      id,

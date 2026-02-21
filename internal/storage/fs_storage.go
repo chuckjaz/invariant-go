@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"invariant/internal/identity"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,18 +13,38 @@ import (
 // FileSystemStorage implements the Storage interface by saving blobs to disk.
 type FileSystemStorage struct {
 	baseDir string
+	id      string
 }
 
 // Assert that FileSystemStorage implements the Storage interface
 var _ Storage = (*FileSystemStorage)(nil)
 
+// Assert that FileSystemStorage implements the identity.Provider interface
+var _ identity.Provider = (*FileSystemStorage)(nil)
+
 func NewFileSystemStorage(baseDir string) *FileSystemStorage {
 	// Ensure the base directory exists
 	os.MkdirAll(baseDir, 0755)
 
+	idPath := filepath.Join(baseDir, "id")
+	var id string
+	if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+		id = string(data)
+	} else {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+		os.WriteFile(idPath, []byte(id), 0644)
+	}
+
 	return &FileSystemStorage{
 		baseDir: baseDir,
+		id:      id,
 	}
+}
+
+func (s *FileSystemStorage) ID() string {
+	return s.id
 }
 
 // addressToPath converts an address (e.g., "aabbcc...") to a structured path
