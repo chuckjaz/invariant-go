@@ -7,12 +7,18 @@ import (
 	"net/http"
 	"os"
 
+	"invariant/internal/discovery"
+	"invariant/internal/identity"
 	"invariant/internal/storage"
 )
 
 func main() {
 	var dir string
 	flag.StringVar(&dir, "dir", "", "Base directory for file system storage")
+	var discoveryURL string
+	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	var advertiseAddr string
+	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	flag.Parse()
 
 	var s storage.Storage
@@ -30,6 +36,25 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%s", port)
+
+	if discoveryURL != "" {
+		if advertiseAddr == "" {
+			advertiseAddr = fmt.Sprintf("http://localhost:%s", port)
+		}
+
+		id := s.(identity.Provider).ID()
+		client := discovery.NewClient(discoveryURL, nil)
+		err := client.Register(discovery.ServiceRegistration{
+			ID:        id,
+			Address:   advertiseAddr,
+			Protocols: []string{"storage-v1"},
+		})
+		if err != nil {
+			log.Fatalf("Failed to register with discovery service: %v", err)
+		}
+		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
+	}
+
 	log.Printf("Listening on %s...", addr)
 	if dir != "" {
 		log.Printf("Using File System storage at %s", dir)
