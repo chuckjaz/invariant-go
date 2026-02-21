@@ -1,8 +1,8 @@
-# Invariant Discovery Protocol
+# The intervariant project - Discovery Protocol
 
-The Invariant Discovery Protocol (IDP) is a simple HTTP-based protocol for discovering Invariant services.
+The Discovery Protocol is a simple HTTP-based protocol for discovering Invariant services.
 
-As services are brought up, they register their ID and address with the IDP. Clients can then query the IDP to find the address of a service by its ID. The service can also register the protocols it supports and clients can query the IDP to find the address of a service by its ID and the protocol it supports. The client should attempt to connect to the service using the protocol it supports in the order reported by the discovery service.
+As services are brought up, they register their ID and address with the Discovery service. Clients can then query the Discovery service to find the address of a service by its ID. The service can also register the protocols it supports and clients can query the Discovery service to find the address of a service by its ID and the protocol it supports. The client should attempt to connect to the service using the protocol it supports in the order reported by the discovery service.
 
 The discovery service will periodally validate registered services are still available. If a service is not available, the discovery service will remove it from the list of registered services. A service is considered availabe if it responds to a GET request to `/id` returns the same ID as registered.
 
