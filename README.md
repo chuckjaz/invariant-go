@@ -2,8 +2,17 @@
 
 A storage system of invariant data that can be used for general purpose programming.
 
-## Executing the project
-To run the server gracefully, you can fire off the entrypoint via mapping your preferred `PORT` and a target `--dir`:
+## Executing the services
+
+### Discovery Service
+To run the discovery server, which defaults to port `3003`:
+```bash
+# Run with in-memory discovery storage
+PORT=3003 go run ./cmd/discovery
+```
+
+### Storage Service
+To run the storage server, you can fire off the entrypoint via mapping your preferred `PORT` and an optional target `--dir`:
 ```bash
 # Run with in-memory storage natively
 PORT=3000 go run ./cmd/storage
