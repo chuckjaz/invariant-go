@@ -13,6 +13,9 @@ type FileSystemStorage struct {
 	baseDir string
 }
 
+// Assert that FileSystemStorage implements the Storage interface
+var _ Storage = (*FileSystemStorage)(nil)
+
 func NewFileSystemStorage(baseDir string) *FileSystemStorage {
 	// Ensure the base directory exists
 	os.MkdirAll(baseDir, 0755)

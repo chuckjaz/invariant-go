@@ -8,13 +8,8 @@ import (
 	"sync"
 )
 
-type Storage interface {
-	Has(address string) bool
-	Get(address string) (io.ReadCloser, bool)
-	Store(r io.Reader) (string, error)
-	StoreAt(address string, r io.Reader) (bool, error)
-	Size(address string) (int64, bool)
-}
+// Assert that InMemoryStorage implements the Storage interface
+var _ Storage = (*InMemoryStorage)(nil)
 
 type InMemoryStorage struct {
 	mu    sync.RWMutex
