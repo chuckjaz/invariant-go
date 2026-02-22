@@ -28,9 +28,9 @@ func (s *DiscoveryServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /id", s.handleGetID)
-	mux.HandleFunc("GET /discovery/{id}", s.handleGet)
-	mux.HandleFunc("GET /discovery", s.handleFind)
-	mux.HandleFunc("PUT /discovery", s.handlePut)
+	mux.HandleFunc("GET /{id}", s.handleGet)
+	mux.HandleFunc("GET /", s.handleFind)
+	mux.HandleFunc("PUT /{id}", s.handlePut)
 
 	return mux
 }

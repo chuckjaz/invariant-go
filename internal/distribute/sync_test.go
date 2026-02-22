@@ -43,7 +43,7 @@ func TestInMemoryDistribute_Sync(t *testing.T) {
 	// Create test servers simulating storage nodes that just count fetch requests
 	createServer := func() *httptest.Server {
 		mux := http.NewServeMux()
-		mux.HandleFunc("POST /storage/fetch", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /fetch", func(w http.ResponseWriter, r *http.Request) {
 			var req storage.StorageFetchRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			defer r.Body.Close()
@@ -125,7 +125,7 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 	// Create test server that always fails (e.g. 500 status)
 	createFailingServer := func() *httptest.Server {
 		mux := http.NewServeMux()
-		mux.HandleFunc("POST /storage/fetch", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /fetch", func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			fetchReqs[r.Host]++
 			mu.Unlock()
@@ -133,7 +133,7 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		})
 		// Provide GET endpoint to fail the fallback relay check
-		mux.HandleFunc("GET /storage", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		})
 		return httptest.NewServer(mux)
@@ -142,7 +142,7 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 	// Create a stable server
 	createStableServer := func() *httptest.Server {
 		mux := http.NewServeMux()
-		mux.HandleFunc("POST /storage/fetch", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /fetch", func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			fetchReqs[r.Host]++
 			mu.Unlock()

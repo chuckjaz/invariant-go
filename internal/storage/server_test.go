@@ -29,9 +29,9 @@ func TestStorageServer(t *testing.T) {
 		t.Errorf("expected 64 char hex string for /id, got length %d", len(idBytes))
 	}
 
-	// 2. POST /storage/
+	// 2. POST /
 	content := []byte("hello world")
-	res, err = http.Post(ts.URL+"/storage/", "text/plain", bytes.NewReader(content))
+	res, err = http.Post(ts.URL+"/", "text/plain", bytes.NewReader(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +45,8 @@ func TestStorageServer(t *testing.T) {
 		t.Errorf("expected hash %s, got %s", expectedHash, address)
 	}
 
-	// 3. GET /storage/:address
-	res, err = http.Get(ts.URL + "/storage/" + address)
+	// 3. GET /:address
+	res, err = http.Get(ts.URL + "/" + address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +62,8 @@ func TestStorageServer(t *testing.T) {
 		t.Errorf("expected %s, got %s", content, valBytes)
 	}
 
-	// 4. HEAD /storage/:address
-	req, _ := http.NewRequest(http.MethodHead, ts.URL+"/storage/"+address, nil)
+	// 4. HEAD /:address
+	req, _ := http.NewRequest(http.MethodHead, ts.URL+"/"+address, nil)
 	client := &http.Client{}
 	res, err = client.Do(req)
 	if err != nil {
@@ -77,9 +77,9 @@ func TestStorageServer(t *testing.T) {
 		t.Errorf("expected Content-Length 11, got %s", res.Header.Get("Content-Length"))
 	}
 
-	// 5. PUT /storage/:address
+	// 5. PUT /:address
 	newContent := []byte("new content")
-	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/storage/"+address, bytes.NewReader(newContent))
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/"+address, bytes.NewReader(newContent))
 	res, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestStorageServer(t *testing.T) {
 
 	hash2 := sha256.Sum256(newContent)
 	newExpectedHash := hex.EncodeToString(hash2[:])
-	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/storage/"+newExpectedHash, bytes.NewReader(newContent))
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/"+newExpectedHash, bytes.NewReader(newContent))
 	res, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -105,14 +105,14 @@ func TestStorageServer(t *testing.T) {
 		t.Errorf("expected %s, got %s", newExpectedHash, string(body))
 	}
 
-	// 6. Test /storage/fetch optional endpoints
-	res, _ = http.Post(ts.URL+"/storage/fetch", "application/json", strings.NewReader(`{}`))
+	// 6. Test /fetch optional endpoints
+	res, _ = http.Post(ts.URL+"/fetch", "application/json", strings.NewReader(`{}`))
 	res.Body.Close()
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 Not Found, got %d", res.StatusCode)
 	}
 
-	req, _ = http.NewRequest("HEAD", ts.URL+"/storage/fetch", nil)
+	req, _ = http.NewRequest("HEAD", ts.URL+"/fetch", nil)
 	res, _ = client.Do(req)
 	res.Body.Close()
 	if res.StatusCode != http.StatusNotFound {
@@ -163,8 +163,8 @@ func TestStorageServer_Fetch(t *testing.T) {
 	destTS := httptest.NewServer(destServer)
 	defer destTS.Close()
 
-	// 1. Send HEAD to /storage/fetch (should be 200 OK because we have discovery)
-	reqHead, _ := http.NewRequest("HEAD", destTS.URL+"/storage/fetch", nil)
+	// 1. Send HEAD to /fetch (should be 200 OK because we have discovery)
+	reqHead, _ := http.NewRequest("HEAD", destTS.URL+"/fetch", nil)
 	client := &http.Client{}
 	resHead, err := client.Do(reqHead)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestStorageServer_Fetch(t *testing.T) {
 
 	// 2. Fetch from source ID
 	fetchReqBody := `{"address":"` + sourceAddr + `","container":"` + sourceID + `"}`
-	resFetch, err := http.Post(destTS.URL+"/storage/fetch", "application/json", strings.NewReader(fetchReqBody))
+	resFetch, err := http.Post(destTS.URL+"/fetch", "application/json", strings.NewReader(fetchReqBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestStorageServer_Fetch(t *testing.T) {
 	// Use a new arbitrary address so the local storage optimization logic doesn't return 200 early.
 	badAddr := "0101010101010101010101010101010101010101010101010101010101010101"
 	badFetchReqBody := `{"address":"` + badAddr + `","container":"missing-node-id"}`
-	resBadFetch, _ := http.Post(destTS.URL+"/storage/fetch", "application/json", strings.NewReader(badFetchReqBody))
+	resBadFetch, _ := http.Post(destTS.URL+"/fetch", "application/json", strings.NewReader(badFetchReqBody))
 	resBadFetch.Body.Close()
 	if resBadFetch.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected 502 Bad Gateway for missing node, got %d", resBadFetch.StatusCode)

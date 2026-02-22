@@ -30,7 +30,7 @@ Returns the ID of the discovery service.
 
 The hex encoded ID of the discovery service.
 
-## `GET /discovery/:id`
+## `GET /:id`
 
 Returns the service description for the given ID. The service description includes the id, address, and protocols supported by the service. The response is a JSON object with TypeScript type of,
 
@@ -42,7 +42,7 @@ interface ServiceDescription {
 }
 ```
 
-## `GET /discovery?protocol=:protocol&count=:count`
+## `GET /?protocol=:protocol&count=:count`
 
 Returns a list of service descriptions for the given protocol. The response is a JSON array of service descriptions. The count parameter is optional and defaults to 1.
 
@@ -57,7 +57,7 @@ Returns a list of service descriptions for the given protocol. The response is a
 
 The response is a JSON array of service descriptions.
 
-## `PUT /discovery`
+## `PUT /:id`
 
 Register a service with the discovery service.
 

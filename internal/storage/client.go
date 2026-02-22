@@ -28,7 +28,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 
 // Has checks if the storage contains the given address.
 func (c *Client) Has(address string) bool {
-	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/storage/%s", c.baseURL, address), nil)
+	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return false
 	}
@@ -44,7 +44,7 @@ func (c *Client) Has(address string) bool {
 
 // Get retrieves the data for the given address.
 func (c *Client) Get(address string) (io.ReadCloser, bool) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/storage/%s", c.baseURL, address), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return nil, false
 	}
@@ -62,7 +62,7 @@ func (c *Client) Get(address string) (io.ReadCloser, bool) {
 
 // Store saves data and returns its content-based address.
 func (c *Client) Store(r io.Reader) (string, error) {
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/storage/", c.baseURL), r)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/", c.baseURL), r)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +87,7 @@ func (c *Client) Store(r io.Reader) (string, error) {
 
 // StoreAt saves data at the specified address.
 func (c *Client) StoreAt(address string, r io.Reader) (bool, error) {
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/storage/%s", c.baseURL, address), r)
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, address), r)
 	if err != nil {
 		return false, err
 	}
@@ -107,7 +107,7 @@ func (c *Client) StoreAt(address string, r io.Reader) (bool, error) {
 
 // Size returns the size of the data at the given address.
 func (c *Client) Size(address string) (int64, bool) {
-	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/storage/%s", c.baseURL, address), nil)
+	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return 0, false
 	}
@@ -145,7 +145,7 @@ func (c *Client) Fetch(address, container string) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/storage/fetch", c.baseURL), bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/fetch", c.baseURL), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}

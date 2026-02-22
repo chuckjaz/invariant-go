@@ -29,7 +29,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 
 // Get retrieves the service description for the given ID.
 func (c *Client) Get(id string) (ServiceDescription, bool) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/discovery/%s", c.baseURL, id), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
 	if err != nil {
 		return ServiceDescription{}, false
 	}
@@ -53,7 +53,7 @@ func (c *Client) Get(id string) (ServiceDescription, bool) {
 
 // Find searches for services by protocol up to a certain count.
 func (c *Client) Find(protocol string, count int) ([]ServiceDescription, error) {
-	u, err := url.Parse(fmt.Sprintf("%s/discovery", c.baseURL))
+	u, err := url.Parse(fmt.Sprintf("%s/", c.baseURL))
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (c *Client) Register(reg ServiceRegistration) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/discovery", c.baseURL), bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, reg.ID), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}

@@ -24,7 +24,7 @@ func TestDiscoveryServer(t *testing.T) {
 		t.Errorf("expected 200 OK, got %d", res.StatusCode)
 	}
 
-	// 2. PUT /discovery
+	// 2. PUT /test-service-id
 	reg := ServiceRegistration{
 		ID:        "test-service-id",
 		Address:   "http://localhost:8080",
@@ -32,7 +32,7 @@ func TestDiscoveryServer(t *testing.T) {
 	}
 
 	reqBody, _ := json.Marshal(reg)
-	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/discovery", bytes.NewReader(reqBody))
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/test-service-id", bytes.NewReader(reqBody))
 	client := &http.Client{}
 	res, err = client.Do(req)
 	if err != nil {
@@ -43,8 +43,8 @@ func TestDiscoveryServer(t *testing.T) {
 		t.Errorf("expected 200 OK, got %d", res.StatusCode)
 	}
 
-	// 3. GET /discovery/:id
-	res, err = http.Get(ts.URL + "/discovery/test-service-id")
+	// 3. GET /:id
+	res, err = http.Get(ts.URL + "/test-service-id")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +60,8 @@ func TestDiscoveryServer(t *testing.T) {
 		t.Errorf("expected ID %s, got %s", reg.ID, desc.ID)
 	}
 
-	// 4. GET /discovery?protocol=http
-	res, err = http.Get(ts.URL + "/discovery?protocol=http")
+	// 4. GET /?protocol=http
+	res, err = http.Get(ts.URL + "/?protocol=http")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +80,8 @@ func TestDiscoveryServer(t *testing.T) {
 		t.Errorf("expected ID %s, got %s", reg.ID, descs[0].ID)
 	}
 
-	// 5. GET /discovery?protocol=unknown
-	res, err = http.Get(ts.URL + "/discovery?protocol=unknown")
+	// 5. GET /?protocol=unknown
+	res, err = http.Get(ts.URL + "/?protocol=unknown")
 	if err != nil {
 		t.Fatal(err)
 	}

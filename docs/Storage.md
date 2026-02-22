@@ -48,7 +48,7 @@ Retrieve information about whether a blob is available.
 | ETag           | `:address`                |
 | content-length | `:size`                   |
 
-## `POST /storage/`
+## `POST /`
 
 Store a blob into the store. The server, if it accepts a blob, is required to support up to 1 Mib of data per blob. It may store larger blobs but this should not be relied on.
 
@@ -60,7 +60,7 @@ Store a blob into the store. The server, if it accepts a blob, is required to su
 
 The body of the response is the `:address` of the content.
 
-## `PUT /storage/:address`
+## `PUT /:address`
 
 Store a blob into the store with the given `:address`.
 
@@ -76,7 +76,7 @@ If content with the given `:address` is already present in the store the server 
 
 The body of the response is the URL path part of the content.
 
-## `POST /storage/fetch`
+## `POST /fetch`
 
 An optionally supported fetch request. This is a request for the storage service to retrieve and store a block from another storage service.
 
@@ -98,6 +98,6 @@ interface StorageFetchRequest {
 }
 ```
 
-## `HEAD /storage/fetch`
+## `HEAD /fetch`
 
-Responds with status 200 if `POST /storage/fetch` is supported or 404 otherwise.
+Responds with status 200 if `POST /fetch` is supported or 404 otherwise.
