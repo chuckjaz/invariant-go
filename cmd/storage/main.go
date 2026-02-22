@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"invariant/internal/discovery"
+	"invariant/internal/has"
 	"invariant/internal/identity"
 	"invariant/internal/storage"
 )
@@ -19,6 +21,10 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
+	var hasIDs string
+	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol")
+	var hasBatchSize int
+	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of block addresses to send per request")
 	flag.Parse()
 
 	var s storage.Storage
@@ -57,6 +63,34 @@ func main() {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
+	}
+
+	var hasClients []storage.HasClient
+	if hasIDs != "" {
+		if discoveryURL == "" {
+			log.Fatalf("Discovery service is required to use the -has flag")
+		}
+
+		// Use a discovery client to resolve Has service IDs
+		dClient := discovery.NewClient(discoveryURL, nil)
+
+		ids := strings.Split(hasIDs, ",")
+		for _, hid := range ids {
+			hid = strings.TrimSpace(hid)
+			if hid == "" {
+				continue
+			}
+
+			desc, ok := dClient.Get(hid)
+			if !ok {
+				log.Printf("Warning: Could not find address for Has service ID %s", hid)
+				continue
+			}
+
+			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+		}
+
+		server.StartHasNotification(hasClients, hasBatchSize)
 	}
 
 	log.Printf("Listening on %s...", addr)

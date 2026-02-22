@@ -165,3 +165,52 @@ func (s *FileSystemStorage) Size(address string) (int64, bool) {
 	}
 	return stat.Size(), true
 }
+
+func (s *FileSystemStorage) List(chunkSize int) <-chan []string {
+	if chunkSize <= 0 {
+		chunkSize = 10000
+	}
+	ch := make(chan []string)
+
+	go func() {
+		defer close(ch)
+		var chunk []string
+
+		_ = filepath.WalkDir(s.baseDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Skip the base directory itself and any subdirectories
+			if d.IsDir() {
+				return nil
+			}
+
+			filename := d.Name()
+
+			// Skip the ID file
+			if filename == "id" && filepath.Dir(path) == s.baseDir {
+				return nil
+			}
+
+			// Skip temporary upload files
+			if len(filename) >= 7 && filename[:7] == "upload-" {
+				return nil
+			}
+
+			// The filename itself is the address if it reaches here
+			chunk = append(chunk, filename)
+			if len(chunk) >= chunkSize {
+				ch <- chunk
+				chunk = nil
+			}
+			return nil
+		})
+
+		if len(chunk) > 0 {
+			ch <- chunk
+		}
+	}()
+
+	return ch
+}

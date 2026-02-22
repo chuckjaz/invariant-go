@@ -86,4 +86,29 @@ func TestFileSystemStorage(t *testing.T) {
 	if os.IsNotExist(err) {
 		t.Fatalf("Expected file at structured path %s does not exist", newExpectedPath)
 	}
+
+	// 8. Verify List
+	var list []string
+	for chunk := range fs.List(10) {
+		list = append(list, chunk...)
+	}
+
+	if len(list) != 2 {
+		t.Fatalf("Expected List to return 2 items, got %d", len(list))
+	}
+
+	found1 := false
+	found2 := false
+	for _, item := range list {
+		if item == expectedAddress {
+			found1 = true
+		}
+		if item == newExpectedHash {
+			found2 = true
+		}
+	}
+
+	if !found1 || !found2 {
+		t.Fatalf("Expected List to contain both %s and %s, but got %v", expectedAddress, newExpectedHash, list)
+	}
 }

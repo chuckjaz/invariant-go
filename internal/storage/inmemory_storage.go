@@ -95,3 +95,30 @@ func (s *InMemoryStorage) Size(address string) (int64, bool) {
 	}
 	return int64(len(data)), true
 }
+
+func (s *InMemoryStorage) List(chunkSize int) <-chan []string {
+	if chunkSize <= 0 {
+		chunkSize = 10000
+	}
+	ch := make(chan []string)
+
+	go func() {
+		defer close(ch)
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var chunk []string
+		for addr := range s.store {
+			chunk = append(chunk, addr)
+			if len(chunk) >= chunkSize {
+				ch <- chunk
+				chunk = nil
+			}
+		}
+		if len(chunk) > 0 {
+			ch <- chunk
+		}
+	}()
+
+	return ch
+}

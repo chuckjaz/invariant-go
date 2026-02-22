@@ -33,11 +33,36 @@ func NewStorageServer(storage Storage) *StorageServer {
 	}
 }
 
+// HasClient represents a client that can notify a service about known blocks.
+type HasClient interface {
+	Has(storageID string, addresses []string) error
+}
+
 // WithDiscovery sets the discovery client used by the storage server
 // to locate other storage nodes for fetching operations.
 func (s *StorageServer) WithDiscovery(d discovery.Discovery) *StorageServer {
 	s.discovery = d
 	return s
+}
+
+// StartHasNotification starts a background goroutine that sends all stored
+// block addresses to the provided Has clients in batches.
+func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int) {
+	if len(clients) == 0 {
+		return
+	}
+	if batchSize <= 0 {
+		batchSize = 10000
+	}
+
+	go func() {
+		for batch := range s.storage.List(batchSize) {
+			for _, client := range clients {
+				// Ignore errors in background notification
+				_ = client.Has(s.id, batch)
+			}
+		}
+	}()
 }
 
 func (s *StorageServer) Handler() http.Handler {

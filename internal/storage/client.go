@@ -164,5 +164,12 @@ func (c *Client) Fetch(address, container string) error {
 	return nil
 }
 
+// List returns all addresses stored in the remote storage. Not currently supported via HTTP.
+func (c *Client) List(chunkSize int) <-chan []string {
+	ch := make(chan []string)
+	close(ch)
+	return ch
+}
+
 // Assert that Client implements the Storage interface
 var _ Storage = (*Client)(nil)
