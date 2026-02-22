@@ -55,7 +55,7 @@ func (n NodeID) Less(other, target NodeID) bool {
 
 // PrefixLen returns the number of common bits between two NodeIDs.
 func (n NodeID) PrefixLen(other NodeID) int {
-	for i := 0; i < IDLength; i++ {
+	for i := range IDLength {
 		b := n[i] ^ other[i]
 		if b != 0 {
 			// Find the first set bit from the left
