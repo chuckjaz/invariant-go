@@ -8,6 +8,10 @@ The default algorithm for storage is SHA-256 but any algorithm can be used as de
 
 Server specific authorization my be required for any of the requests.
 
+# Version
+
+The version 1 of the storage protocol with the protocol token of storage-v1.
+
 # Values
 
 ## `:address`

@@ -8,6 +8,10 @@ The primary algorithm used by distribute is to determine Kademlia distance of th
 
 The kademlia distance is calculated as the XOR of the binary representation of the two IDs.
 
+# Version
+
+The version 1 of the distribute protocol with the protocol token of distribute-v1.
+
 # Values
 
 ## `:id`

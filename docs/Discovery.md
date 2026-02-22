@@ -6,6 +6,10 @@ As services are brought up, they register their ID and address with the Discover
 
 The discovery service will periodally validate registered services are still available. If a service is not available, the discovery service will remove it from the list of registered services. A service is considered availabe if it responds to a GET request to `/id` returns the same ID as registered.
 
+## Version
+
+The version 1 of the discovery protocol with the protocol token of discovery-v1.
+
 ## Values
 
 ### `:id`

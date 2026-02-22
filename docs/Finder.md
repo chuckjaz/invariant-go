@@ -4,6 +4,10 @@ The finder protocol is a protocol for finding blocks in storage services.
 
 The finder service uses the Kademlia algorithm to find the storage service that have the given block ID.
 
+## Version
+
+The version 1 of the finder protocol with the protocol token of finder-v1.
+
 ## Values
 
 ### `:id`
