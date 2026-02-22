@@ -171,5 +171,12 @@ func (c *Client) List(chunkSize int) <-chan []string {
 	return ch
 }
 
+// Subscribe provides a channel for live updates. Not currently supported via HTTP.
+func (c *Client) Subscribe() <-chan string {
+	ch := make(chan string)
+	close(ch)
+	return ch
+}
+
 // Assert that Client implements the Storage interface
 var _ Storage = (*Client)(nil)

@@ -10,6 +10,7 @@ type Storage interface {
 	StoreAt(address string, r io.Reader) (bool, error)
 	Size(address string) (int64, bool)
 	List(chunkSize int) <-chan []string
+	Subscribe() <-chan string
 }
 
 // StorageFetchRequest represents a request to fetch a block from another service

@@ -8,12 +8,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // FileSystemStorage implements the Storage interface by saving blobs to disk.
 type FileSystemStorage struct {
-	baseDir string
-	id      string
+	baseDir     string
+	id          string
+	mu          sync.RWMutex
+	subscribers []chan string
 }
 
 // Assert that FileSystemStorage implements the Storage interface
@@ -116,6 +119,8 @@ func (s *FileSystemStorage) Store(r io.Reader) (string, error) {
 		return "", err
 	}
 
+	s.notifySubscribers(address)
+
 	return address, nil
 }
 
@@ -153,6 +158,8 @@ func (s *FileSystemStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	if err := os.Rename(tmpFile.Name(), finalPath); err != nil {
 		return false, err
 	}
+
+	s.notifySubscribers(address)
 
 	return true, nil
 }
@@ -213,4 +220,24 @@ func (s *FileSystemStorage) List(chunkSize int) <-chan []string {
 	}()
 
 	return ch
+}
+
+func (s *FileSystemStorage) Subscribe() <-chan string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan string, 100)
+	s.subscribers = append(s.subscribers, ch)
+	return ch
+}
+
+func (s *FileSystemStorage) notifySubscribers(address string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, ch := range s.subscribers {
+		select {
+		case ch <- address:
+		default:
+			// Subscriber is full or blocked, drop the notification
+		}
+	}
 }

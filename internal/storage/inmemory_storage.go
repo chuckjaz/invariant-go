@@ -17,9 +17,10 @@ var _ Storage = (*InMemoryStorage)(nil)
 var _ identity.Provider = (*InMemoryStorage)(nil)
 
 type InMemoryStorage struct {
-	id    string
-	mu    sync.RWMutex
-	store map[string][]byte
+	id          string
+	mu          sync.RWMutex
+	store       map[string][]byte
+	subscribers []chan string
 }
 
 func NewInMemoryStorage() *InMemoryStorage {
@@ -65,6 +66,7 @@ func (s *InMemoryStorage) Store(r io.Reader) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store[address] = data
+	s.notifySubscribers(address)
 	return address, nil
 }
 
@@ -83,6 +85,7 @@ func (s *InMemoryStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store[address] = data
+	s.notifySubscribers(address)
 	return true, nil
 }
 
@@ -121,4 +124,23 @@ func (s *InMemoryStorage) List(chunkSize int) <-chan []string {
 	}()
 
 	return ch
+}
+
+func (s *InMemoryStorage) Subscribe() <-chan string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan string, 100)
+	s.subscribers = append(s.subscribers, ch)
+	return ch
+}
+
+func (s *InMemoryStorage) notifySubscribers(address string) {
+	// Not acquiring lock here because we are already holding mu.Lock() in Store/StoreAt
+	for _, ch := range s.subscribers {
+		select {
+		case ch <- address:
+		default:
+			// Subscriber is full or blocked, drop the notification
+		}
+	}
 }

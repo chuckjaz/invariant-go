@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"invariant/internal/discovery"
 	"invariant/internal/has"
@@ -25,6 +26,8 @@ func main() {
 	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol")
 	var hasBatchSize int
 	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of block addresses to send per request")
+	var hasBatchDuration time.Duration
+	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
 	flag.Parse()
 
 	var s storage.Storage
@@ -90,7 +93,7 @@ func main() {
 			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
 		}
 
-		server.StartHasNotification(hasClients, hasBatchSize)
+		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
 	}
 
 	log.Printf("Listening on %s...", addr)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type StorageServer struct {
@@ -47,19 +48,54 @@ func (s *StorageServer) WithDiscovery(d discovery.Discovery) *StorageServer {
 
 // StartHasNotification starts a background goroutine that sends all stored
 // block addresses to the provided Has clients in batches.
-func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int) {
+func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int, batchDuration time.Duration) {
 	if len(clients) == 0 {
 		return
 	}
 	if batchSize <= 0 {
 		batchSize = 10000
 	}
+	if batchDuration <= 0 {
+		batchDuration = 1 * time.Second
+	}
 
 	go func() {
+		// 1. Send initial batch of all existing blocks
 		for batch := range s.storage.List(batchSize) {
 			for _, client := range clients {
-				// Ignore errors in background notification
 				_ = client.Has(s.id, batch)
+			}
+		}
+
+		// 2. Listen for new blocks and send them in batches
+		sub := s.storage.Subscribe()
+		var currentBatch []string
+		ticker := time.NewTicker(batchDuration)
+		defer ticker.Stop()
+
+		sendBatch := func() {
+			if len(currentBatch) == 0 {
+				return
+			}
+			for _, client := range clients {
+				_ = client.Has(s.id, currentBatch)
+			}
+			currentBatch = nil
+		}
+
+		for {
+			select {
+			case addr, ok := <-sub:
+				if !ok {
+					return
+				}
+				currentBatch = append(currentBatch, addr)
+				if len(currentBatch) >= batchSize {
+					sendBatch()
+					ticker.Reset(batchDuration) // reset the ticker so we don't send an empty batch right away
+				}
+			case <-ticker.C:
+				sendBatch()
 			}
 		}
 	}()
