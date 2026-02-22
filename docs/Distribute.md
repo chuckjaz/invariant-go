@@ -42,9 +42,9 @@ The request is empty.
 
 The response is empty.
 
-## `PUT /has`
+## `PUT /has/:id`
 
-Notifies the distribute service that the storage service has blocks with the given addresses. The request is a JSON object with TypeScript type of,
+Notifies the distribute service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with TypeScript type of,
 
 ```ts
 interface HasRequest {

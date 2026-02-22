@@ -44,6 +44,10 @@ func main() {
 
 		id := s.(identity.Provider).ID()
 		client := discovery.NewClient(discoveryURL, nil)
+
+		// Configure the storage server to use discovery for fetching
+		server.WithDiscovery(client)
+
 		err := client.Register(discovery.ServiceRegistration{
 			ID:        id,
 			Address:   advertiseAddr,

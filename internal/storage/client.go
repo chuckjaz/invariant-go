@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -130,6 +132,36 @@ func (c *Client) Size(address string) (int64, bool) {
 	}
 
 	return size, true
+}
+
+// Fetch instructs the remote server to fetch data from another container.
+func (c *Client) Fetch(address, container string) error {
+	reqBody := StorageFetchRequest{
+		Address:   address,
+		Container: container,
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/storage/fetch", c.baseURL), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // Assert that Client implements the Storage interface
