@@ -1,9 +1,9 @@
 package finder
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"invariant/internal/has"
 	"net/http"
 )
 
@@ -56,29 +56,8 @@ func (c *Client) Find(address string) ([]FindResponse, error) {
 
 // Has notifies the finder service that a storage node holds the given blocks.
 func (c *Client) Has(storageID string, addresses []string) error {
-	reqBody := HasRequest{Addresses: addresses}
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/has/%s", c.baseURL, storageID), bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	hasClient := has.NewClient(c.baseURL, c.httpClient)
+	return hasClient.Has(storageID, addresses)
 }
 
 // Notify pings the remote finder to notify it of a new finder's existence.

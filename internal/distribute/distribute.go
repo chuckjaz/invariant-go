@@ -5,12 +5,6 @@ import (
 	"math/bits"
 )
 
-// HasRequest represents a request to notify the distribute service that a
-// storage service has the specified data blocks.
-type HasRequest struct {
-	Addresses []string `json:"addresses"`
-}
-
 // Distribute defines the core logic for managing the distribution of blobs.
 type Distribute interface {
 	container.Container

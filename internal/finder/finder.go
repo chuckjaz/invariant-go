@@ -12,11 +12,6 @@ type FindResponse struct {
 	Protocol string `json:"protocol"`
 }
 
-// HasRequest is the payload for notifying a finder about known blocks.
-type HasRequest struct {
-	Addresses []string `json:"addresses"`
-}
-
 // Finder defines the interface for the Kademlia-based finder service.
 type Finder interface {
 	ID() string

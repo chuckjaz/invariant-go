@@ -3,6 +3,7 @@ package finder
 import (
 	"fmt"
 	"invariant/internal/discovery"
+	"invariant/internal/has"
 	"net/http/httptest"
 	"reflect"
 	"testing"
@@ -73,10 +74,8 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 
 	// 3. Register a block from a simulated storage node
 	storageID := "storage-1"
-	err = client.Has(storageID, []string{blockAddr})
-	if err != nil {
-		t.Fatalf("Failed to call has: %v", err)
-	}
+	reqBody := has.HasRequest{Addresses: []string{blockAddr}}
+	err = client.Has(storageID, reqBody.Addresses)
 
 	// 4. Client queries - should now find the block on storage-1
 	res, err = client.Find(blockAddr)

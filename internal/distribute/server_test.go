@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"invariant/internal/has"
 )
 
 func TestDistributeServer(t *testing.T) {
 	d := NewInMemoryDistribute(nil, 3, 3)
-	server := NewDistributeServer(d)
+	server := NewDistributeServer("", d)
 	ts := httptest.NewServer(server)
 	defer ts.Close()
 
@@ -46,7 +48,7 @@ func TestDistributeServer(t *testing.T) {
 	}
 
 	// Test PUT /has/{id}
-	hasReq := HasRequest{Addresses: []string{"abc", "def"}}
+	hasReq := has.HasRequest{Addresses: []string{"abc", "def"}}
 	body, _ := json.Marshal(hasReq)
 	req, err = http.NewRequest(http.MethodPut, ts.URL+"/has/"+testID, bytes.NewBuffer(body))
 	if err != nil {

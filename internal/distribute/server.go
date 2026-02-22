@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+
+	"invariant/internal/has"
 )
 
 // DistributeServer provides an HTTP interface for the Distribute service.
@@ -15,10 +17,12 @@ type DistributeServer struct {
 }
 
 // NewDistributeServer creates a new Distribute HTTP server.
-func NewDistributeServer(distribute Distribute) *DistributeServer {
-	idBytes := make([]byte, 32)
-	rand.Read(idBytes)
-	id := hex.EncodeToString(idBytes)
+func NewDistributeServer(id string, distribute Distribute) *DistributeServer {
+	if id == "" {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+	}
 
 	s := &DistributeServer{
 		id:         id,
@@ -32,6 +36,11 @@ func NewDistributeServer(distribute Distribute) *DistributeServer {
 
 	s.handler = mux
 	return s
+}
+
+// ID returns the server's generated or provided ID.
+func (s *DistributeServer) ID() string {
+	return s.id
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -66,7 +75,7 @@ func (s *DistributeServer) handleHas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req HasRequest
+	var req has.HasRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request: invalid JSON", http.StatusBadRequest)
 		return

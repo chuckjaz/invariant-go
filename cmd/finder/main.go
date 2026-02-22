@@ -55,7 +55,7 @@ func main() {
 		err := disc.Register(discovery.ServiceRegistration{
 			ID:        id,
 			Address:   advertiseAddr,
-			Protocols: []string{"finder-v1"},
+			Protocols: []string{"finder-v1", "has-v1"},
 		})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)

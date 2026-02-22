@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"invariant/internal/discovery"
 	"net/http"
+
+	"invariant/internal/has"
 )
 
 // FinderServer wraps a Finder implementation and provides HTTP endpoints.
@@ -69,7 +71,7 @@ func (s *FinderServer) handleHas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var reqBody HasRequest
+	var reqBody has.HasRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		http.Error(w, "Bad Request: valid JSON expected", http.StatusBadRequest)
 		return
