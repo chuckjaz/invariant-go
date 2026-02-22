@@ -21,6 +21,26 @@ PORT=3000 go run ./cmd/storage
 PORT=3000 go run ./cmd/storage --dir=/tmp/blocks
 ```
 
+### Distribute Service
+To run the distribute server, which coordinates block replication logic, typically on port `3001` or `3004`:
+```bash
+# Run with default in-memory distribution logic
+PORT=3001 go run ./cmd/distribute
+
+# With a specific replication factor and connecting to discovery
+PORT=3001 go run ./cmd/distribute -N 3 -discovery http://localhost:3003
+```
+
+### Finder Service
+To run the finder server, which manages Kademlia routing logic, typically on port `3002` or `3004`:
+```bash
+# Start a standalone finder
+PORT=3002 go run ./cmd/finder
+
+# Connect the finder to the discovery service
+PORT=3002 go run ./cmd/finder -discovery http://localhost:3003
+```
+
 ## Running tests
 To run continuous tests, execute standard go test coverage:
 ```bash
