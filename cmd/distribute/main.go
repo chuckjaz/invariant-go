@@ -24,7 +24,7 @@ func main() {
 		disc = discovery.NewClient(discoveryURL, nil)
 	}
 
-	d := distribute.NewInMemoryDistribute(disc, repFactor)
+	d := distribute.NewInMemoryDistribute(disc, repFactor, 3)
 	if disc != nil {
 		d.StartSync(10 * time.Second)
 	}
