@@ -8,37 +8,43 @@ A storage system of invariant data that can be used for general purpose programm
 To run the discovery server, which defaults to port `3003`:
 ```bash
 # Run with in-memory discovery storage
-PORT=3003 go run ./cmd/discovery
+go run ./cmd/discovery -port 3003
 ```
 
 ### Storage Service
-To run the storage server, you can fire off the entrypoint via mapping your preferred `PORT` and an optional target `--dir`:
+To run the storage server, you can fire off the entrypoint via mapping your preferred `-port` and an optional target `-dir`:
 ```bash
 # Run with in-memory storage natively
-PORT=3000 go run ./cmd/storage
+go run ./cmd/storage -port 3000
 
 # Run with persistent nested file system blocks
-PORT=3000 go run ./cmd/storage --dir=/tmp/blocks
+go run ./cmd/storage -port 3000 -dir /tmp/blocks
 ```
 
 ### Distribute Service
 To run the distribute server, which coordinates block replication logic, typically on port `3001` or `3004`:
 ```bash
 # Run with default in-memory distribution logic
-PORT=3001 go run ./cmd/distribute
+go run ./cmd/distribute -port 3001
 
 # With a specific replication factor and connecting to discovery
-PORT=3001 go run ./cmd/distribute -N 3 -discovery http://localhost:3003
+go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003
 ```
 
 ### Finder Service
 To run the finder server, which manages Kademlia routing logic, typically on port `3002` or `3004`:
 ```bash
 # Start a standalone finder
-PORT=3002 go run ./cmd/finder
+go run ./cmd/finder -port 3002
 
 # Connect the finder to the discovery service
-PORT=3002 go run ./cmd/finder -discovery http://localhost:3003
+go run ./cmd/finder -port 3002 -discovery http://localhost:3003
+```
+
+## Building binaries
+To build all microservices into the `bin/` directory, use the supplied build script:
+```bash
+./build
 ```
 
 ## Running tests
