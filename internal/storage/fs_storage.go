@@ -59,7 +59,7 @@ func (s *FileSystemStorage) addressToPath(address string) string {
 
 	dir1 := address[0:2]
 	dir2 := address[2:4]
-	filename := address
+	filename := address[4:]
 
 	return filepath.Join(s.baseDir, dir1, dir2, filename)
 }
