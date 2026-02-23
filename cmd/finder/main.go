@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
@@ -26,6 +25,8 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
+	var port int
+	flag.IntVar(&port, "port", 3004, "Port to listen on (using 3004 to not conflict with storage/discovery)")
 	flag.Parse()
 
 	if id == "" {
@@ -37,17 +38,12 @@ func main() {
 		log.Fatalf("Failed to create finder: %v", err)
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3004" // Using 3004 to not conflict with storage (3000), discovery (3003) commonly
-	}
-
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%d", port)
 
 	var disc discovery.Discovery
 	if discoveryURL != "" {
 		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%s", port)
+			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 		}
 
 		disc = discovery.NewClient(discoveryURL, nil)

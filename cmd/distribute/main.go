@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"invariant/internal/discovery"
@@ -21,6 +20,8 @@ func main() {
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	var repFactor int
 	flag.IntVar(&repFactor, "N", 3, "Replication factor for blocks")
+	var port int
+	flag.IntVar(&port, "port", 3004, "Port to listen on")
 	flag.Parse()
 
 	var disc discovery.Discovery
@@ -35,16 +36,11 @@ func main() {
 
 	server := distribute.NewDistributeServer(id, d)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3004"
-	}
-
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%d", port)
 
 	if discoveryURL != "" {
 		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%s", port)
+			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 		}
 
 		err := disc.Register(discovery.ServiceRegistration{

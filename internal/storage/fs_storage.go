@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -205,8 +206,14 @@ func (s *FileSystemStorage) List(chunkSize int) <-chan []string {
 				return nil
 			}
 
-			// The filename itself is the address if it reaches here
-			chunk = append(chunk, filename)
+			// Recover the full address from the relative path
+			relPath, err := filepath.Rel(s.baseDir, path)
+			if err != nil {
+				return nil
+			}
+			address := strings.ReplaceAll(relPath, string(filepath.Separator), "")
+
+			chunk = append(chunk, address)
 			if len(chunk) >= chunkSize {
 				ch <- chunk
 				chunk = nil

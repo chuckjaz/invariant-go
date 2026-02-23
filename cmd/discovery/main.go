@@ -1,24 +1,23 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"invariant/internal/discovery"
 )
 
 func main() {
+	var port int
+	flag.IntVar(&port, "port", 3003, "Port to listen on")
+	flag.Parse()
+
 	d := discovery.NewInMemoryDiscovery()
 	server := discovery.NewDiscoveryServer(d)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3003"
-	}
-
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%d", port)
 	log.Printf("Discovery service listening on %s...", addr)
 	log.Printf("Using In-Memory discovery storage")
 

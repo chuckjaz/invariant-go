@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -28,6 +27,8 @@ func main() {
 	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of block addresses to send per request")
 	var hasBatchDuration time.Duration
 	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
+	var port int
+	flag.IntVar(&port, "port", 3000, "Port to listen on")
 	flag.Parse()
 
 	var s storage.Storage
@@ -39,16 +40,11 @@ func main() {
 
 	server := storage.NewStorageServer(s)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3000"
-	}
-
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%d", port)
 
 	if discoveryURL != "" {
 		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%s", port)
+			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 		}
 
 		id := s.(identity.Provider).ID()

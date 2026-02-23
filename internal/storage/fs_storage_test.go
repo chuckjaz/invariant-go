@@ -29,7 +29,7 @@ func TestFileSystemStorage(t *testing.T) {
 		t.Fatalf("expected address %s, got %s", expectedAddress, address)
 	}
 
-	expectedPath := filepath.Join(tmpDir, expectedAddress[0:2], expectedAddress[2:4], expectedAddress)
+	expectedPath := filepath.Join(tmpDir, expectedAddress[0:2], expectedAddress[2:4], expectedAddress[4:])
 	_, err = os.Stat(expectedPath)
 	if os.IsNotExist(err) {
 		t.Fatalf("Expected file at structured path %s does not exist", expectedPath)
@@ -81,7 +81,7 @@ func TestFileSystemStorage(t *testing.T) {
 		t.Fatal("Expected StoreAt to succeed")
 	}
 
-	newExpectedPath := filepath.Join(tmpDir, newExpectedHash[0:2], newExpectedHash[2:4], newExpectedHash)
+	newExpectedPath := filepath.Join(tmpDir, newExpectedHash[0:2], newExpectedHash[2:4], newExpectedHash[4:])
 	_, err = os.Stat(newExpectedPath)
 	if os.IsNotExist(err) {
 		t.Fatalf("Expected file at structured path %s does not exist", newExpectedPath)
