@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Define the output directory
+OUTPUT_DIR="bin"
+mkdir -p $OUTPUT_DIR
+
+# Iterate over subdirectories in cmd/
+for dir in ./cmd/*/ ; do
+    # Extract the binary name from the directory name
+    binary_name=$(basename "$dir")
+    # Build the binary and place it in the output directory
+    echo go build -o "$OUTPUT_DIR/$binary_name" "$dir"
+    go build -o "$OUTPUT_DIR/$binary_name" "$dir"
+done
