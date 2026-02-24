@@ -9,6 +9,7 @@ import (
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
+	"invariant/internal/names"
 )
 
 func main() {
@@ -22,6 +23,8 @@ func main() {
 	flag.IntVar(&repFactor, "N", 3, "Replication factor for blocks")
 	var port int
 	flag.IntVar(&port, "port", 3004, "Port to listen on")
+	var name string
+	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
 
 	var disc discovery.Discovery
@@ -52,6 +55,23 @@ func main() {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, server.ID())
+	}
+
+	if name != "" {
+		if disc == nil {
+			log.Fatalf("a discovery service with a registered names service is required for the service to be named.")
+		}
+		nameServices, err := disc.Find("names-v1", 1)
+		if err != nil || len(nameServices) == 0 {
+			log.Fatalf("a discovery service with a registered names service is required for the service to be named.")
+		}
+
+		nameClient := names.NewClient(nameServices[0].Address, nil)
+		err = nameClient.Put(name, server.ID(), []string{"distribute-v1", "has-v1"})
+		if err != nil {
+			log.Fatalf("Failed to register name with names service at %s: %v", nameServices[0].Address, err)
+		}
+		log.Printf("Registered name %q for ID %s", name, server.ID())
 	}
 
 	log.Printf("Distribute service (ID %s) listening on %s...", server.ID(), addr)
