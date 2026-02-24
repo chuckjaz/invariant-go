@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -22,7 +23,7 @@ func main() {
 	var repFactor int
 	flag.IntVar(&repFactor, "N", 3, "Replication factor for blocks")
 	var port int
-	flag.IntVar(&port, "port", 3004, "Port to listen on")
+	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
@@ -40,10 +41,16 @@ func main() {
 	server := distribute.NewDistributeServer(id, d)
 
 	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", addr, err)
+	}
+
+	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
 		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
+			advertiseAddr = fmt.Sprintf("http://localhost:%d", actualPort)
 		}
 
 		err := disc.Register(discovery.ServiceRegistration{
@@ -74,8 +81,8 @@ func main() {
 		log.Printf("Registered name %q for ID %s", name, server.ID())
 	}
 
-	log.Printf("Distribute service (ID %s) listening on %s...", server.ID(), addr)
+	log.Printf("Distribute service (ID %s) listening on :%d...", server.ID(), actualPort)
 	log.Printf("Using In-Memory distribute storage")
 
-	log.Fatal(http.ListenAndServe(addr, server))
+	log.Fatal(http.Serve(listener, server))
 }
