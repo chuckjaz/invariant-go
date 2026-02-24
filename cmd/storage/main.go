@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -28,7 +29,7 @@ func main() {
 	var hasBatchDuration time.Duration
 	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
 	var port int
-	flag.IntVar(&port, "port", 3000, "Port to listen on")
+	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	flag.Parse()
 
 	var s storage.Storage
@@ -41,10 +42,16 @@ func main() {
 	server := storage.NewStorageServer(s)
 
 	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", addr, err)
+	}
+
+	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
 		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
+			advertiseAddr = fmt.Sprintf("http://localhost:%d", actualPort)
 		}
 
 		id := s.(identity.Provider).ID()
@@ -92,11 +99,11 @@ func main() {
 		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
 	}
 
-	log.Printf("Listening on %s...", addr)
+	log.Printf("Listening on :%d...", actualPort)
 	if dir != "" {
 		log.Printf("Using File System storage at %s", dir)
 	} else {
 		log.Printf("Using In-Memory storage")
 	}
-	log.Fatal(http.ListenAndServe(addr, server))
+	log.Fatal(http.Serve(listener, server))
 }
