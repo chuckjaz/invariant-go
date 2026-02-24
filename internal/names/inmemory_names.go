@@ -1,21 +1,37 @@
 package names
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"invariant/internal/identity"
 	"sync"
 )
 
 // Assert that InMemoryNames implements the Names interface
 var _ Names = (*InMemoryNames)(nil)
 
+// Assert that InMemoryNames implements the identity.Provider interface
+var _ identity.Provider = (*InMemoryNames)(nil)
+
 type InMemoryNames struct {
+	id    string
 	mu    sync.RWMutex
 	store map[string]NameEntry
 }
 
 func NewInMemoryNames() *InMemoryNames {
+	idBytes := make([]byte, 32)
+	rand.Read(idBytes)
+	id := hex.EncodeToString(idBytes)
+
 	return &InMemoryNames{
+		id:    id,
 		store: make(map[string]NameEntry),
 	}
+}
+
+func (s *InMemoryNames) ID() string {
+	return s.id
 }
 
 func (s *InMemoryNames) Get(name string) (NameEntry, error) {

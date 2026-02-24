@@ -2,6 +2,8 @@ package names
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,12 +12,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"invariant/internal/identity"
 )
 
 // Assert that FileSystemNames implements the Names interface
 var _ Names = (*FileSystemNames)(nil)
 
+// Assert that FileSystemNames implements the identity.Provider interface
+var _ identity.Provider = (*FileSystemNames)(nil)
+
 type FileSystemNames struct {
+	id               string
 	mu               sync.RWMutex
 	store            map[string]NameEntry
 	baseDir          string
@@ -37,7 +45,19 @@ func NewFileSystemNames(baseDir string, snapshotInterval time.Duration) (*FileSy
 		return nil, err
 	}
 
+	idPath := filepath.Join(baseDir, "id")
+	var id string
+	if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+		id = string(data)
+	} else {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+		os.WriteFile(idPath, []byte(id), 0644)
+	}
+
 	fsn := &FileSystemNames{
+		id:               id,
 		store:            make(map[string]NameEntry),
 		baseDir:          baseDir,
 		snapshotInterval: snapshotInterval,
@@ -85,6 +105,10 @@ func NewFileSystemNames(baseDir string, snapshotInterval time.Duration) (*FileSy
 	}
 
 	return fsn, nil
+}
+
+func (s *FileSystemNames) ID() string {
+	return s.id
 }
 
 func (s *FileSystemNames) applyJournal(path string) error {
