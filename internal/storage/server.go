@@ -105,25 +105,20 @@ func (s *StorageServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /id", s.handleGetID)
-	mux.HandleFunc("HEAD /id", s.handleGetID)
 
 	mux.HandleFunc("POST /{$}", s.handlePost)
 
 	mux.HandleFunc("POST /fetch", s.handleFetch)
 	mux.HandleFunc("HEAD /fetch", s.handleFetch)
 
-	mux.HandleFunc("/{address}", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.handleGet(w, r)
-		case http.MethodHead:
+	mux.HandleFunc("GET /{address}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
 			s.handleHead(w, r)
-		case http.MethodPut:
-			s.handlePut(w, r)
-		default:
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		} else {
+			s.handleGet(w, r)
 		}
 	})
+	mux.HandleFunc("PUT /{address}", s.handlePut)
 
 	return mux
 }
