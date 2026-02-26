@@ -11,11 +11,23 @@ func TestLoadConfig(t *testing.T) {
 	configPath := filepath.Join(tempDir, "services.yaml")
 
 	yamlContent := `
+common:
+  base:
+    port: "8080"
+    log: "debug"
+  extra:
+    trace: "true"
+    port: "9090"
 services:
   - command: test-service
+    use: base
     args:
-      port: "8080"
       env: "prod"
+      log: "info"
+  - command: test-multi
+    use: [base, extra]
+    args:
+      env: "staging"
 `
 	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
 	if err != nil {
@@ -27,8 +39,8 @@ services:
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
-	if len(cfg.Services) != 1 {
-		t.Fatalf("expected 1 service, got %d", len(cfg.Services))
+	if len(cfg.Services) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(cfg.Services))
 	}
 
 	svc := cfg.Services[0]
@@ -37,11 +49,28 @@ services:
 	}
 
 	if svc.Args["port"] != "8080" {
-		t.Errorf("expected port '8080', got '%s'", svc.Args["port"])
+		t.Errorf("expected port '8080' from common, got '%s'", svc.Args["port"])
 	}
 
 	if svc.Args["env"] != "prod" {
 		t.Errorf("expected env 'prod', got '%s'", svc.Args["env"])
+	}
+
+	if svc.Args["log"] != "info" {
+		t.Errorf("expected log 'info' (overridden), got '%s'", svc.Args["log"])
+	}
+
+	multiSvc := cfg.Services[1]
+	if multiSvc.Command != "test-multi" {
+		t.Errorf("expected command 'test-multi', got '%s'", multiSvc.Command)
+	}
+
+	if multiSvc.Args["trace"] != "true" {
+		t.Errorf("expected trace 'true' from extra common, got '%s'", multiSvc.Args["trace"])
+	}
+
+	if multiSvc.Args["port"] != "8080" {
+		t.Errorf("expected port '8080' from first common taking precedence, got '%s'", multiSvc.Args["port"])
 	}
 }
 

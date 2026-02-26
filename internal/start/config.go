@@ -12,12 +12,34 @@ import (
 
 // Config represents the configuration in the YAML file.
 type Config struct {
-	Services []ServiceConfig `yaml:"services"`
+	Common   map[string]map[string]string `yaml:"common,omitempty"`
+	Services []ServiceConfig              `yaml:"services"`
+}
+
+// StringArray allows a YAML field to be parsed as either a single string or a slice of strings.
+type StringArray []string
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (a *StringArray) UnmarshalYAML(value *yaml.Node) error {
+	var multi []string
+	err := value.Decode(&multi)
+	if err != nil {
+		var single string
+		err := value.Decode(&single)
+		if err != nil {
+			return err
+		}
+		*a = []string{single}
+	} else {
+		*a = multi
+	}
+	return nil
 }
 
 // ServiceConfig represents a single service to start.
 type ServiceConfig struct {
 	Command string            `yaml:"command"`
+	Use     StringArray       `yaml:"use,omitempty"`
 	Args    map[string]string `yaml:"args"`
 }
 
@@ -42,6 +64,24 @@ func LoadConfig(path string) (*Config, error) {
 	// Apply substitutions
 	for i := range config.Services {
 		svc := &config.Services[i]
+
+		if len(svc.Use) > 0 {
+			if svc.Args == nil {
+				svc.Args = make(map[string]string)
+			}
+			for _, useName := range svc.Use {
+				commonArgs, ok := config.Common[useName]
+				if !ok {
+					return nil, fmt.Errorf("service '%s' uses undefined common set '%s'", svc.Command, useName)
+				}
+				for k, v := range commonArgs {
+					if _, exists := svc.Args[k]; !exists {
+						svc.Args[k] = v
+					}
+				}
+			}
+		}
+
 		for k, v := range svc.Args {
 			svc.Args[k] = SubstituteString(v, baseDir)
 		}
