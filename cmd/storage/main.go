@@ -50,21 +50,13 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
-		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%d", actualPort)
-		}
-
 		id := s.(identity.Provider).ID()
 		client := discovery.NewClient(discoveryURL, nil)
 
 		// Configure the storage server to use discovery for fetching
 		server.WithDiscovery(client)
 
-		err := client.Register(discovery.ServiceRegistration{
-			ID:        id,
-			Address:   advertiseAddr,
-			Protocols: []string{"storage-v1"},
-		})
+		err := discovery.AdvertiseAndRegister(client, id, advertiseAddr, actualPort, []string{"storage-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

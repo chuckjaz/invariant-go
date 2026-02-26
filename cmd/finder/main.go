@@ -42,17 +42,9 @@ func main() {
 
 	var disc discovery.Discovery
 	if discoveryURL != "" {
-		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
-		}
-
 		disc = discovery.NewClient(discoveryURL, nil)
 
-		err := disc.Register(discovery.ServiceRegistration{
-			ID:        id,
-			Address:   advertiseAddr,
-			Protocols: []string{"finder-v1", "has-v1"},
-		})
+		err := discovery.AdvertiseAndRegister(disc, id, advertiseAddr, port, []string{"finder-v1", "has-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

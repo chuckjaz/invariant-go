@@ -49,15 +49,7 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
-		if advertiseAddr == "" {
-			advertiseAddr = fmt.Sprintf("http://localhost:%d", actualPort)
-		}
-
-		err := disc.Register(discovery.ServiceRegistration{
-			ID:        server.ID(),
-			Address:   advertiseAddr,
-			Protocols: []string{"distribute-v1", "has-v1"},
-		})
+		err := discovery.AdvertiseAndRegister(disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "has-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
