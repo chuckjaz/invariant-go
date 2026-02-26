@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"invariant/internal/discovery"
+	"invariant/internal/distribute"
 	"invariant/internal/has"
 	"invariant/internal/identity"
+	"invariant/internal/names"
 	"invariant/internal/storage"
 )
 
@@ -22,6 +24,8 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
+	var distributeArg string
+	flag.StringVar(&distributeArg, "distribute", "", "ID or Name of the distribute service to register with")
 	var hasIDs string
 	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol")
 	var hasBatchSize int
@@ -87,7 +91,56 @@ func main() {
 
 			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
 		}
+	}
 
+	if distributeArg != "" {
+		if discoveryURL == "" {
+			log.Fatalf("Discovery service is required to use the -distribute flag")
+		}
+
+		dClient := discovery.NewClient(discoveryURL, nil)
+		var distID string
+
+		// If it's a 64-character hex string, it's an ID. Otherwise, resolve it via names service.
+		if len(distributeArg) == 64 {
+			distID = distributeArg
+		} else {
+			namesServers, err := dClient.Find("names-v1", 100)
+			if err != nil || len(namesServers) == 0 {
+				log.Fatalf("Warning: Could not find any names servers to resolve distribute name %v", err)
+			}
+
+			resolved := false
+			for _, ns := range namesServers {
+				nClient := names.NewClient(ns.Address, nil)
+				entry, err := nClient.Get(distributeArg)
+				if err == nil {
+					distID = entry.Value
+					resolved = true
+					break
+				}
+			}
+			if !resolved {
+				log.Fatalf("Could not resolve distribute name %s using names servers", distributeArg)
+			}
+		}
+
+		desc, ok := dClient.Get(distID)
+		if !ok {
+			log.Fatalf("Could not find distribute service %s in discovery", distID)
+		}
+
+		distClient := distribute.NewClient(desc.Address, nil)
+		id := s.(identity.Provider).ID()
+		if err := distClient.Register(id); err != nil {
+			log.Fatalf("Failed to register with distribute service %s: %v", distID, err)
+		}
+		log.Printf("Registered with distribute service %s at %s", distID, desc.Address)
+
+		hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+	}
+
+	if len(hasClients) > 0 {
 		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
 	}
 
