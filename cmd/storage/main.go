@@ -13,7 +13,6 @@ import (
 	"invariant/internal/distribute"
 	"invariant/internal/has"
 	"invariant/internal/identity"
-	"invariant/internal/names"
 	"invariant/internal/storage"
 )
 
@@ -83,6 +82,12 @@ func main() {
 				continue
 			}
 
+			hid, err = discovery.ResolveName(dClient, hid)
+			if err != nil {
+				log.Printf("Warning: Could not resolve has name/id %s: %v", hid, err)
+				continue
+			}
+
 			desc, ok := dClient.Get(hid)
 			if !ok {
 				log.Printf("Warning: Could not find address for Has service ID %s", hid)
@@ -102,27 +107,9 @@ func main() {
 		var distID string
 
 		// If it's a 64-character hex string, it's an ID. Otherwise, resolve it via names service.
-		if len(distributeArg) == 64 {
-			distID = distributeArg
-		} else {
-			namesServers, err := dClient.Find("names-v1", 100)
-			if err != nil || len(namesServers) == 0 {
-				log.Fatalf("Warning: Could not find any names servers to resolve distribute name %v", err)
-			}
-
-			resolved := false
-			for _, ns := range namesServers {
-				nClient := names.NewClient(ns.Address, nil)
-				entry, err := nClient.Get(distributeArg)
-				if err == nil {
-					distID = entry.Value
-					resolved = true
-					break
-				}
-			}
-			if !resolved {
-				log.Fatalf("Could not resolve distribute name %s using names servers", distributeArg)
-			}
+		distID, err = discovery.ResolveName(dClient, distributeArg)
+		if err != nil {
+			log.Fatalf("Warning: Could not resolve distribute name %v", err)
 		}
 
 		desc, ok := dClient.Get(distID)
