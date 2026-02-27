@@ -192,6 +192,11 @@ func (d *Directory) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON correctly marshals a Directory into a JSON array of polymorphic Entry items.
+func (d Directory) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]Entry(d))
+}
+
 // Validate traverses the directory and validates all entries.
 func (d Directory) Validate() error {
 	for i, entry := range d {
