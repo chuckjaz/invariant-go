@@ -18,19 +18,20 @@ func TestFilesService_ReadOnly(t *testing.T) {
 	store := storage.NewInMemoryStorage()
 
 	// Create an empty root directory
-	service, err := NewService(Options{
+	filesService, err := NewInMemoryFiles(Options{
 		Storage: store,
 	})
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
-	defer service.Close()
+	defer filesService.Close()
 
-	if service.isWritable() {
+	if filesService.isWritable() {
 		t.Errorf("expected read-only service")
 	}
 
-	handler := service.Handler()
+	server := NewServer(filesService)
+	handler := server.Handler()
 
 	// Ensure PUT fails with read-only
 	req := httptest.NewRequest(http.MethodPut, "/1/test.txt", nil)
@@ -58,7 +59,7 @@ func TestFilesService_WriteAndSync(t *testing.T) {
 		Slot:    true,
 	}
 
-	service, err := NewService(Options{
+	filesService, err := NewInMemoryFiles(Options{
 		Storage:          store,
 		Slots:            memSlots,
 		RootLink:         rootLink,
@@ -69,13 +70,14 @@ func TestFilesService_WriteAndSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
-	defer service.Close()
+	defer filesService.Close()
 
-	if !service.isWritable() {
+	if !filesService.isWritable() {
 		t.Errorf("expected writable service")
 	}
 
-	handler := service.Handler()
+	server := NewServer(filesService)
+	handler := server.Handler()
 
 	// Write empty file
 	req := httptest.NewRequest(http.MethodPut, "/1/test.txt", nil)

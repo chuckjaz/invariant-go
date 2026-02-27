@@ -2,11 +2,7 @@ package files
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strconv"
-	"strings"
-	"sync"
+	"io"
 	"time"
 
 	"invariant/internal/content"
@@ -15,7 +11,49 @@ import (
 	"invariant/internal/storage"
 )
 
-// Options configuring the Files service.
+// Files defines the interface for the files protocol
+type Files interface {
+	// CreateEntry creates a new file, directory, or symbolic link
+	CreateEntry(ctx context.Context, parentID uint64, name string, kind filetree.EntryKind, target string, contentLink *content.ContentLink, contentReader io.Reader) error
+
+	// ReadFile reads the content of a file
+	ReadFile(ctx context.Context, nodeID uint64, offset, length int64) (io.ReadCloser, error)
+
+	// WriteFile overwrites or appends to a file
+	WriteFile(ctx context.Context, nodeID uint64, offset int64, appendFlag bool, r io.Reader) error
+
+	// ReadDirectory reads the directory entries
+	ReadDirectory(ctx context.Context, nodeID uint64, offset, length int64) (filetree.Directory, error)
+
+	// GetAttributes gets the attributes of a node
+	GetAttributes(ctx context.Context, nodeID uint64) (EntryAttributes, error)
+
+	// SetAttributes sets the attributes of a node
+	SetAttributes(ctx context.Context, nodeID uint64, attrs EntryAttributes) (EntryAttributes, error)
+
+	// GetContent gets the content link of a file
+	GetContent(ctx context.Context, nodeID uint64) (content.ContentLink, error)
+
+	// GetInfo gets the content information of a node
+	GetInfo(ctx context.Context, nodeID uint64) (ContentInformationCommon, error)
+
+	// Lookup looks up a name in a directory
+	Lookup(ctx context.Context, parentID uint64, name string) (ContentInformationCommon, error)
+
+	// Remove removes an entry from a directory
+	Remove(ctx context.Context, parentID uint64, name string) error
+
+	// Rename renames an entry
+	Rename(ctx context.Context, parentID uint64, oldName string, newParentID uint64, newName string) error
+
+	// Link creates a hard link
+	Link(ctx context.Context, parentID uint64, name string, targetNodeID uint64) error
+
+	// Sync forces a synchronization
+	Sync(ctx context.Context, nodeID uint64, wait bool) error
+}
+
+// Options configuring the internal Files service.
 type Options struct {
 	Slots            slots.Slots
 	Storage          storage.Storage
@@ -25,166 +63,23 @@ type Options struct {
 	WriterOptions    content.WriterOptions
 }
 
-// Service represents the files service.
-type Service struct {
-	opts Options
-
-	mu    sync.RWMutex
-	nodes map[uint64]*Node
-	root  uint64
-	next  uint64
-
-	// Sync state
-	dirtyNodes map[uint64]bool
-
-	// Slots polling state
-	lastSlotAddress string
-
-	// Background task context
-	ctx    context.Context
-	cancel context.CancelFunc
+// ContentInformationCommon represents the info returned by GET /info/:node
+type ContentInformationCommon struct {
+	Node       uint64 `json:"node"`
+	Kind       string `json:"kind"`
+	ModifyTime uint64 `json:"modifyTime"`
+	CreateTime uint64 `json:"createTime"`
+	Executable bool   `json:"executable"`
+	Writable   bool   `json:"writable"`
+	Etag       string `json:"etag"`
 }
 
-// Node represents a single entry in the file tree.
-type Node struct {
-	ID     uint64
-	Name   string
-	Kind   filetree.EntryKind
-	Parent uint64
-
-	// Metadata
-	CreateTime *uint64
-	ModifyTime *uint64
-	Mode       *string
-	Size       uint64
-	Type       string
-
-	// For files/directories that haven't been modified, point to origin content
-	Content content.ContentLink
-
-	// For directories: map of name to child node ID
-	Children map[string]uint64
-
-	// For symbolic links
-	Target string
-
-	// State flags
-	IsDirty  bool
-	IsLoaded bool // For directories: whether children have been fetched
-}
-
-// NewService creates a new Files service.
-func NewService(opts Options) (*Service, error) {
-	if opts.Storage == nil {
-		return nil, errors.New("storage client is required")
-	}
-
-	if opts.AutoSyncTimeout == 0 {
-		opts.AutoSyncTimeout = time.Minute
-	}
-	if opts.SlotPollInterval == 0 {
-		opts.SlotPollInterval = 5 * time.Minute
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	s := &Service{
-		opts:       opts,
-		nodes:      make(map[uint64]*Node),
-		root:       1,
-		next:       2,
-		dirtyNodes: make(map[uint64]bool),
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	// Initialize the root node based on the provided RootLink
-	now := uint64(time.Now().Unix())
-	rootNode := &Node{
-		ID:         1,
-		Name:       "",
-		Kind:       filetree.DirectoryKind,
-		CreateTime: &now,
-		ModifyTime: &now,
-		Content:    opts.RootLink,
-		Children:   make(map[string]uint64),
-		IsLoaded:   false,
-	}
-
-	if opts.RootLink.Address == "" {
-		// Empty root
-		rootNode.IsLoaded = true
-	}
-
-	s.nodes[1] = rootNode
-
-	// Start background tasks
-	go s.autoSyncLoop()
-	if opts.Slots != nil && opts.RootLink.Slot {
-		go s.pollSlotLoop()
-	}
-
-	return s, nil
-}
-
-// Close stops the background tasks.
-func (s *Service) Close() {
-	s.cancel()
-}
-
-// Helpers for node management (requires caller to hold lock)
-
-func (s *Service) getNextID() uint64 {
-	id := s.next
-	s.next++
-	return id
-}
-
-func (s *Service) markDirty(id uint64) {
-	s.dirtyNodes[id] = true
-	if node, ok := s.nodes[id]; ok {
-		node.IsDirty = true
-		now := uint64(time.Now().Unix())
-		node.ModifyTime = &now
-		if node.Parent != 0 {
-			s.markDirty(node.Parent)
-		}
-	}
-}
-
-// loadDirectory reads the directory content from storage and populates children
-func (s *Service) loadDirectory(id uint64) error {
-	node, ok := s.nodes[id]
-	if !ok || node.Kind != filetree.DirectoryKind {
-		return errors.New("invalid directory node")
-	}
-
-	if node.IsLoaded {
-		return nil
-	}
-
-	if node.Content.Address == "" {
-		node.IsLoaded = true
-		return nil
-	}
-
-	reader, err := content.Read(node.Content, s.opts.Storage, s.opts.Slots)
-	if err != nil {
-		return fmt.Errorf("failed to create reader for directory %d: %w", id, err)
-	}
-
-	// ... reading directory ... (to be implemented)
-	_ = reader
-
-	node.IsLoaded = true
-	return nil
-}
-
-func parseNodeID(nodeStr string) (uint64, error) {
-	nodeStr = strings.TrimPrefix(nodeStr, "/")
-	nodeID, err := strconv.ParseUint(nodeStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid node ID: %v", err)
-	}
-	return nodeID, nil
+// EntryAttributes represents the attributes returned by GET /attributes/:node
+type EntryAttributes struct {
+	Writable   *bool   `json:"writable,omitempty"`
+	ModifyTime *uint64 `json:"modifyTime,omitempty"`
+	CreateTime *uint64 `json:"createTime,omitempty"`
+	Mode       *string `json:"mode,omitempty"`
+	Size       *uint64 `json:"size,omitempty"`
+	Type       *string `json:"type,omitempty"`
 }
