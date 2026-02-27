@@ -1,5 +1,7 @@
 package discovery
 
+import "slices"
+
 import "sync"
 
 // Assert that InMemoryDiscovery implements the Discovery interface
@@ -40,13 +42,7 @@ func (d *InMemoryDiscovery) Find(protocol string, count int) ([]ServiceDescripti
 			continue
 		}
 
-		hasProtocol := false
-		for _, p := range reg.Protocols {
-			if p == protocol {
-				hasProtocol = true
-				break
-			}
-		}
+		hasProtocol := slices.Contains(reg.Protocols, protocol)
 
 		if hasProtocol {
 			results = append(results, ServiceDescription{

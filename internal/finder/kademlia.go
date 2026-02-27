@@ -40,7 +40,7 @@ func (n NodeID) Equals(other NodeID) bool {
 // XOR computes the distance between two NodeIDs.
 func (n NodeID) XOR(other NodeID) NodeID {
 	var distance NodeID
-	for i := 0; i < IDLength; i++ {
+	for i := range IDLength {
 		distance[i] = n[i] ^ other[i]
 	}
 	return distance
@@ -59,7 +59,7 @@ func (n NodeID) PrefixLen(other NodeID) int {
 		b := n[i] ^ other[i]
 		if b != 0 {
 			// Find the first set bit from the left
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				if (b & (1 << (7 - j))) != 0 {
 					return i*8 + j
 				}

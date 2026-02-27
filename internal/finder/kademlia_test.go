@@ -54,7 +54,7 @@ func TestRoutingTableCapacity(t *testing.T) {
 
 	// Add 30 random nodes. Because they are random, they will almost certainly
 	// fall into the 0-prefix bucket.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		// Flip the first bit so it's guaranteed to be distance 255 (prefix len 0)
 		var other NodeID
 		rand.Read(other[:])

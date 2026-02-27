@@ -49,8 +49,8 @@ func (c *DNSClient) Get(name string) (NameEntry, error) {
 	}
 
 	for _, txt := range txts {
-		if strings.HasPrefix(txt, "invariant:") {
-			content := strings.TrimPrefix(txt, "invariant:")
+		if after, ok := strings.CutPrefix(txt, "invariant:"); ok {
+			content := after
 			parts := strings.SplitN(content, ";", 2)
 
 			if len(parts) == 0 || parts[0] == "" {

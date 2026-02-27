@@ -209,7 +209,7 @@ func (d *InMemoryDistribute) Sync() {
 
 				// Try to replicate to this node, with retries on failure
 				success := false
-				for attempt := 0; attempt < 2; attempt++ {
+				for attempt := range 2 {
 					forceRefresh := attempt > 0 // Force refresh on retry
 					destAddr, ok := d.getServiceAddress(destSrvID, forceRefresh)
 					if !ok {
