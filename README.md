@@ -53,8 +53,8 @@ go run ./cmd/finder -port 3002
 go run ./cmd/finder -port 3002 -discovery http://localhost:3003
 ```
 
-### Start Service (Orchestrator)
-The `start` command lets you execute multiple services governed by a single YAML configuration file. Wait for all processes to start, substitute environment variables, substitute `~` for the home directory and `*` for the configuration's base directory, and share common arguments.
+### Start Utility (Testing Orchestrator)
+The `start` command lets you execute multiple services governed by a single YAML configuration file. It is **not** an industrial-strength orchestrator, but rather a utility designed locally for prototyping and testing. It waits for all processes to start, substitutes environment variables, substitutes `~` for the home directory and `*` for the configuration's base directory, and shares common arguments.
 
 ```bash
 # Start services defined in services.yaml
@@ -96,6 +96,61 @@ services:
     args:
         dir: "*/storage-2"
         has: "distribute-1"
+```
+
+### Docker Compose
+For a more robust and industrial-strength deployment, you can use Docker and Docker Compose. This is the recommended alternative for running these services in production-like environments or cross-platform setups. 
+
+**Example `docker-compose.yml`** (equivalent to the `services.yaml` above):
+```yaml
+version: '3.8'
+
+x-discovery-args: &discovery-args
+  -discovery: http://discovery:3003
+  -advertise: http://0.0.0.0
+
+services:
+  discovery:
+    build: .
+    command: ["./bin/discovery", "-port", "3003"]
+    ports:
+      - "3003:3003"
+
+  names:
+    build: .
+    command: ["./bin/names", "-port", "3005", "-dir", "/data/names"]
+    volumes:
+      - ./data/names:/data/names
+    depends_on:
+      - discovery
+    environment:
+      # Inject discovery args via command override conceptually, or rely on internal entrypoint scripts
+      # For simplicity, assumed inline here
+    command: ["./bin/names", "-port", "3005", "-dir", "/data/names", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
+
+  distribute:
+    build: .
+    command: ["./bin/distribute", "-port", "3001", "-name", "distribute-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
+    depends_on:
+      - discovery
+
+  storage-1:
+    build: .
+    command: ["./bin/storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-has", "distribute-1"]
+    volumes:
+      - ./data/storage-1:/data/storage-1
+    depends_on:
+      - discovery
+      - distribute
+
+  storage-2:
+    build: .
+    command: ["./bin/storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-has", "distribute-1"]
+    volumes:
+      - ./data/storage-2:/data/storage-2
+    depends_on:
+      - discovery
+      - distribute
 ```
 
 ## Building binaries
