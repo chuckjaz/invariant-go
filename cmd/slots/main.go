@@ -9,9 +9,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"invariant/internal/discovery"
+	"invariant/internal/has"
 	"invariant/internal/slots"
 )
 
@@ -34,6 +36,12 @@ func main() {
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
+	var hasIDs string
+	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol (e.g. finder)")
+	var hasBatchSize int
+	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of slot IDs to send per request")
+	var hasBatchDuration time.Duration
+	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new slot notifications")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
@@ -85,6 +93,37 @@ func main() {
 	}
 
 	server := slots.NewServer(s)
+
+	var hasClients []slots.HasClient
+	if disc != nil {
+		for hid := range strings.SplitSeq(hasIDs, ",") {
+			hid = strings.TrimSpace(hid)
+			if hid == "" {
+				continue
+			}
+
+			// Resolve name to ID if it's not a hex ID
+			resolvedID, err := discovery.ResolveName(disc, hid)
+			if err != nil {
+				log.Fatalf("Could not resolve has name/id %s: %v", hid, err)
+				continue
+			}
+
+			desc, ok := disc.Get(resolvedID)
+			if !ok {
+				log.Fatalf("Could not find address for Has service %s", resolvedID)
+				continue
+			}
+
+			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+		}
+	} else if hasIDs != "" {
+		log.Fatalf("a discovery service is required to use the -has flag")
+	}
+
+	if len(hasClients) > 0 {
+		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
+	}
 
 	log.Printf("Slots service (ID %s) listening on :%d...", s.ID(), actualPort)
 	if dir != "" {

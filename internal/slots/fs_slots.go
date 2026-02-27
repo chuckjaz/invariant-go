@@ -27,6 +27,7 @@ type FileSystemSlots struct {
 	journalName      string
 	snapshotInterval time.Duration
 	stopCh           chan struct{}
+	subscribers      []chan string
 }
 
 type journalEntry struct {
@@ -200,7 +201,56 @@ func (s *FileSystemSlots) Create(id string, address string) error {
 	}
 
 	s.store[id] = address
+	s.notifySubscribers(id)
 	return nil
+}
+
+// List returns a channel that yields chunks of all known slot IDs.
+func (s *FileSystemSlots) List(chunkSize int) <-chan []string {
+	if chunkSize <= 0 {
+		chunkSize = 10000
+	}
+	ch := make(chan []string)
+
+	go func() {
+		defer close(ch)
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var chunk []string
+		for id := range s.store {
+			chunk = append(chunk, id)
+			if len(chunk) >= chunkSize {
+				ch <- chunk
+				chunk = nil
+			}
+		}
+		if len(chunk) > 0 {
+			ch <- chunk
+		}
+	}()
+
+	return ch
+}
+
+// Subscribe returns a channel that yields the IDs of newly created slots.
+func (s *FileSystemSlots) Subscribe() <-chan string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan string, 100)
+	s.subscribers = append(s.subscribers, ch)
+	return ch
+}
+
+func (s *FileSystemSlots) notifySubscribers(id string) {
+	// Note: We expect the caller to hold s.mu.Lock(). Wait for them, or we deadlock.
+	for _, ch := range s.subscribers {
+		select {
+		case ch <- id:
+		default:
+			// Subscriber is full or blocked, drop the notification
+		}
+	}
 }
 
 // Update attempts to change the address of a slot, ensuring the previous address matches.

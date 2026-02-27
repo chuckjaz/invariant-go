@@ -147,4 +147,18 @@ func (c *Client) Create(id string, address string) error {
 	return nil
 }
 
+// List is not supported on the client side at this time.
+func (c *Client) List(chunkSize int) <-chan []string {
+	ch := make(chan []string)
+	close(ch)
+	return ch
+}
+
+// Subscribe is not supported on the client side at this time.
+func (c *Client) Subscribe() <-chan string {
+	ch := make(chan string)
+	close(ch)
+	return ch
+}
+
 var _ Slots = (*Client)(nil)

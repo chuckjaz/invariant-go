@@ -37,4 +37,10 @@ type Slots interface {
 
 	// Create creates a new slot with the given id and address.
 	Create(id string, address string) error
+
+	// List returns a channel that yields chunks of all known slot IDs.
+	List(chunkSize int) <-chan []string
+
+	// Subscribe returns a channel that yields the IDs of newly created slots.
+	Subscribe() <-chan string
 }

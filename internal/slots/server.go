@@ -4,18 +4,81 @@ package slots
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // Server wraps a Slots implementation and provides HTTP endpoints.
 type Server struct {
+	id    string
 	slots Slots
 }
 
 // NewServer creates a new Slots HTTP server.
 func NewServer(slots Slots) *Server {
 	return &Server{
+		id:    slots.ID(),
 		slots: slots,
 	}
+}
+
+// HasClient represents a client that can notify a service about known items.
+type HasClient interface {
+	Has(id string, addresses []string) error
+}
+
+// StartHasNotification starts a background goroutine that sends all stored
+// slot IDs to the provided Has clients in batches.
+func (s *Server) StartHasNotification(clients []HasClient, batchSize int, batchDuration time.Duration) {
+	if len(clients) == 0 {
+		return
+	}
+	if batchSize <= 0 {
+		batchSize = 10000
+	}
+	if batchDuration <= 0 {
+		batchDuration = 1 * time.Second
+	}
+
+	go func() {
+		// 1. Send initial batch of all existing slots
+		for batch := range s.slots.List(batchSize) {
+			for _, client := range clients {
+				_ = client.Has(s.id, batch)
+			}
+		}
+
+		// 2. Listen for new slots and send them in batches
+		sub := s.slots.Subscribe()
+		var currentBatch []string
+		ticker := time.NewTicker(batchDuration)
+		defer ticker.Stop()
+
+		sendBatch := func() {
+			if len(currentBatch) == 0 {
+				return
+			}
+			for _, client := range clients {
+				_ = client.Has(s.id, currentBatch)
+			}
+			currentBatch = nil
+		}
+
+		for {
+			select {
+			case addr, ok := <-sub:
+				if !ok {
+					return
+				}
+				currentBatch = append(currentBatch, addr)
+				if len(currentBatch) >= batchSize {
+					sendBatch()
+					ticker.Reset(batchDuration)
+				}
+			case <-ticker.C:
+				sendBatch()
+			}
+		}
+	}()
 }
 
 // Handler returns the http.Handler for the slots service endpoints.
