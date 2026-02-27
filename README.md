@@ -7,14 +7,14 @@ A storage system of invariant data that can be used for general purpose programm
 Many of the services support dynamic port binding if you omit the `-port` flag or provide `-port 0`. This is useful for avoiding port conflicts when running multiple instances.
 
 ### Discovery Service
-To run the discovery server, which defaults to port `3003`:
+To run the discovery server ([protocol description](docs/Discovery.md)), which defaults to port `3003`:
 ```bash
 # Run with in-memory discovery storage
 go run ./cmd/discovery -port 3003
 ```
 
 ### Names Service
-The names service provides a mechanism to bind logical string names to 64-character IDs. It can be run in memory or backed by the file system.
+The names service ([protocol description](docs/Names.md)) provides a mechanism to bind logical string names to 64-character IDs. It can be run in memory or backed by the file system.
 ```bash
 # Run with in-memory names storage
 go run ./cmd/names -port 3005 -discovery http://localhost:3003
@@ -24,7 +24,7 @@ go run ./cmd/names -port 3005 -dir /tmp/names -discovery http://localhost:3003
 ```
 
 ### Storage Service
-The storage service is responsible for storing and retrieving blobs of data.
+The storage service ([protocol description](docs/Storage.md)) is responsible for storing and retrieving blobs of data.
 ```bash
 # Run with in-memory storage naitvely
 go run ./cmd/storage -port 3000
@@ -34,7 +34,7 @@ go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:300
 ```
 
 ### Distribute Service
-The distribute server coordinates block replication logic. It can pull available names/IDs from the discovery service.
+The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication logic. It can pull available names/IDs from the discovery service.
 ```bash
 # Run with default in-memory distribution logic
 go run ./cmd/distribute -port 3001
@@ -44,7 +44,7 @@ go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003 -name d
 ```
 
 ### Finder Service
-The finder server manages Kademlia routing logic.
+The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing logic.
 ```bash
 # Start a standalone finder
 go run ./cmd/finder -port 3002
