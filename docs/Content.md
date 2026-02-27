@@ -1,16 +1,20 @@
 # The invariant project - Content
 
-Content is a set of blocks that, taken together, form a complete file. The content is described by a :content-link type that includes the address of the content or the root block of the content and any transforms that should be performed on the content while it is being retrieved.
+Content is a set of blocks that, taken together, form a complete file. The content is described by a `:content-link` type that includes the address of the content or the root block of the content and any transforms that should be performed on the content while it is being retrieved.
 
 ## Version
 
-The version 1 of the content protocol with the protocol token of content-v1.
+The current version of the content protocol is `content-v1`.
 
 ## Values
 
 ### `:address`
 
 The address of the content or the root block of the content.
+
+### `:id`
+
+The ID is a service or slot ID.
 
 ### `:transforms`
 
@@ -47,7 +51,7 @@ interface AesCbcDecipherTransform {
 
 interface DecompressTransform {
     kind: "Decompress"
-    algorithm: "inflate" | "brotli" | "unzip"
+    algorithm: "inflate" | "gzip"
 }
 ```
 
@@ -55,7 +59,7 @@ The `address` field is the address of the content or the the `slot` ID, if it is
 
 ## Reading a `:content-link`
 
-To read a `:content-link`, the root block is retrieved from a storage service. Perferably this is an `storage.AggerageClient`, which uses a `finder-v1` service to find the best storage service to retrieve the content from. If the `primary` field is present, and the aggregate storage client cannot find the block, the reader should try to retrieve the block from the storage service with the `primary` ID. The reader MUST perform the transforms in the order they are listed but MUST NOT require the same order as is currently required by the writer.
+To read a `:content-link`, the root block is retrieved from a storage service. Perferably this is an `storage.AggerageClient`, which uses a `finder-v1` service to find the best storage service to retrieve the content from. If the `primary` field is present, and the aggregate storage client cannot find the block, the reader SHOULD try to retrieve the block from the storage service with the `primary` ID. The reader MUST perform the transforms in the order they are listed but MUST NOT require the same order as is currently required by the writer.
 
 ### Transforms
 
