@@ -54,21 +54,22 @@ func main() {
 
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
+	var dClient *discovery.Client
 	if discoveryURL != "" {
 		id := s.(identity.Provider).ID()
-		client := discovery.NewClient(discoveryURL, nil)
+		dClient = discovery.NewClient(discoveryURL, nil)
 
 		// Configure the storage server to use discovery for fetching
-		server.WithDiscovery(client)
+		server.WithDiscovery(dClient)
 
-		err := discovery.AdvertiseAndRegister(client, id, advertiseAddr, actualPort, []string{"storage-v1"})
+		err := discovery.AdvertiseAndRegister(dClient, id, advertiseAddr, actualPort, []string{"storage-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
 
 		if name != "" {
-			err := discovery.RegisterName(client, name, id, []string{"storage-v1"})
+			err := discovery.RegisterName(dClient, name, id, []string{"storage-v1"})
 			if err != nil {
 				log.Fatalf("Failed to register name %q: %v", name, err)
 			}
@@ -79,16 +80,8 @@ func main() {
 	}
 
 	var hasClients []storage.HasClient
-	if hasIDs != "" {
-		if discoveryURL == "" {
-			log.Fatalf("Discovery service is required to use the -has flag")
-		}
-
-		// Use a discovery client to resolve Has service IDs
-		dClient := discovery.NewClient(discoveryURL, nil)
-
-		ids := strings.Split(hasIDs, ",")
-		for _, hid := range ids {
+	if dClient != nil {
+		for hid := range strings.SplitSeq(hasIDs, ",") {
 			hid = strings.TrimSpace(hid)
 			if hid == "" {
 				continue
@@ -96,13 +89,13 @@ func main() {
 
 			hid, err = discovery.ResolveName(dClient, hid)
 			if err != nil {
-				log.Printf("Warning: Could not resolve has name/id %s: %v", hid, err)
+				log.Fatalf("Could not resolve has name/id %s: %v", hid, err)
 				continue
 			}
 
 			desc, ok := dClient.Get(hid)
 			if !ok {
-				log.Printf("Warning: Could not find address for Has service ID %s", hid)
+				log.Fatalf("Could not find address for Has service ID %s", hid)
 				continue
 			}
 
