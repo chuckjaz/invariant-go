@@ -1,6 +1,6 @@
 # The invariant project - Has Protocol
 
-The Has protocol is a notification protocol for storage services to notify other storage services that they have a block.
+The Has protocol is a notification protocol for storage services to notify other services that they have a block.
 
 This protocol is a common part of the Distribute protocol and the Finder protocol. 
 

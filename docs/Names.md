@@ -35,7 +35,7 @@ interface NameResponse {
 }
 ```
 
-## PUT /:name?value=:id;tokens=:tokens
+## PUT /:name?value=:id&tokens=:tokens
 
 Store the ID of a service or the address of a block with the given name. The tokens are protocol version tokens. For a block the token should be `block-v1`. For a service the token should be the protocol tokens of the protocols the service supports.
 
@@ -43,10 +43,16 @@ Store the ID of a service or the address of a block with the given name. The tok
 
 Delete the name from the names service.
 
+### Required request headers
+
+| Header        | Value                     |
+| ------------- | ------------------------- |
+| If-Match      | `:value`                  |
+
+The If-Match must match the current ID or address associated with the name. If it does not match, or is missing, the request will be rejected with a 412 Precondition Failed response.
+
 ### Required response headers
 
 | Header        | Value                     |
 | ------------- | ------------------------- |
 | ETag          | `:value`                  |
-
-The ETag must match the current ID or address associated with the name. If it does not match, the request will be rejected with a 412 Precondition Failed response.

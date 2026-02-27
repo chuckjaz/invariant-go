@@ -22,11 +22,11 @@ The content hash of the content.
 
 A server ID which is a 32 byte hex encoded value.
 
-# GET `/id`
+# `GET /id`
 
 Determine the `:id` of the server.
 
-## GET /storage/:address
+# `GET /:address`
 
 Retrieve an octent stream of the data with hash code `:address`, if it is in the store.
 
@@ -40,7 +40,7 @@ Retrieve an octent stream of the data with hash code `:address`, if it is in the
 
 All other headers are as defined by HTML 1.1
 
-## `HEAD /storage/:address`
+## `HEAD /:address`
 
 Retrieve information about whether a blob is available.
 
@@ -76,7 +76,7 @@ If content with the given `:address` is already present in the store the server 
 
 | Header         | Value                     |
 | -------------- | ------------------------- |
-| Content-Type   | plain/text                |
+| Content-Type   | text/plain                |
 
 The body of the response is the URL path part of the content.
 
