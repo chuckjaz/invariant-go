@@ -3,6 +3,7 @@ package start
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -73,8 +74,8 @@ func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {
 		cmdPath := filepath.Join(r.baseDir, filepath.Base(sc.Command))
 		cmd := exec.CommandContext(ctx, cmdPath, args...)
 		cmd.Dir = r.baseDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stdout}
+		cmd.Stderr = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stderr}
 
 		log.Printf("Starting service [%s] command: %s %v", sc.Command, cmdPath, args)
 		startTime := time.Now()
@@ -119,4 +120,26 @@ func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {
 			log.Printf("Restarting service [%s] in %v (exponential back-off)", sc.Command, backoff)
 		}
 	}
+}
+
+type prefixWriter struct {
+	cmd  *exec.Cmd
+	name string
+	out  io.Writer
+	line []byte
+}
+
+func (w *prefixWriter) Write(p []byte) (n int, err error) {
+	for _, b := range p {
+		w.line = append(w.line, b)
+		if b == '\n' {
+			pid := -1
+			if w.cmd != nil && w.cmd.Process != nil {
+				pid = w.cmd.Process.Pid
+			}
+			fmt.Fprintf(w.out, "[%s:%d] %s", w.name, pid, string(w.line))
+			w.line = w.line[:0]
+		}
+	}
+	return len(p), nil
 }
