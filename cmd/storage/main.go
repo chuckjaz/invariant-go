@@ -33,6 +33,8 @@ func main() {
 	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	var name string
+	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
 
 	var s storage.Storage
@@ -64,6 +66,16 @@ func main() {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
+
+		if name != "" {
+			err := discovery.RegisterName(client, name, id, []string{"storage-v1"})
+			if err != nil {
+				log.Fatalf("Failed to register name %q: %v", name, err)
+			}
+			log.Printf("Registered name %q for ID %s", name, id)
+		}
+	} else if name != "" {
+		log.Fatalf("a discovery service with a registered names service is required for the service to be named.")
 	}
 
 	var hasClients []storage.HasClient

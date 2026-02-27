@@ -3,6 +3,8 @@ package discovery
 import (
 	"fmt"
 	"net/url"
+
+	"invariant/internal/names"
 )
 
 // AdvertiseAndRegister forms the complete advertise URL and registers the service
@@ -27,4 +29,20 @@ func AdvertiseAndRegister(disc Discovery, id, advertiseAddr string, port int, pr
 		Address:   advertiseAddr,
 		Protocols: protocols,
 	})
+}
+
+// RegisterName uses the discovery service to find a "names-v1" service
+// and registers the given name for the given ID with the specified protocols.
+func RegisterName(disc Discovery, name, id string, protocols []string) error {
+	if disc == nil {
+		return fmt.Errorf("a discovery service is required for the service to be named")
+	}
+
+	nameServices, err := disc.Find("names-v1", 1)
+	if err != nil || len(nameServices) == 0 {
+		return fmt.Errorf("a discovery service with a registered names service is required for the service to be named")
+	}
+
+	nameClient := names.NewClient(nameServices[0].Address, nil)
+	return nameClient.Put(name, id, protocols)
 }

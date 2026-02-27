@@ -27,6 +27,8 @@ func main() {
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	var port int
 	flag.IntVar(&port, "port", 3004, "Port to listen on (using 3004 to not conflict with storage/discovery)")
+	var name string
+	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
 
 	if id == "" {
@@ -49,6 +51,14 @@ func main() {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
+	}
+
+	if name != "" {
+		err := discovery.RegisterName(disc, name, id, []string{"finder-v1", "has-v1"})
+		if err != nil {
+			log.Fatalf("Failed to register name %q: %v", name, err)
+		}
+		log.Printf("Registered name %q for ID %s", name, id)
 	}
 
 	server := finder.NewFinderServer(f, disc)
