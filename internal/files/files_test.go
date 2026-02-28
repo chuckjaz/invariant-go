@@ -2,7 +2,9 @@ package files
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -128,5 +130,97 @@ func TestFilesService_WriteAndSync(t *testing.T) {
 	}
 	if addr == "init-addr" {
 		t.Fatalf("slot address was not updated after sync")
+	}
+}
+
+func TestFilesService_WriteAndSyncMultipleParents(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-multi-id")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	err := memSlots.Create("test-slot-multi", initLink.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootLink := content.ContentLink{
+		Address: "test-slot-multi",
+		Slot:    true,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:          store,
+		Slots:            memSlots,
+		RootLink:         rootLink,
+		AutoSyncTimeout:  time.Hour,
+		SlotPollInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+
+	// Create a subdirectory "dir1"
+	err = filesService.CreateEntry(ctx, 1, "dir1", filetree.DirectoryKind, "", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create dir1: %v", err)
+	}
+
+	filesService.mu.RLock()
+	dir1ID := filesService.nodes[1].Children["dir1"]
+	filesService.mu.RUnlock()
+
+	// Create `file1` within `dir1`
+	err = filesService.CreateEntry(ctx, dir1ID, "file1", filetree.FileKind, "", nil, bytes.NewReader([]byte("init")))
+	if err != nil {
+		t.Fatalf("failed to create file1: %v", err)
+	}
+
+	filesService.mu.RLock()
+	file1ID := filesService.nodes[dir1ID].Children["file1"]
+	filesService.mu.RUnlock()
+
+	// Link `file1` into the root directory directly
+	err = filesService.Link(ctx, 1, "file1-link", file1ID)
+	if err != nil {
+		t.Fatalf("failed to link file1: %v", err)
+	}
+
+	// Reset dirty state to properly observe write side-effects
+	filesService.mu.Lock()
+	for k := range filesService.dirtyNodes {
+		delete(filesService.dirtyNodes, k)
+	}
+	for _, node := range filesService.nodes {
+		node.IsDirty = false
+	}
+	filesService.mu.Unlock()
+
+	// Modify the file content to simulate a write event
+	server := NewServer(filesService)
+	handler := server.Handler()
+
+	data := []byte("updated content")
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/file/%d", file1ID), bytes.NewReader(data))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// Verify both dir1 and root directories are marked dirty
+	filesService.mu.RLock()
+	defer filesService.mu.RUnlock()
+
+	if !filesService.dirtyNodes[dir1ID] {
+		t.Errorf("expected dir1 to be marked dirty because it contains the file")
+	}
+
+	if !filesService.dirtyNodes[1] {
+		t.Errorf("expected root directory to be marked dirty because it contains a link to the file")
 	}
 }

@@ -35,10 +35,10 @@ type InMemoryFiles struct {
 
 // Node represents a single entry in the file tree.
 type Node struct {
-	ID     uint64
-	Name   string
-	Kind   filetree.EntryKind
-	Parent uint64
+	ID      uint64
+	Name    string
+	Kind    filetree.EntryKind
+	Parents map[uint64]bool
 
 	CreateTime *uint64
 	ModifyTime *uint64
@@ -85,6 +85,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 		ID:         1,
 		Name:       "",
 		Kind:       filetree.DirectoryKind,
+		Parents:    make(map[uint64]bool),
 		CreateTime: &now,
 		ModifyTime: &now,
 		Content:    opts.RootLink,
@@ -123,8 +124,10 @@ func (s *InMemoryFiles) markDirty(id uint64) {
 		node.IsDirty = true
 		now := uint64(time.Now().Unix())
 		node.ModifyTime = &now
-		if node.Parent != 0 {
-			s.markDirty(node.Parent)
+		for parentID := range node.Parents {
+			if parentID != 0 {
+				s.markDirty(parentID)
+			}
 		}
 	}
 }
@@ -171,10 +174,10 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 	for _, entry := range d {
 		childID := s.getNextID()
 		childNode := &Node{
-			ID:     childID,
-			Name:   entry.GetName(),
-			Kind:   entry.GetKind(),
-			Parent: id,
+			ID:      childID,
+			Name:    entry.GetName(),
+			Kind:    entry.GetKind(),
+			Parents: map[uint64]bool{id: true},
 		}
 
 		switch e := entry.(type) {
@@ -207,14 +210,20 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 	return nil
 }
 
-func (s *InMemoryFiles) deleteNodeRecursively(id uint64) {
+func (s *InMemoryFiles) deleteNodeRecursively(id uint64, parentID uint64) {
 	node, ok := s.nodes[id]
 	if !ok {
 		return
 	}
+	if parentID != 0 {
+		delete(node.Parents, parentID)
+		if len(node.Parents) > 0 {
+			return
+		}
+	}
 	if node.Kind == filetree.DirectoryKind {
 		for _, childID := range node.Children {
-			s.deleteNodeRecursively(childID)
+			s.deleteNodeRecursively(childID, id)
 		}
 	}
 	delete(s.nodes, id)
@@ -241,7 +250,7 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		ID:         childID,
 		Name:       name,
 		Kind:       kind,
-		Parent:     parentID,
+		Parents:    map[uint64]bool{parentID: true},
 		CreateTime: &now,
 		ModifyTime: &now,
 	}
@@ -339,7 +348,6 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	}
 
 	node.Content = link
-	s.markDirty(node.Parent)
 	s.markDirty(nodeID)
 
 	return nil
@@ -576,7 +584,7 @@ func (s *InMemoryFiles) Remove(ctx context.Context, parentID uint64, name string
 
 	delete(parentNode.Children, name)
 	s.markDirty(parentID)
-	s.deleteNodeRecursively(childID)
+	s.deleteNodeRecursively(childID, parentID)
 	return nil
 }
 
@@ -607,12 +615,16 @@ func (s *InMemoryFiles) Rename(ctx context.Context, parentID uint64, oldName str
 		// Target exists, remove it first
 		targetChildID := newParentNode.Children[newName]
 		delete(newParentNode.Children, newName)
-		s.deleteNodeRecursively(targetChildID)
+		s.deleteNodeRecursively(targetChildID, newParentID)
 	}
 
 	node := s.nodes[childID]
 	node.Name = newName
-	node.Parent = newParentID
+	delete(node.Parents, parentID)
+	if node.Parents == nil {
+		node.Parents = make(map[uint64]bool)
+	}
+	node.Parents[newParentID] = true
 	now := uint64(time.Now().Unix())
 	node.ModifyTime = &now
 
@@ -639,12 +651,16 @@ func (s *InMemoryFiles) Link(ctx context.Context, parentID uint64, name string, 
 	}
 
 	parentNode := s.nodes[parentID]
-	_, ok := s.nodes[targetNodeID]
+	targetNode, ok := s.nodes[targetNodeID]
 	if !ok {
 		return errors.New("target node not found")
 	}
 
 	parentNode.Children[name] = targetNodeID
+	if targetNode.Parents == nil {
+		targetNode.Parents = make(map[uint64]bool)
+	}
+	targetNode.Parents[parentID] = true
 	s.markDirty(parentID)
 
 	return nil
@@ -759,7 +775,7 @@ func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[s
 			if !s.nodes[childID].IsDirty {
 				delete(localNode.Children, name)
 				s.markDirty(localID)
-				s.deleteNodeRecursively(childID)
+				s.deleteNodeRecursively(childID, localID)
 			}
 		}
 	}
