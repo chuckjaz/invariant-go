@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -306,9 +307,7 @@ func (s *FileSystemSlots) doSnapshot() {
 	s.mu.Lock()
 	// Copy the map to safely marshal it outside the lock
 	storeCopy := make(map[string]string, len(s.store))
-	for k, v := range s.store {
-		storeCopy[k] = v
-	}
+	maps.Copy(storeCopy, s.store)
 
 	// Create new journal while holding the lock
 	if err := s.openNewJournal(); err != nil {

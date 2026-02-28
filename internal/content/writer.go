@@ -85,7 +85,7 @@ func splitBlocks(data []byte, store storage.Storage, opts WriterOptions, sharedK
 	mask := uint32((1 << 20) - 1) // 1MB avg target
 
 	start := 0
-	for i := 0; i < len(data); i++ {
+	for i := range data {
 		h := bh.WriteB(data[i])
 		size := i - start + 1
 
@@ -136,12 +136,9 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 	chunks := ceilDiv(len(items), 1000)
 	var parentItems []BlockListItem
 
-	for i := 0; i < chunks; i++ {
+	for i := range chunks {
 		start := i * 1000
-		end := start + 1000
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(start+1000, len(items))
 
 		subListLink, err := writeBlockList(items[start:end], store, opts, sharedKey)
 		if err != nil {

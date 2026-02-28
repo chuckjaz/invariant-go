@@ -336,6 +336,50 @@ func (s *InMemoryFiles) ReadFile(ctx context.Context, nodeID uint64, offset, len
 	return reader, nil
 }
 
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+type countReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+type dynamicSkipReader struct {
+	r      io.Reader
+	skipFn func() int64
+	done   bool
+}
+
+func (s *dynamicSkipReader) Read(p []byte) (int, error) {
+	if !s.done {
+		skip := s.skipFn()
+		if skip > 0 {
+			_, err := io.CopyN(io.Discard, s.r, skip)
+			if err != nil {
+				if err == io.EOF {
+					s.done = true
+					return 0, io.EOF
+				}
+				return 0, err
+			}
+		}
+		s.done = true
+	}
+	return s.r.Read(p)
+}
+
 func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int64, appendFlag bool, r io.Reader) error {
 	if !s.isWritable() {
 		return errors.New("file system is read-only")
@@ -358,39 +402,48 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 		startOffset = 0
 	}
 
-	newData, err := io.ReadAll(r)
-	if err != nil {
-		return fmt.Errorf("failed to read write content: %w", err)
-	}
-
-	var existingData []byte
+	var existingReader io.ReadCloser
 	if node.Content.Address != "" {
-		reader, err := content.Read(node.Content, s.opts.Storage, s.opts.Slots)
-		if err == nil {
-			existingData, _ = io.ReadAll(reader)
-			reader.Close()
+		var err error
+		existingReader, err = content.Read(node.Content, s.opts.Storage, s.opts.Slots)
+		if err != nil {
+			return fmt.Errorf("failed to read existing content: %w", err)
 		}
+		defer existingReader.Close()
 	}
 
-	var finalData []byte
-	if startOffset == 0 && len(existingData) <= len(newData) {
-		finalData = newData
-	} else {
-		endOffset := startOffset + int64(len(newData))
-		finalSize := max(int64(len(existingData)), endOffset)
+	var parts []io.Reader
 
-		finalData = make([]byte, finalSize)
-		copy(finalData, existingData)
-		copy(finalData[startOffset:], newData)
+	if existingReader != nil {
+		if startOffset <= int64(node.Size) {
+			parts = append(parts, io.LimitReader(existingReader, startOffset))
+		} else {
+			parts = append(parts, existingReader)
+			parts = append(parts, io.LimitReader(zeroReader{}, startOffset-int64(node.Size)))
+		}
+	} else if startOffset > 0 {
+		parts = append(parts, io.LimitReader(zeroReader{}, startOffset))
 	}
 
-	link, err := content.Write(bytes.NewReader(finalData), s.opts.Storage, s.opts.WriterOptions)
+	cr := &countReader{r: r}
+	parts = append(parts, cr)
+
+	if existingReader != nil {
+		parts = append(parts, &dynamicSkipReader{
+			r: existingReader,
+			skipFn: func() int64 {
+				return cr.n
+			},
+		})
+	}
+
+	link, err := content.Write(io.MultiReader(parts...), s.opts.Storage, s.opts.WriterOptions)
 	if err != nil {
 		return err
 	}
 
 	node.Content = link
-	node.Size = uint64(len(finalData))
+	node.Size = uint64(max(int64(node.Size), startOffset+cr.n))
 	s.markDirty(nodeID)
 
 	return nil

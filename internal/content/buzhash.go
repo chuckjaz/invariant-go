@@ -13,7 +13,7 @@ func NewBuzHash(windowSize int) *BuzHash {
 		window: make([]byte, windowSize),
 	}
 	// Initialize table with some pseudo-random values
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		b.table[i] = uint32(i) * 0x5bd1e995
 	}
 	return b

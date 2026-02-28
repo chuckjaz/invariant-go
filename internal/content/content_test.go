@@ -40,7 +40,7 @@ func TestReadWriteEncryptedCompressed(t *testing.T) {
 
 	data := []byte("hello world with compression and encryption")
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		data = append(data, []byte("hello world with compression and encryption ")...)
 	}
 
