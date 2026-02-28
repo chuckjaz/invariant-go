@@ -263,7 +263,14 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 			if contentReader == nil {
 				contentReader = io.LimitReader(nil, 0)
 			}
-			link, err := content.Write(contentReader, s.opts.Storage, s.opts.WriterOptions)
+			data, err := io.ReadAll(contentReader)
+			if err != nil {
+				return fmt.Errorf("failed to read content: %v", err)
+			}
+			if kind == filetree.FileKind {
+				childNode.Size = uint64(len(data))
+			}
+			link, err := content.Write(bytes.NewReader(data), s.opts.Storage, s.opts.WriterOptions)
 			if err != nil {
 				return fmt.Errorf("failed to save file: %v", err)
 			}
@@ -342,12 +349,48 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 		return errors.New("invalid file node")
 	}
 
-	link, err := content.Write(r, s.opts.Storage, s.opts.WriterOptions)
+	var startOffset int64
+	if appendFlag {
+		startOffset = int64(node.Size)
+	} else if offset > 0 {
+		startOffset = offset
+	} else {
+		startOffset = 0
+	}
+
+	newData, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("failed to read write content: %w", err)
+	}
+
+	var existingData []byte
+	if node.Content.Address != "" {
+		reader, err := content.Read(node.Content, s.opts.Storage, s.opts.Slots)
+		if err == nil {
+			existingData, _ = io.ReadAll(reader)
+			reader.Close()
+		}
+	}
+
+	var finalData []byte
+	if startOffset == 0 && len(existingData) <= len(newData) {
+		finalData = newData
+	} else {
+		endOffset := startOffset + int64(len(newData))
+		finalSize := max(int64(len(existingData)), endOffset)
+
+		finalData = make([]byte, finalSize)
+		copy(finalData, existingData)
+		copy(finalData[startOffset:], newData)
+	}
+
+	link, err := content.Write(bytes.NewReader(finalData), s.opts.Storage, s.opts.WriterOptions)
 	if err != nil {
 		return err
 	}
 
 	node.Content = link
+	node.Size = uint64(len(finalData))
 	s.markDirty(nodeID)
 
 	return nil

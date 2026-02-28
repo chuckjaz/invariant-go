@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -222,5 +223,86 @@ func TestFilesService_WriteAndSyncMultipleParents(t *testing.T) {
 
 	if !filesService.dirtyNodes[1] {
 		t.Errorf("expected root directory to be marked dirty because it contains a link to the file")
+	}
+}
+
+func TestFilesService_WriteFile_AppendAndOffset(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-id")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	memSlots.Create("test-slot", initLink.Address)
+
+	rootLink := content.ContentLink{
+		Address: "test-slot",
+		Slot:    true,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:          store,
+		Slots:            memSlots,
+		RootLink:         rootLink,
+		AutoSyncTimeout:  time.Hour,
+		SlotPollInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+
+	// Initial write (file size: 5, content: "hello")
+	err = filesService.CreateEntry(ctx, 1, "test.txt", filetree.FileKind, "", nil, bytes.NewReader([]byte("hello")))
+	if err != nil {
+		t.Fatalf("failed to create entry: %v", err)
+	}
+	filesService.mu.RLock()
+	fileID := filesService.nodes[1].Children["test.txt"]
+	filesService.mu.RUnlock()
+
+	// Append " world"
+	err = filesService.WriteFile(ctx, fileID, 0, true, bytes.NewReader([]byte(" world")))
+	if err != nil {
+		t.Fatalf("failed to append: %v", err)
+	}
+
+	// Verify append
+	rc, err := filesService.ReadFile(ctx, fileID, 0, 0)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "hello world" {
+		t.Errorf("expected 'hello world', got %q", string(data))
+	}
+
+	// Overwrite part of the file (offset 6, "WORLD" -> "hello WORLD")
+	err = filesService.WriteFile(ctx, fileID, 6, false, bytes.NewReader([]byte("WORLD")))
+	if err != nil {
+		t.Fatalf("failed to overwrite: %v", err)
+	}
+
+	rc, err = filesService.ReadFile(ctx, fileID, 0, 0)
+	data, _ = io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "hello WORLD" {
+		t.Errorf("expected 'hello WORLD', got %q", string(data))
+	}
+
+	// Offset past end of file (zero padding)
+	err = filesService.WriteFile(ctx, fileID, 15, false, bytes.NewReader([]byte("!")))
+	if err != nil {
+		t.Fatalf("failed to write past EOF: %v", err)
+	}
+
+	rc, err = filesService.ReadFile(ctx, fileID, 0, 0)
+	data, _ = io.ReadAll(rc)
+	rc.Close()
+	expected := "hello WORLD\x00\x00\x00\x00!"
+	if string(data) != expected {
+		t.Errorf("expected %q, got %q", expected, string(data))
 	}
 }
