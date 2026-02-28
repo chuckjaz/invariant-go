@@ -1,0 +1,1 @@
+Read AGENTS.md for the rules of the project.
