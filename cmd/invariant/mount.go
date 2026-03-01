@@ -2,13 +2,16 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"os/user"
 	"strconv"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 
+	"invariant/internal/config"
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/files"
@@ -18,27 +21,36 @@ import (
 	"invariant/internal/storage"
 )
 
-func main() {
+func runMount(globalCfg *config.InvariantConfig, args []string) {
+	fsFlags := flag.NewFlagSet("mount", flag.ExitOnError)
 	var mountpoint string
-	flag.StringVar(&mountpoint, "mount", "", "Directory to mount the FUSE file system")
+	fsFlags.StringVar(&mountpoint, "mount", "", "Directory to mount the FUSE file system")
 	var discoveryURL string
-	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var rootAddr string
-	flag.StringVar(&rootAddr, "root", "", "Root block or slot address")
+	fsFlags.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
-	flag.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
-	flag.Parse()
+	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
+
+	fsFlags.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options]\n\n")
+		fsFlags.PrintDefaults()
+	}
+	fsFlags.Parse(args)
 
 	if mountpoint == "" {
 		log.Fatalf("Mountpoint is required (--mount)")
 	}
 
-	var dClient discovery.Discovery
-	if discoveryURL != "" {
-		dClient = discovery.NewClient(discoveryURL, nil)
-	} else {
+	if discoveryURL == "" && globalCfg != nil {
+		discoveryURL = globalCfg.Discovery
+	}
+	if discoveryURL == "" {
 		log.Fatalf("Discovery URL is required")
 	}
+
+	var dClient discovery.Discovery
+	dClient = discovery.NewClient(discoveryURL, nil)
 
 	rootIsSlot := false
 	if slot != "" {

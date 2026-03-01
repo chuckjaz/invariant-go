@@ -12,6 +12,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  start    Start invariant services from configuration\n")
 	fmt.Fprintf(os.Stderr, "  slot     Allocate a new slot from the slots service\n")
+	fmt.Fprintf(os.Stderr, "  mount    Mount the invariant file system\n")
 	os.Exit(1)
 }
 
@@ -31,6 +32,8 @@ func main() {
 		runStart(cfg, os.Args[2:])
 	case "slot":
 		runSlot(cfg, os.Args[2:])
+	case "mount":
+		runMount(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()
