@@ -2,30 +2,36 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
-	"net"
-	"net/http"
+	"os/user"
+	"strconv"
 	"time"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/files"
 	"invariant/internal/finder"
+	"invariant/internal/fuse"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
 func main() {
+	var mountpoint string
+	flag.StringVar(&mountpoint, "mount", "", "Directory to mount the FUSE file system")
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var rootAddr string
 	flag.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
 	flag.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
-	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	flag.Parse()
+
+	if mountpoint == "" {
+		log.Fatalf("Mountpoint is required (--mount)")
+	}
 
 	var dClient discovery.Discovery
 	if discoveryURL != "" {
@@ -68,21 +74,33 @@ func main() {
 		SlotPollInterval: 5 * time.Minute,
 	}
 
-	f, err := files.NewInMemoryFiles(opts)
+	filesrv, err := files.NewInMemoryFiles(opts)
 	if err != nil {
 		log.Fatalf("Failed to initialize files service: %v", err)
 	}
-	defer f.Close()
+	defer filesrv.Close()
 
-	server := files.NewServer(f)
+	rootNode := fuse.NewNode(filesrv, 1) // 1 is the root node ID in InMemoryFiles
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+	var uid, gid uint32
+	if currentUser, err := user.Current(); err == nil {
+		if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
+			uid = uint32(parsedUID)
+		}
+		if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
+			gid = uint32(parsedGID)
+		}
 	}
 
-	actualPort := listener.Addr().(*net.TCPAddr).Port
-	log.Printf("Listening on :%d...", actualPort)
-	log.Fatal(http.Serve(listener, server.Handler()))
+	server, err := fs.Mount(mountpoint, rootNode, &fs.Options{
+		UID: uid,
+		GID: gid,
+	})
+	if err != nil {
+		log.Fatalf("Mount fail: %v\n", err)
+	}
+
+	log.Printf("Mounted on %s\n", mountpoint)
+	log.Printf("Unmount by calling 'fusermount -u %s'", mountpoint)
+	server.Wait()
 }
