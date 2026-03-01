@@ -10,13 +10,15 @@ import (
 	"invariant/internal/config"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/names"
 	"invariant/internal/slots"
 )
 
 func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("slot", flag.ExitOnError)
+	nameFlag := fs.String("name", "", "Optional name to register the newly allocated slot with")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: invariant slot <block-address>\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant slot [options] <block-address>\n")
 		fmt.Fprintf(os.Stderr, "Allocates a new slot using the discovery service and the given initial block address.\n\n")
 		fs.PrintDefaults()
 	}
@@ -25,6 +27,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	if len(fs.Args()) < 1 {
 		fmt.Fprintf(os.Stderr, "Error: missing block address\n")
 		fs.Usage()
+		os.Exit(1)
 	}
 
 	blockAddress := fs.Args()[0]
@@ -80,4 +83,23 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	fmt.Printf("Allocated new slot: %s\n", slotID)
+
+	if *nameFlag != "" {
+		namesID, err := dClient.Find("names-v1", 1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Could not query discovery service for names-v1: %v\n", err)
+			os.Exit(1)
+		}
+		if len(namesID) == 0 {
+			fmt.Fprintf(os.Stderr, "Warning: Could not find any names-v1 service to register name.\n")
+		} else {
+			namesClient := names.NewClient(namesID[0].Address, nil)
+			err = namesClient.Put(*nameFlag, slotID, []string{"slots-v1"})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to register name: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Successfully registered name %q to slot %s\n", *nameFlag, slotID)
+		}
+	}
 }

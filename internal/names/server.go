@@ -61,13 +61,10 @@ func (s *NamesServer) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tokensStr == "" {
-		http.Error(w, "Bad Request: missing tokens", http.StatusBadRequest)
-		return
+	var tokens []string
+	if tokensStr != "" {
+		tokens = strings.Split(tokensStr, ",")
 	}
-
-	tokens := strings.Split(tokensStr, ",")
-
 	// Proceed with normal Put, ETag precondition is only specified for DELETE in the protocol.
 
 	err := s.names.Put(name, value, tokens)
