@@ -53,12 +53,12 @@ go run ./cmd/finder -port 3002
 go run ./cmd/finder -port 3002 -discovery http://localhost:3003
 ```
 
-### Start Utility (Testing Orchestrator)
-The `start` command lets you execute multiple services governed by a single YAML configuration file. It is **not** an industrial-strength orchestrator, but rather a utility designed locally for prototyping and testing. It waits for all processes to start, substitutes environment variables, substitutes `~` for the home directory and `*` for the configuration's base directory, and shares common arguments.
+### Invariant Utility (Testing Orchestrator & CLI)
+The `invariant` command lets you execute multiple services governed by a single YAML configuration file, as well as interact with the cluster (e.g., allocating slots). It is **not** an industrial-strength orchestrator, but rather a utility designed locally for prototyping and testing.
 
 ```bash
 # Start services defined in services.yaml
-go run ./cmd/start services.yaml
+go run ./cmd/invariant start services.yaml
 ```
 
 **Example `services.yaml`**:
