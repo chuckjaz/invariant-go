@@ -95,7 +95,7 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 	}
 }
 
-func TestFinderNotifyAndPushBlocks(t *testing.T) {
+func TestFinderPeerAndPushBlocks(t *testing.T) {
 	disc := newMockDiscovery()
 
 	// We are testing: Finder A has a block. Finder B notifies Finder A.
@@ -130,9 +130,9 @@ func TestFinderNotifyAndPushBlocks(t *testing.T) {
 	clientA := NewClient(tsA.URL, nil)
 	clientA.Has("storage-1", []string{blockAddr})
 
-	// Notify Finder A about Finder B
-	fmt.Printf("Notifying A about B\n")
-	err := clientA.Notify(idB)
+	// Notify Finder A about Peer Finder B
+	fmt.Printf("Peering A about B\n")
+	err := clientA.Peer(idB)
 	if err != nil {
 		t.Fatalf("Failed to notify: %v", err)
 	}
@@ -171,13 +171,13 @@ func TestFinderReturnsFinders(t *testing.T) {
 
 	clientA := NewClient(tsA.URL, nil)
 
-	// Register them in discovery (though Notify doesn't strictly need this unless it's pushing blocks)
+	// Register them in discovery (though Peer doesn't strictly need this unless it's pushing blocks)
 	disc.Register(discovery.ServiceRegistration{ID: idB, Address: "http://b", Protocols: []string{"finder-v1"}})
 	disc.Register(discovery.ServiceRegistration{ID: idC, Address: "http://c", Protocols: []string{"finder-v1"}})
 
-	// Notify A about B and C
-	clientA.Notify(idB)
-	clientA.Notify(idC)
+	// Notify A about Peer B and C
+	clientA.Peer(idB)
+	clientA.Peer(idC)
 
 	// Now ask A for a block it DOES NOT know about. It should return its closest finders.
 	blockAddr := "0000000000000000000000000000000000000000000000000000000000000000"

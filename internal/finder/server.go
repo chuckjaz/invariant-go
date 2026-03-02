@@ -28,7 +28,7 @@ func (s *FinderServer) Handler() http.Handler {
 	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("GET /{address}", s.handleFind)
 	mux.HandleFunc("PUT /has/{id}", s.handleHas)
-	mux.HandleFunc("PUT /notify/{id}", s.handleNotify)
+	mux.HandleFunc("PUT /peer/{id}", s.handlePeer)
 
 	return mux
 }
@@ -86,7 +86,7 @@ func (s *FinderServer) handleHas(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *FinderServer) handleNotify(w http.ResponseWriter, r *http.Request) {
+func (s *FinderServer) handlePeer(w http.ResponseWriter, r *http.Request) {
 	newFinderID := r.PathValue("id")
 	if newFinderID == "" {
 		http.Error(w, "Bad Request: missing finder ID", http.StatusBadRequest)
@@ -94,7 +94,7 @@ func (s *FinderServer) handleNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Add them to our routing table
-	if err := s.finder.Notify(newFinderID); err != nil {
+	if err := s.finder.Peer(newFinderID); err != nil {
 		http.Error(w, "Bad Request: invalid finder ID", http.StatusBadRequest)
 		return
 	}

@@ -17,7 +17,7 @@ type Finder interface {
 	ID() string
 	Find(address string) ([]FindResponse, error)
 	Has(storageID string, addresses []string) error
-	Notify(finderID string) error
+	Peer(finderID string) error
 }
 
 // FinderTest provides testing and diagnostic methods.
@@ -118,8 +118,8 @@ func (f *MemoryFinder) Has(storageID string, addresses []string) error {
 	return nil
 }
 
-// Notify is called when another finder notifies us of their existence.
-func (f *MemoryFinder) Notify(finderID string) error {
+// Peer is called when another finder notifies us of their existence.
+func (f *MemoryFinder) Peer(finderID string) error {
 	nodeID, err := ParseNodeID(finderID)
 	if err != nil {
 		return fmt.Errorf("invalid finder ID in notify: %w", err)

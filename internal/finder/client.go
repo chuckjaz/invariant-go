@@ -60,9 +60,9 @@ func (c *Client) Has(storageID string, addresses []string) error {
 	return hasClient.Has(storageID, addresses)
 }
 
-// Notify pings the remote finder to notify it of a new finder's existence.
-func (c *Client) Notify(finderID string) error {
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/notify/%s", c.baseURL, finderID), nil)
+// Peer pings the remote finder to notify it of a new finder's existence.
+func (c *Client) Peer(finderID string) error {
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/peer/%s", c.baseURL, finderID), nil)
 	if err != nil {
 		return err
 	}

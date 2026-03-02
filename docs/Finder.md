@@ -55,7 +55,7 @@ interface HasRequest {
 
 The response is empty.
 
-## PUT `/notify/:id`
+## PUT `/peer/:id`
 
 Notifies the finder service that there is another finder with `:id`.
 
