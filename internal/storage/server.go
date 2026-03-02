@@ -34,9 +34,9 @@ func NewStorageServer(storage Storage) *StorageServer {
 	}
 }
 
-// HasClient represents a client that can notify a service about known blocks.
-type HasClient interface {
-	Has(storageID string, addresses []string) error
+// NotifyClient represents a client that can notify a service about known blocks.
+type NotifyClient interface {
+	Notify(storageID string, addresses []string) error
 }
 
 // WithDiscovery sets the discovery client used by the storage server
@@ -46,9 +46,9 @@ func (s *StorageServer) WithDiscovery(d discovery.Discovery) *StorageServer {
 	return s
 }
 
-// StartHasNotification starts a background goroutine that sends all stored
+// StartNotification starts a background goroutine that sends all stored
 // block addresses to the provided Has clients in batches.
-func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int, batchDuration time.Duration) {
+func (s *StorageServer) StartNotification(clients []NotifyClient, batchSize int, batchDuration time.Duration) {
 	if len(clients) == 0 {
 		return
 	}
@@ -63,7 +63,7 @@ func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int,
 		// 1. Send initial batch of all existing blocks
 		for batch := range s.storage.List(batchSize) {
 			for _, client := range clients {
-				_ = client.Has(s.id, batch)
+				_ = client.Notify(s.id, batch)
 			}
 		}
 
@@ -78,7 +78,7 @@ func (s *StorageServer) StartHasNotification(clients []HasClient, batchSize int,
 				return
 			}
 			for _, client := range clients {
-				_ = client.Has(s.id, currentBatch)
+				_ = client.Notify(s.id, currentBatch)
 			}
 			currentBatch = nil
 		}

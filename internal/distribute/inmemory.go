@@ -52,7 +52,7 @@ func (d *InMemoryDistribute) Register(id string) error {
 
 // Has notifies the distribute service that the storage service with the given
 // id has the specified data blocks.
-func (d *InMemoryDistribute) Has(id string, addresses []string) error {
+func (d *InMemoryDistribute) Notify(id string, addresses []string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"invariant/internal/has"
+	"invariant/internal/notify"
 )
 
 // DistributeServer provides an HTTP interface for the Distribute service.
@@ -32,7 +32,7 @@ func NewDistributeServer(id string, distribute Distribute) *DistributeServer {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("PUT /register/{id}", s.handleRegister)
-	mux.HandleFunc("PUT /has/{id}", s.handleHas)
+	mux.HandleFunc("PUT /notify/{id}", s.handleNotify)
 
 	s.handler = mux
 	return s
@@ -68,21 +68,21 @@ func (s *DistributeServer) handleRegister(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *DistributeServer) handleHas(w http.ResponseWriter, r *http.Request) {
+func (s *DistributeServer) handleNotify(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, "Bad Request: missing id", http.StatusBadRequest)
 		return
 	}
 
-	var req has.HasRequest
+	var req notify.NotifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request: invalid JSON", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
-	if err := s.distribute.Has(id, req.Addresses); err != nil {
+	if err := s.distribute.Notify(id, req.Addresses); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

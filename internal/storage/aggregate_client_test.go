@@ -137,7 +137,7 @@ func TestAggregateClient_FinderFallback(t *testing.T) {
 	addr, _ := store1.Store(bytes.NewReader([]byte("remote block")))
 
 	// Finder knows about it
-	f.Has("node-remote", []string{addr})
+	f.Notify("node-remote", []string{addr})
 
 	c := NewAggregateClient(f, d, 2, 10)
 

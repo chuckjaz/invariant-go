@@ -93,7 +93,7 @@ func TestInMemoryDistribute_Sync(t *testing.T) {
 
 	// Node 1 has a block
 	blockID := "1111111111111111111111111111111111111111111111111111111111111111"
-	d.Has("0000000000000000000000000000000100000000000000000000000000000000", []string{blockID})
+	d.Notify("0000000000000000000000000000000100000000000000000000000000000000", []string{blockID})
 
 	// Run sync
 	d.Sync()
@@ -175,7 +175,7 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 	d.Register(id2)
 
 	blockID := "2222222222222222222222222222222222222222222222222222222222222222"
-	d.Has(id1, []string{blockID})
+	d.Notify(id1, []string{blockID})
 
 	// First sync attempt will fail on s2 (fetch fails, fallback gets 500)
 	// Attempts = 2 as per the inner loop of sync for each location
@@ -250,7 +250,7 @@ func TestInMemoryDistribute_Sync_OnlyRegistered(t *testing.T) {
 
 	// We cheat here and say an UNREGISTERED node has the block, but d.Has automatically
 	// adds it to d.services. Let's construct scenario where Block is in d.services, but Node 2 is completely out of d.services.
-	d.Has("0000000000000000000000000000000100000000000000000000000000000000", []string{"1111111111111111111111111111111111111111111111111111111111111111"})
+	d.Notify("0000000000000000000000000000000100000000000000000000000000000000", []string{"1111111111111111111111111111111111111111111111111111111111111111"})
 
 	d.Sync()
 
@@ -309,7 +309,7 @@ func TestInMemoryDistribute_Sync_Integration(t *testing.T) {
 	}
 
 	// Tell distribute that node 1 has it
-	dist.Has(id1, []string{addr})
+	dist.Notify(id1, []string{addr})
 
 	// 6. Run Sync
 	// Since HTTP fetch is not supported completely by the storage server (returns 404),

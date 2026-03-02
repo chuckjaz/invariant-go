@@ -21,14 +21,14 @@ func NewServer(slots Slots) *Server {
 	}
 }
 
-// HasClient represents a client that can notify a service about known items.
-type HasClient interface {
-	Has(id string, addresses []string) error
+// NotifyClient represents a client that can notify a service about known items.
+type NotifyClient interface {
+	Notify(id string, addresses []string) error
 }
 
-// StartHasNotification starts a background goroutine that sends all stored
+// StartNotification starts a background goroutine that sends all stored
 // slot IDs to the provided Has clients in batches.
-func (s *Server) StartHasNotification(clients []HasClient, batchSize int, batchDuration time.Duration) {
+func (s *Server) StartNotification(clients []NotifyClient, batchSize int, batchDuration time.Duration) {
 	if len(clients) == 0 {
 		return
 	}
@@ -43,7 +43,7 @@ func (s *Server) StartHasNotification(clients []HasClient, batchSize int, batchD
 		// 1. Send initial batch of all existing slots
 		for batch := range s.slots.List(batchSize) {
 			for _, client := range clients {
-				_ = client.Has(s.id, batch)
+				_ = client.Notify(s.id, batch)
 			}
 		}
 
@@ -58,7 +58,7 @@ func (s *Server) StartHasNotification(clients []HasClient, batchSize int, batchD
 				return
 			}
 			for _, client := range clients {
-				_ = client.Has(s.id, currentBatch)
+				_ = client.Notify(s.id, currentBatch)
 			}
 			currentBatch = nil
 		}

@@ -41,7 +41,7 @@ interface FindResponse  {
 
 The `protocol` is the protocol of the service. If it is a `storage-v1` then it has the block. If it is a `finder-v1` then it may know about the block and the client should query it. The client should query the services in the order they are returned. 
 
-## `PUT /has/:id`
+## `PUT /notify/:id`
 
 Notifies the finder service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with type of,
 

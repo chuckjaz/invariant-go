@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"invariant/internal/discovery"
-	"invariant/internal/has"
+	"invariant/internal/notify"
 	"invariant/internal/slots"
 )
 
@@ -94,7 +94,7 @@ func main() {
 
 	server := slots.NewServer(s)
 
-	var hasClients []slots.HasClient
+	var notifyClients []slots.NotifyClient
 	if disc != nil {
 		for hid := range strings.SplitSeq(hasIDs, ",") {
 			hid = strings.TrimSpace(hid)
@@ -115,14 +115,14 @@ func main() {
 				continue
 			}
 
-			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+			notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
 		}
 	} else if hasIDs != "" {
 		log.Fatalf("a discovery service is required to use the -has flag")
 	}
 
-	if len(hasClients) > 0 {
-		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
+	if len(notifyClients) > 0 {
+		server.StartNotification(notifyClients, hasBatchSize, hasBatchDuration)
 	}
 
 	log.Printf("Slots service (ID %s) listening on :%d...", s.ID(), actualPort)

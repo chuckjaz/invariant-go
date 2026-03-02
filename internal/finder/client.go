@@ -3,7 +3,7 @@ package finder
 import (
 	"encoding/json"
 	"fmt"
-	"invariant/internal/has"
+	"invariant/internal/notify"
 	"net/http"
 )
 
@@ -55,9 +55,9 @@ func (c *Client) Find(address string) ([]FindResponse, error) {
 }
 
 // Has notifies the finder service that a storage node holds the given blocks.
-func (c *Client) Has(storageID string, addresses []string) error {
-	hasClient := has.NewClient(c.baseURL, c.httpClient)
-	return hasClient.Has(storageID, addresses)
+func (c *Client) Notify(storageID string, addresses []string) error {
+	hasClient := notify.NewClient(c.baseURL, c.httpClient)
+	return hasClient.Notify(storageID, addresses)
 }
 
 // Peer pings the remote finder to notify it of a new finder's existence.

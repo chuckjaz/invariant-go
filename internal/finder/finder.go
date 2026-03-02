@@ -16,7 +16,7 @@ type FindResponse struct {
 type Finder interface {
 	ID() string
 	Find(address string) ([]FindResponse, error)
-	Has(storageID string, addresses []string) error
+	Notify(storageID string, addresses []string) error
 	Peer(finderID string) error
 }
 
@@ -104,7 +104,7 @@ func (f *MemoryFinder) Find(address string) ([]FindResponse, error) {
 }
 
 // Has registers that a storage ID holds the given blocks.
-func (f *MemoryFinder) Has(storageID string, addresses []string) error {
+func (f *MemoryFinder) Notify(storageID string, addresses []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

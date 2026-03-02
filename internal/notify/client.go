@@ -1,4 +1,4 @@
-package has
+package notify
 
 import (
 	"bytes"
@@ -7,8 +7,8 @@ import (
 	"net/http"
 )
 
-// HasRequest is the payload for notifying a service about known blocks.
-type HasRequest struct {
+// NotifyRequest is the payload for notifying a service about known blocks.
+type NotifyRequest struct {
 	Addresses []string `json:"addresses"`
 }
 
@@ -32,8 +32,8 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 
 // Has notifies the service that a storage node holds the given blocks.
 // The `storageID` is the ID of the storage node that has the blocks.
-func (c *Client) Has(storageID string, addresses []string) error {
-	reqBody := HasRequest{Addresses: addresses}
+func (c *Client) Notify(storageID string, addresses []string) error {
+	reqBody := NotifyRequest{Addresses: addresses}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return err

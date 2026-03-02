@@ -11,8 +11,8 @@ import (
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
-	"invariant/internal/has"
 	"invariant/internal/identity"
+	"invariant/internal/notify"
 	"invariant/internal/storage"
 )
 
@@ -79,7 +79,7 @@ func main() {
 		log.Fatalf("a discovery service with a registered names service is required for the service to be named.")
 	}
 
-	var hasClients []storage.HasClient
+	var notifyClients []storage.NotifyClient
 	if dClient != nil {
 		for hid := range strings.SplitSeq(hasIDs, ",") {
 			hid = strings.TrimSpace(hid)
@@ -99,7 +99,7 @@ func main() {
 				continue
 			}
 
-			hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+			notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
 		}
 	}
 
@@ -129,11 +129,11 @@ func main() {
 		}
 		log.Printf("Registered with distribute service %s at %s", distID, desc.Address)
 
-		hasClients = append(hasClients, has.NewClient(desc.Address, nil))
+		notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
 	}
 
-	if len(hasClients) > 0 {
-		server.StartHasNotification(hasClients, hasBatchSize, hasBatchDuration)
+	if len(notifyClients) > 0 {
+		server.StartNotification(notifyClients, hasBatchSize, hasBatchDuration)
 	}
 
 	log.Printf("Listening on :%d...", actualPort)

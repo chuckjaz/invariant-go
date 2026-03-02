@@ -36,7 +36,7 @@ The hex encoded ID of the distribute service.
 
 Register a storage service with the distribute service. Once a storage service is registered, the distribute service will periodically check the health of the storage service and if it is not available, it will attempt to replicate the data blocks from the unavailable storage service to other storage services.
 
-When a storage service starts it is expected to send `PUT /has` requests to the distribute service to identify all the blocks it has. It is also expected to send `PUT /has` requests periodically to update the distribute service of new blocks receives.
+When a storage service starts it is expected to send `PUT /notify` requests to the distribute service to identify all the blocks it notify. It is also expected to send `PUT /notify` requests periodically to update the distribute service of new blocks receives.
 
 ### Request
 
@@ -46,7 +46,7 @@ The request is empty.
 
 The response is empty.
 
-## `PUT /has/:id`
+## `PUT /notify/:id`
 
 Notifies the distribute service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with TypeScript type of,
 

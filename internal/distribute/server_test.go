@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"invariant/internal/has"
+	"invariant/internal/notify"
 )
 
 func TestDistributeServer(t *testing.T) {
@@ -48,9 +48,9 @@ func TestDistributeServer(t *testing.T) {
 	}
 
 	// Test PUT /has/{id}
-	hasReq := has.HasRequest{Addresses: []string{"abc", "def"}}
+	hasReq := notify.NotifyRequest{Addresses: []string{"abc", "def"}}
 	body, _ := json.Marshal(hasReq)
-	req, err = http.NewRequest(http.MethodPut, ts.URL+"/has/"+testID, bytes.NewBuffer(body))
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/notify/"+testID, bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}

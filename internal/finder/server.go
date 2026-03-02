@@ -5,7 +5,7 @@ import (
 	"invariant/internal/discovery"
 	"net/http"
 
-	"invariant/internal/has"
+	"invariant/internal/notify"
 )
 
 // FinderServer wraps a Finder implementation and provides HTTP endpoints.
@@ -27,7 +27,7 @@ func (s *FinderServer) Handler() http.Handler {
 
 	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("GET /{address}", s.handleFind)
-	mux.HandleFunc("PUT /has/{id}", s.handleHas)
+	mux.HandleFunc("PUT /has/{id}", s.handleNotify)
 	mux.HandleFunc("PUT /peer/{id}", s.handlePeer)
 
 	return mux
@@ -64,21 +64,21 @@ func (s *FinderServer) handleFind(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(responses)
 }
 
-func (s *FinderServer) handleHas(w http.ResponseWriter, r *http.Request) {
+func (s *FinderServer) handleNotify(w http.ResponseWriter, r *http.Request) {
 	storageID := r.PathValue("id")
 	if storageID == "" {
 		http.Error(w, "Bad Request: missing storage ID", http.StatusBadRequest)
 		return
 	}
 
-	var reqBody has.HasRequest
+	var reqBody notify.NotifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		http.Error(w, "Bad Request: valid JSON expected", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
-	if err := s.finder.Has(storageID, reqBody.Addresses); err != nil {
+	if err := s.finder.Notify(storageID, reqBody.Addresses); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -154,6 +154,6 @@ func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 
 	// Send batches to the new finder
 	for sID, addrs := range pushMap {
-		remoteClient.Has(sID, addrs)
+		remoteClient.Notify(sID, addrs)
 	}
 }
