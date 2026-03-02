@@ -52,10 +52,24 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	var dClient discovery.Discovery
 	dClient = discovery.NewClient(discoveryURL, nil)
 
+	if rootAddr == "" && slot == "" {
+		log.Fatalf("Either --root or --slot is required")
+	}
+
 	rootIsSlot := false
 	if slot != "" {
-		rootAddr = slot
+		resolved, err := discovery.ResolveName(dClient, slot)
+		if err != nil {
+			log.Fatalf("Could not resolve slot name: %v", err)
+		}
+		rootAddr = resolved
 		rootIsSlot = true
+	} else {
+		resolved, err := discovery.ResolveName(dClient, rootAddr)
+		if err != nil {
+			log.Fatalf("Could not resolve root name: %v", err)
+		}
+		rootAddr = resolved
 	}
 
 	findService := func(kind string) string {
