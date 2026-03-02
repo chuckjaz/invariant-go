@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/user"
@@ -15,6 +17,7 @@ import (
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/files"
+	"invariant/internal/filetree"
 	"invariant/internal/finder"
 	"invariant/internal/fuse"
 	"invariant/internal/slots"
@@ -98,6 +101,20 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		},
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
+	}
+
+	rc, err := content.Read(opts.RootLink, storageClient, slotsClient)
+	if err != nil {
+		log.Fatalf("Failed to resolve and read root directory: %v", err)
+	}
+	data, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil {
+		log.Fatalf("Failed to read root directory content: %v", err)
+	}
+	var dir filetree.Directory
+	if err := json.Unmarshal(data, &dir); err != nil {
+		log.Fatalf("Root directory content is not a valid directory format: %v", err)
 	}
 
 	filesrv, err := files.NewInMemoryFiles(opts)
