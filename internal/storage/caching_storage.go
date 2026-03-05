@@ -345,33 +345,6 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	return ok, nil
 }
 
-func (s *CachingStorage) getLRUBack() (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.currentSize <= s.desiredSize {
-		return "", false
-	}
-
-	elem := s.lruList.Back()
-	if elem == nil {
-		return "", false
-	}
-
-	return elem.Value.(string), true
-}
-
-func (s *CachingStorage) removeLRUBack(address string, sizeRemoved int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if elem, ok := s.lruMap[address]; ok && elem == s.lruList.Back() {
-		s.lruList.Remove(elem)
-		delete(s.lruMap, address)
-		s.currentSize -= sizeRemoved
-	}
-}
-
 func (s *CachingStorage) evictionLoop() {
 	ticker := time.NewTicker(time.Second) // Fallback check
 	defer ticker.Stop()
@@ -390,10 +363,19 @@ func (s *CachingStorage) evictionLoop() {
 
 func (s *CachingStorage) doEvict() {
 	for {
-		addr, ok := s.getLRUBack()
-		if !ok {
+		s.mu.Lock()
+		if s.currentSize <= s.desiredSize {
+			s.mu.Unlock()
 			break
 		}
+
+		elem := s.lruList.Back()
+		if elem == nil {
+			s.mu.Unlock()
+			break
+		}
+		addr := elem.Value.(string)
+		s.mu.Unlock()
 
 		// Found a candidate for eviction.
 		// Upload to destination if it doesn't have it.
@@ -413,11 +395,30 @@ func (s *CachingStorage) doEvict() {
 			}
 		}
 
+		s.mu.Lock()
+		// Recheck in case size dropped due to other operations
+		if s.currentSize <= s.desiredSize {
+			s.mu.Unlock()
+			break
+		}
+
+		// Recheck that it's still at the back (hasn't been touched)
+		elem = s.lruMap[addr]
+		if elem == nil || elem != s.lruList.Back() {
+			s.mu.Unlock()
+			continue
+		}
+
 		size, hasSize := s.local.Size(addr)
 		if !hasSize {
 			// If it's already gone, just clean it up from LRU with 0 size
 			size = 0
 		}
+
+		s.lruList.Remove(elem)
+		delete(s.lruMap, addr)
+		s.currentSize -= size
+		s.mu.Unlock()
 
 		// Remove from local storage
 		ok, err := s.local.Remove(addr)
@@ -425,8 +426,5 @@ func (s *CachingStorage) doEvict() {
 			log.Printf("caching storage: failed to explicitly remove block %s from local storage: %v", addr, err)
 			break
 		}
-
-		// Remove from LRU and update size
-		s.removeLRUBack(addr, size)
 	}
 }
