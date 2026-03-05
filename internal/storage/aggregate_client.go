@@ -429,19 +429,5 @@ func (c *AggregateClient) StoreAt(address string, r io.Reader) (bool, error) {
 	return success, nil
 }
 
-// List returns all addresses stored in the aggregate storage. Currently not supported.
-func (c *AggregateClient) List(chunkSize int) <-chan []string {
-	ch := make(chan []string)
-	close(ch)
-	return ch
-}
-
-// Subscribe provides a channel for live updates. Currently not supported.
-func (c *AggregateClient) Subscribe() <-chan string {
-	ch := make(chan string)
-	close(ch)
-	return ch
-}
-
 // Assert that AggregateClient implements the Storage interface
 var _ Storage = (*AggregateClient)(nil)

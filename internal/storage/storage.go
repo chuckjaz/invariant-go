@@ -9,6 +9,11 @@ type Storage interface {
 	Store(r io.Reader) (string, error)
 	StoreAt(address string, r io.Reader) (bool, error)
 	Size(address string) (int64, bool)
+}
+
+// ControlledStorage adds capabilities to iterate and subscribe to a Storage
+type ControlledStorage interface {
+	Storage
 	List(chunkSize int) <-chan []string
 	Subscribe() <-chan string
 }

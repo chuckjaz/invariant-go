@@ -60,15 +60,20 @@ func (s *StorageServer) StartNotification(clients []NotifyClient, batchSize int,
 	}
 
 	go func() {
+		cStorage, ok := s.storage.(ControlledStorage)
+		if !ok {
+			return
+		}
+
 		// 1. Send initial batch of all existing blocks
-		for batch := range s.storage.List(batchSize) {
+		for batch := range cStorage.List(batchSize) {
 			for _, client := range clients {
 				_ = client.Notify(s.id, batch)
 			}
 		}
 
 		// 2. Listen for new blocks and send them in batches
-		sub := s.storage.Subscribe()
+		sub := cStorage.Subscribe()
 		var currentBatch []string
 		ticker := time.NewTicker(batchDuration)
 		defer ticker.Stop()
