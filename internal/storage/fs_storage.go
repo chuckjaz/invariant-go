@@ -248,3 +248,15 @@ func (s *FileSystemStorage) notifySubscribers(address string) {
 		}
 	}
 }
+
+func (s *FileSystemStorage) Remove(address string) (bool, error) {
+	path := s.addressToPath(address)
+	err := os.Remove(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

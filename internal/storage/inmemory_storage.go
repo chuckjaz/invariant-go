@@ -144,3 +144,13 @@ func (s *InMemoryStorage) notifySubscribers(address string) {
 		}
 	}
 }
+
+func (s *InMemoryStorage) Remove(address string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.store[address]; !ok {
+		return false, nil
+	}
+	delete(s.store, address)
+	return true, nil
+}

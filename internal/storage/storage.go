@@ -16,6 +16,7 @@ type ControlledStorage interface {
 	Storage
 	List(chunkSize int) <-chan []string
 	Subscribe() <-chan string
+	Remove(address string) (bool, error)
 }
 
 // StorageFetchRequest represents a request to fetch a block from another service
