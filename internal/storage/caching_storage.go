@@ -296,6 +296,14 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 }
 
 func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
+	if s.local.Has(address) {
+		s.markUsed(address)
+		if closer, ok := r.(io.Closer); ok {
+			closer.Close()
+		}
+		return true, nil
+	}
+
 	s.mu.Lock()
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
