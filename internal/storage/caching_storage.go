@@ -56,26 +56,32 @@ func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, de
 }
 
 func (s *CachingStorage) init() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// 1. Load existing blocks from local storage into LRU
 	for batch := range s.local.List(1000) {
+		var sizesToAdd []int64
+		var addrsToAdd []string
+
+		// Get capacities without holding the lock
 		for _, addr := range batch {
 			size, ok := s.local.Size(addr)
-			if !ok {
-				continue
+			if ok {
+				addrsToAdd = append(addrsToAdd, addr)
+				sizesToAdd = append(sizesToAdd, size)
 			}
+		}
 
+		s.mu.Lock()
+		for i, addr := range addrsToAdd {
 			// Add to back of LRU (least recently used)
 			// Assuming the iteration order is somewhat arbitrary or we just consider
 			// things already on disk as "older" until accessed.
 			if _, exists := s.lruMap[addr]; !exists {
 				elem := s.lruList.PushBack(addr)
 				s.lruMap[addr] = elem
-				s.currentSize += size
+				s.currentSize += sizesToAdd[i]
 			}
 		}
+		s.mu.Unlock()
 	}
 
 	s.checkEviction()
