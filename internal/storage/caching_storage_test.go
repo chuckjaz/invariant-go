@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,36 @@ func TestCachingStorageStoreAtEvictionTrigger(t *testing.T) {
 
 	if !remote.Has(addrA) {
 		t.Errorf("Block A should be on remote")
+	}
+}
+
+func TestCachingStorageTeeGet(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+	cs := NewCachingStorage(local, remote, 100, 50)
+	defer cs.Close()
+
+	// Store in remote only
+	data := []byte("hello destination")
+	addr, _ := remote.Store(bytes.NewReader(data))
+
+	// Get from cs
+	rc, ok := cs.Get(addr)
+	if !ok {
+		t.Fatalf("Expected block to be retrievable from destination")
+	}
+
+	readData, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil || string(readData) != string(data) {
+		t.Fatalf("Failed to read correctly: %v", err)
+	}
+
+	// wait for goroutine to finish tee-ing
+	time.Sleep(100 * time.Millisecond)
+
+	// Local should now have it!
+	if !local.Has(addr) {
+		t.Errorf("Expected block to be cached in local storage")
 	}
 }

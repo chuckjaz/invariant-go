@@ -120,10 +120,36 @@ func (s *CachingStorage) addUsed(address string, size int64) {
 	s.checkEviction()
 }
 
+type trackingReadCloser struct {
+	c  io.ReadCloser
+	pw *io.PipeWriter
+}
+
+func (t *trackingReadCloser) Read(p []byte) (n int, err error) {
+	n, err = t.c.Read(p)
+	if n > 0 {
+		_, _ = t.pw.Write(p[:n])
+	}
+	if err == io.EOF {
+		t.pw.Close()
+	} else if err != nil {
+		t.pw.CloseWithError(err)
+	}
+	return n, err
+}
+
+func (t *trackingReadCloser) Close() error {
+	t.pw.CloseWithError(io.ErrClosedPipe)
+	return t.c.Close()
+}
+
 func (s *CachingStorage) Has(address string) bool {
 	if ok := s.local.Has(address); ok {
 		s.markUsed(address)
 		return true
+	}
+	if s.destination != nil {
+		return s.destination.Has(address)
 	}
 	return false
 }
@@ -134,6 +160,38 @@ func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
 		s.markUsed(address)
 		return rc, true
 	}
+
+	if s.destination != nil {
+		rc, ok = s.destination.Get(address)
+		if ok {
+			destSize, hasSize := s.destination.Size(address)
+			if hasSize {
+				s.mu.Lock()
+				hasRoom := s.currentSize+destSize <= s.maxSize
+				s.mu.Unlock()
+
+				if hasRoom {
+					pr, pw := io.Pipe()
+					go func() {
+						defer pr.Close()
+						okL, errL := s.local.StoreAt(address, pr)
+						if errL == nil && okL {
+							actualSize, hasSizeL := s.local.Size(address)
+							if hasSizeL {
+								s.addUsed(address, actualSize)
+							}
+						}
+					}()
+
+					return &trackingReadCloser{
+						c:  rc,
+						pw: pw,
+					}, true
+				}
+			}
+			return rc, true
+		}
+	}
 	return nil, false
 }
 
@@ -142,6 +200,9 @@ func (s *CachingStorage) Size(address string) (int64, bool) {
 	if ok {
 		s.markUsed(address)
 		return size, true
+	}
+	if s.destination != nil {
+		return s.destination.Size(address)
 	}
 	return 0, false
 }
