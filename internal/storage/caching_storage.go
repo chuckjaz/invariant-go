@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"container/list"
 	"context"
 	"errors"
@@ -207,61 +206,126 @@ func (s *CachingStorage) Size(address string) (int64, bool) {
 	return 0, false
 }
 
-func (s *CachingStorage) Store(r io.Reader) (string, error) {
-	// Buffer the reader to know the size before committing to store
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return "", err
-	}
-	size := int64(len(data))
+type trackingReader struct {
+	r         io.Reader
+	size      int64
+	onDone    func(int64)
+	checkSize func(int64) error
+	done      bool
+}
 
+func (tr *trackingReader) Read(p []byte) (n int, err error) {
+	n, err = tr.r.Read(p)
+	tr.size += int64(n)
+
+	if tr.checkSize != nil {
+		if errCheck := tr.checkSize(tr.size); errCheck != nil {
+			return n, errCheck
+		}
+	}
+
+	if err == io.EOF && !tr.done {
+		tr.done = true
+		if tr.onDone != nil {
+			tr.onDone(tr.size)
+		}
+	}
+	return n, err
+}
+
+func (tr *trackingReader) Close() error {
+	if !tr.done {
+		tr.done = true
+		if tr.onDone != nil {
+			tr.onDone(tr.size)
+		}
+	}
+	if rc, ok := tr.r.(io.ReadCloser); ok {
+		return rc.Close()
+	}
+	return nil
+}
+
+func (s *CachingStorage) Store(r io.Reader) (string, error) {
 	s.mu.Lock()
-	if s.currentSize+size > s.maxSize {
+	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		return "", ErrMaxSizeExceeded
 	}
 	s.mu.Unlock()
 
-	// Need to reader from the buffer now
-	bufReader := bytes.NewReader(data)
-	addr, err := s.local.Store(bufReader)
+	var finalSize int64
+	tr := &trackingReader{
+		r: r,
+		onDone: func(size int64) {
+			finalSize = size
+		},
+		checkSize: func(added int64) error {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.currentSize+added > s.maxSize {
+				return ErrMaxSizeExceeded
+			}
+			return nil
+		},
+	}
+
+	addr, err := s.local.Store(tr)
 	if err != nil {
 		return "", err
 	}
 
+	// Double check we actually stored it and got the size via the local storage
+	// (or simply rely on tr.size if it was newly read).
+	tr.Close()
+
 	actualSize, ok := s.local.Size(addr)
-	if ok {
-		s.addUsed(addr, actualSize)
+	if !ok {
+		actualSize = finalSize
 	}
+
+	s.addUsed(addr, actualSize)
 
 	return addr, nil
 }
 
 func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return false, err
-	}
-	size := int64(len(data))
-
 	s.mu.Lock()
-	if s.currentSize+size > s.maxSize {
+	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		return false, ErrMaxSizeExceeded
 	}
 	s.mu.Unlock()
 
-	bufReader := bytes.NewReader(data)
-	ok, err := s.local.StoreAt(address, bufReader)
+	var finalSize int64
+	tr := &trackingReader{
+		r: r,
+		onDone: func(size int64) {
+			finalSize = size
+		},
+		checkSize: func(added int64) error {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.currentSize+added > s.maxSize {
+				return ErrMaxSizeExceeded
+			}
+			return nil
+		},
+	}
+
+	ok, err := s.local.StoreAt(address, tr)
 	if err != nil {
 		return false, err
 	}
 
+	tr.Close()
+
 	if ok {
 		actualSize, hasSize := s.local.Size(address)
-		if hasSize {
-			s.addUsed(address, actualSize)
+		if !hasSize {
+			actualSize = finalSize
 		}
+		s.addUsed(address, actualSize)
 	}
 
 	return ok, nil
