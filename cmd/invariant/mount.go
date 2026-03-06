@@ -34,8 +34,8 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
-	var useCache bool
-	fsFlags.BoolVar(&useCache, "cache", false, "Use in-memory caching for storage backend")
+	var cacheSizeMB int
+	fsFlags.IntVar(&cacheSizeMB, "cache", 10, "In-memory caching size in MB for storage backend (0 to disable)")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options]\n\n")
@@ -95,9 +95,9 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
 	var finalStorage storage.Storage = storageClient
-	if useCache {
+	if cacheSizeMB > 0 {
 		localStore := storage.NewInMemoryStorage()
-		finalStorage = storage.NewCachingStorage(localStore, storageClient, 10*1024*1024, 0, true)
+		finalStorage = storage.NewCachingStorage(localStore, storageClient, int64(cacheSizeMB)*1024*1024, 0, true)
 	}
 
 	opts := files.Options{
