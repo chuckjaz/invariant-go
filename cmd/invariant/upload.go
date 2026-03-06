@@ -41,10 +41,10 @@ func parseIgnoreFile(path string) (ignoreRules, error) {
 
 func (ir ignoreRules) matches(path string, isDir bool) bool {
 	base := filepath.Base(path)
-	if base == ".git" {
-		return true // Always ignore .git
-	}
 	if base == ".invariant" {
+		return true
+	}
+	if ir != nil && base == ".git" {
 		return true
 	}
 

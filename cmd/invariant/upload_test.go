@@ -57,11 +57,18 @@ func TestIgnoreRulesMatches(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "implicit .git match",
+			name:     "implicit .git match with gitignore",
 			rules:    ignoreRules{"*.txt"},
 			path:     ".git",
 			isDir:    true,
 			expected: true,
+		},
+		{
+			name:     "no implicit .git match without gitignore",
+			rules:    nil, // No .gitignore file
+			path:     ".git",
+			isDir:    true,
+			expected: false,
 		},
 		{
 			name:     "implicit .invariant match",
