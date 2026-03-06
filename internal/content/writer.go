@@ -42,20 +42,6 @@ const (
 // applies compression and encryption according to opts,
 // writes the blocks to store, and returns a ContentLink to the root block (or block list).
 func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return ContentLink{}, err
-	}
-
-	if len(data) == 0 {
-		return writeBlock(nil, store, opts, nil)
-	}
-
-	if len(data) <= targetBlockSize {
-		return writeBlock(data, store, opts, nil)
-	}
-
-	// For stream > 1MB, split into blocks.
 	var sharedKey []byte
 	switch opts.KeyPolicy {
 	case RandomAllKey:
@@ -70,44 +56,71 @@ func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink,
 		sharedKey = opts.SuppliedKey
 	}
 
-	blocks, err := splitBlocks(data, store, opts, sharedKey)
-	if err != nil {
-		return ContentLink{}, err
-	}
-
-	return writeBlockList(blocks, store, opts, sharedKey, data)
-}
-
-func splitBlocks(data []byte, store storage.Storage, opts WriterOptions, sharedKey []byte) ([]BlockListItem, error) {
-	var blocks []BlockListItem
 	bh := NewBuzHash(64)
-
 	mask := uint32((1 << 20) - 1) // 1MB avg target
 
-	start := 0
-	for i := range data {
-		h := bh.WriteB(data[i])
-		size := i - start + 1
+	var blocks []BlockListItem
+	var currentChunk bytes.Buffer
+	overallHasher := sha256.New()
+	buf := make([]byte, 32*1024) // 32KB read buffer
 
-		if (h&mask == 0 && size >= targetBlockSize/2) || size == maxBlockSize || i == len(data)-1 {
-			chunk := data[start : i+1]
-			link, err := writeBlock(chunk, store, opts, sharedKey)
-			if err != nil {
-				return nil, err
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			overallHasher.Write(buf[:n])
+			for i := 0; i < n; i++ {
+				b := buf[i]
+				h := bh.WriteB(b)
+				currentChunk.WriteByte(b)
+				size := currentChunk.Len()
+
+				if (h&mask == 0 && size >= targetBlockSize/2) || size == maxBlockSize {
+					link, wErr := writeBlock(currentChunk.Bytes(), store, opts, sharedKey)
+					if wErr != nil {
+						return ContentLink{}, wErr
+					}
+					blocks = append(blocks, BlockListItem{
+						Content: link,
+						Size:    uint64(size),
+					})
+					currentChunk.Reset()
+					bh = NewBuzHash(64)
+				}
 			}
-			blocks = append(blocks, BlockListItem{
-				Content: link,
-				Size:    uint64(len(chunk)),
-			})
-			start = i + 1
-			bh = NewBuzHash(64)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ContentLink{}, err
 		}
 	}
 
-	return blocks, nil
+	if currentChunk.Len() > 0 || len(blocks) == 0 {
+		size := currentChunk.Len()
+		link, err := writeBlock(currentChunk.Bytes(), store, opts, sharedKey)
+		if err != nil {
+			return ContentLink{}, err
+		}
+
+		if len(blocks) == 0 {
+			link.Expected = hex.EncodeToString(overallHasher.Sum(nil))
+			if len(link.Transforms) == 0 && link.Expected == link.Address {
+				link.Expected = ""
+			}
+			return link, nil
+		}
+
+		blocks = append(blocks, BlockListItem{
+			Content: link,
+			Size:    uint64(size),
+		})
+	}
+
+	return writeBlockList(blocks, store, opts, sharedKey, hex.EncodeToString(overallHasher.Sum(nil)))
 }
 
-func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOptions, sharedKey []byte, originalData []byte) (ContentLink, error) {
+func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOptions, sharedKey []byte, overallExpectedHash string) (ContentLink, error) {
 	// A JSON block list might exceed 1MB if there are many items.
 	// We'll recursively split if it's too large.
 
@@ -124,9 +137,7 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 		// Append 'Blocks' transform so it runs last
 		link.Transforms = append(link.Transforms, ContentTransform{Kind: "Blocks"})
 
-		hasher := sha256.New()
-		hasher.Write(originalData)
-		link.Expected = hex.EncodeToString(hasher.Sum(nil))
+		link.Expected = overallExpectedHash
 
 		return link, nil
 	}
@@ -139,7 +150,6 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 	chunks := ceilDiv(len(items), 1000)
 	var parentItems []BlockListItem
 
-	dataOffset := 0
 	for i := range chunks {
 		startIdx := i * 1000
 		endIdx := min(startIdx+1000, len(items))
@@ -149,8 +159,8 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 			subSize += b.Size
 		}
 
-		subData := originalData[dataOffset : dataOffset+int(subSize)]
-		subListLink, err := writeBlockList(items[startIdx:endIdx], store, opts, sharedKey, subData)
+		// Intermediate nested blocklists don't get the overall stream expected hash
+		subListLink, err := writeBlockList(items[startIdx:endIdx], store, opts, sharedKey, "")
 		if err != nil {
 			return ContentLink{}, err
 		}
@@ -159,10 +169,9 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 			Content: subListLink,
 			Size:    subSize,
 		})
-		dataOffset += int(subSize)
 	}
 
-	return writeBlockList(parentItems, store, opts, sharedKey, originalData)
+	return writeBlockList(parentItems, store, opts, sharedKey, overallExpectedHash)
 }
 
 func ceilDiv(a, b int) int {
