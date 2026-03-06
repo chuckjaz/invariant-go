@@ -15,6 +15,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  name     Register a name to a 32-byte hex value\n")
 	fmt.Fprintf(os.Stderr, "  mount    Mount the invariant file system\n")
 	fmt.Fprintf(os.Stderr, "  upload   Upload a local directory as a file tree\n")
+	fmt.Fprintf(os.Stderr, "  print    Print a block's contents to standard output\n")
 	os.Exit(1)
 }
 
@@ -40,6 +41,8 @@ func main() {
 		runMount(cfg, os.Args[2:])
 	case "upload":
 		runUpload(cfg, os.Args[2:])
+	case "print":
+		runPrint(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()
