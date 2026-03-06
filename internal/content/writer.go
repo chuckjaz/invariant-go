@@ -75,7 +75,7 @@ func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink,
 		return ContentLink{}, err
 	}
 
-	return writeBlockList(blocks, store, opts, sharedKey)
+	return writeBlockList(blocks, store, opts, sharedKey, data)
 }
 
 func splitBlocks(data []byte, store storage.Storage, opts WriterOptions, sharedKey []byte) ([]BlockListItem, error) {
@@ -107,7 +107,7 @@ func splitBlocks(data []byte, store storage.Storage, opts WriterOptions, sharedK
 	return blocks, nil
 }
 
-func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOptions, sharedKey []byte) (ContentLink, error) {
+func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOptions, sharedKey []byte, originalData []byte) (ContentLink, error) {
 	// A JSON block list might exceed 1MB if there are many items.
 	// We'll recursively split if it's too large.
 
@@ -116,7 +116,6 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 		return ContentLink{}, err
 	}
 
-	// Since small objects are more common, we check if list fits into max block limit
 	if len(data) <= maxBlockSize {
 		link, err := writeBlock(data, store, opts, sharedKey)
 		if err != nil {
@@ -124,7 +123,11 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 		}
 		// Append 'Blocks' transform so it runs last
 		link.Transforms = append(link.Transforms, ContentTransform{Kind: "Blocks"})
-		link.Expected = "" // block list doesn't have an expected hash unless we hash the actual JSON bytes, but the standard says it's for the underlying data
+
+		hasher := sha256.New()
+		hasher.Write(originalData)
+		link.Expected = hex.EncodeToString(hasher.Sum(nil))
+
 		return link, nil
 	}
 
@@ -136,28 +139,30 @@ func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOpt
 	chunks := ceilDiv(len(items), 1000)
 	var parentItems []BlockListItem
 
+	dataOffset := 0
 	for i := range chunks {
-		start := i * 1000
-		end := min(start+1000, len(items))
+		startIdx := i * 1000
+		endIdx := min(startIdx+1000, len(items))
 
-		subListLink, err := writeBlockList(items[start:end], store, opts, sharedKey)
-		if err != nil {
-			return ContentLink{}, err
+		var subSize uint64
+		for _, b := range items[startIdx:endIdx] {
+			subSize += b.Size
 		}
 
-		// calculate total size of sublist
-		var subSize uint64
-		for _, b := range items[start:end] {
-			subSize += b.Size
+		subData := originalData[dataOffset : dataOffset+int(subSize)]
+		subListLink, err := writeBlockList(items[startIdx:endIdx], store, opts, sharedKey, subData)
+		if err != nil {
+			return ContentLink{}, err
 		}
 
 		parentItems = append(parentItems, BlockListItem{
 			Content: subListLink,
 			Size:    subSize,
 		})
+		dataOffset += int(subSize)
 	}
 
-	return writeBlockList(parentItems, store, opts, sharedKey)
+	return writeBlockList(parentItems, store, opts, sharedKey, originalData)
 }
 
 func ceilDiv(a, b int) int {
@@ -280,6 +285,10 @@ func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKe
 		return link, err
 	}
 	link.Address = addr
+
+	if len(link.Transforms) == 0 && link.Expected == link.Address {
+		link.Expected = ""
+	}
 
 	return link, nil
 }
