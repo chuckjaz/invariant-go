@@ -13,7 +13,7 @@ func TestCachingStorageLRUEviction(t *testing.T) {
 	remote := NewInMemoryStorage()
 
 	// Max size = 15, desired size = 10
-	cs := NewCachingStorage(local, remote, 15, 10)
+	cs := NewCachingStorage(local, remote, 15, 10, false)
 	defer cs.Close()
 
 	// 1. Add block A (size: 5)
@@ -65,7 +65,7 @@ func TestCachingStorageLRUEviction(t *testing.T) {
 
 func TestCachingStorageMaxSizeLimit(t *testing.T) {
 	local := NewInMemoryStorage()
-	cs := NewCachingStorage(local, nil, 10, 5)
+	cs := NewCachingStorage(local, nil, 10, 5, false)
 	defer cs.Close()
 
 	_, err := cs.Store(strings.NewReader("12345"))
@@ -82,7 +82,7 @@ func TestCachingStorageMaxSizeLimit(t *testing.T) {
 func TestCachingStorageStoreAtEvictionTrigger(t *testing.T) {
 	local := NewInMemoryStorage()
 	remote := NewInMemoryStorage()
-	cs := NewCachingStorage(local, remote, 15, 5)
+	cs := NewCachingStorage(local, remote, 15, 5, false)
 	defer cs.Close()
 
 	// Just use valid fake hash for simplicity since InMemoryStorage verifies sha256.
@@ -119,7 +119,7 @@ func TestCachingStorageStoreAtEvictionTrigger(t *testing.T) {
 func TestCachingStorageTeeGet(t *testing.T) {
 	local := NewInMemoryStorage()
 	remote := NewInMemoryStorage()
-	cs := NewCachingStorage(local, remote, 100, 50)
+	cs := NewCachingStorage(local, remote, 100, 50, false)
 	defer cs.Close()
 
 	// Store in remote only
@@ -144,5 +144,34 @@ func TestCachingStorageTeeGet(t *testing.T) {
 	// Local should now have it!
 	if !local.Has(addr) {
 		t.Errorf("Expected block to be cached in local storage")
+	}
+}
+
+func TestCachingStorageDelegateOnMax(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+	// Set desiredSize == maxSize so eviction doesn't aggressively shrink the cache beneath maxSize
+	cs := NewCachingStorage(local, remote, 10, 10, true) // delegateOnMax = true
+	defer cs.Close()
+
+	// 1. Fill cache exactly to maxSize
+	cs.Store(strings.NewReader("12345"))
+	cs.Store(strings.NewReader("67890"))
+
+	// Wait a moment for any async processing (though size is synchronous)
+	time.Sleep(50 * time.Millisecond)
+
+	// s.currentSize should now be 10. s.maxSize is 10.
+	// The next Store should trigger s.currentSize >= s.maxSize and delegate directly.
+	addrA, err := cs.Store(strings.NewReader("abcde"))
+	if err != nil {
+		t.Fatalf("Store A failed unexpectedly: %v", err)
+	}
+
+	if local.Has(addrA) {
+		t.Errorf("Block A should not be in local storage, it should have delegated smoothly")
+	}
+	if !remote.Has(addrA) {
+		t.Errorf("Block A should be in remote storage due to active delegation")
 	}
 }

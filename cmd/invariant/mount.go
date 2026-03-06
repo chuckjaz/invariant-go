@@ -34,6 +34,8 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
+	var useCache bool
+	fsFlags.BoolVar(&useCache, "cache", false, "Use in-memory caching for storage backend")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options]\n\n")
@@ -92,8 +94,14 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	slotsAddr := findService("slots-v1")
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
+	var finalStorage storage.Storage = storageClient
+	if useCache {
+		localStore := storage.NewInMemoryStorage()
+		finalStorage = storage.NewCachingStorage(localStore, storageClient, 10*1024*1024, 0, true)
+	}
+
 	opts := files.Options{
-		Storage: storageClient,
+		Storage: finalStorage,
 		Slots:   slotsClient,
 		RootLink: content.ContentLink{
 			Address: rootAddr,
@@ -103,7 +111,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		SlotPollInterval: 5 * time.Minute,
 	}
 
-	rc, err := content.Read(opts.RootLink, storageClient, slotsClient)
+	rc, err := content.Read(opts.RootLink, finalStorage, slotsClient)
 	if err != nil {
 		log.Fatalf("Failed to resolve and read root directory: %v", err)
 	}

@@ -18,8 +18,9 @@ type CachingStorage struct {
 	local       ControlledStorage
 	destination Storage
 
-	maxSize     int64
-	desiredSize int64
+	maxSize       int64
+	desiredSize   int64
+	delegateOnMax bool
 
 	mu          sync.Mutex
 	lruList     *list.List
@@ -34,19 +35,20 @@ type CachingStorage struct {
 // Assert that CachingStorage implements the Storage interface
 var _ Storage = (*CachingStorage)(nil)
 
-func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, desiredSize int64) *CachingStorage {
+func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, desiredSize int64, delegateOnMax bool) *CachingStorage {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cs := &CachingStorage{
-		local:       local,
-		destination: destination,
-		maxSize:     maxSize,
-		desiredSize: desiredSize,
-		lruList:     list.New(),
-		lruMap:      make(map[string]*list.Element),
-		ctx:         ctx,
-		cancel:      cancel,
-		evict:       make(chan struct{}, 1),
+		local:         local,
+		destination:   destination,
+		maxSize:       maxSize,
+		desiredSize:   desiredSize,
+		delegateOnMax: delegateOnMax,
+		lruList:       list.New(),
+		lruMap:        make(map[string]*list.Element),
+		ctx:           ctx,
+		cancel:        cancel,
+		evict:         make(chan struct{}, 1),
 	}
 
 	cs.init()
@@ -256,6 +258,9 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 	s.mu.Lock()
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
+		if s.delegateOnMax && s.destination != nil {
+			return s.destination.Store(r)
+		}
 		return "", ErrMaxSizeExceeded
 	}
 	s.mu.Unlock()
@@ -270,6 +275,9 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if s.currentSize+added > s.maxSize {
+				if s.delegateOnMax {
+					return nil
+				}
 				return ErrMaxSizeExceeded
 			}
 			return nil
@@ -307,6 +315,9 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	s.mu.Lock()
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
+		if s.delegateOnMax && s.destination != nil {
+			return s.destination.StoreAt(address, r)
+		}
 		return false, ErrMaxSizeExceeded
 	}
 	s.mu.Unlock()
@@ -321,6 +332,9 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if s.currentSize+added > s.maxSize {
+				if s.delegateOnMax {
+					return nil
+				}
 				return ErrMaxSizeExceeded
 			}
 			return nil
