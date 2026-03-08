@@ -156,6 +156,9 @@ func TestFilesService_WriteAndSyncMultipleParents(t *testing.T) {
 		RootLink:         rootLink,
 		AutoSyncTimeout:  time.Hour,
 		SlotPollInterval: time.Hour,
+		Layers: []Layer{
+			{RootLink: rootLink},
+		},
 	})
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)

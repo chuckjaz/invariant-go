@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type InMemoryFiles struct {
 
 	dirtyNodes map[uint64]bool
 
+	layerDependencies map[string]bool
 	lastSlotAddresses map[int]string
 
 	ctx    context.Context
@@ -86,6 +88,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 		root:              1,
 		next:              2,
 		dirtyNodes:        make(map[uint64]bool),
+		layerDependencies: make(map[string]bool),
 		lastSlotAddresses: make(map[int]string),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -138,6 +141,17 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 			go s.pollSlotLoop()
 		}
 	}
+
+	// Make sure we resolve any $ substitutions on startup synchronously
+	// Since opts.Layers specifies the actual layer configs (minus trailing rootLink appended by applyNewLayers typically)
+	// We extract it locally then zero the internal ones down allowing pure reload.
+	initialLayers := opts.Layers
+	// For standard configs without layers, they just want 0 rules, which means nil.
+	if len(initialLayers) == 1 && initialLayers[0].RootLink.Address == opts.RootLink.Address && len(initialLayers[0].Includes) == 0 && len(initialLayers[0].Excludes) == 0 {
+		initialLayers = nil
+	}
+
+	s.applyNewLayers(initialLayers)
 
 	return s, nil
 }
@@ -290,7 +304,11 @@ func (s *InMemoryFiles) getFullPath(id uint64) string {
 	}
 
 	node, ok := s.nodes[id]
-	if !ok || len(node.Parents) == 0 {
+	if !ok {
+		return ""
+	}
+
+	if len(node.Parents) == 0 {
 		return node.Name
 	}
 
@@ -392,6 +410,7 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		ModifyTime:      &now,
 		LayerMembership: layerMembership,
 		LayerContents:   make(map[int]content.ContentLink),
+		IsDirty:         true,
 	}
 
 	switch kind {
@@ -1169,20 +1188,44 @@ func applyTransformsToOptions(transforms []content.ContentTransform, base conten
 }
 
 func (s *InMemoryFiles) checkAndReload(parentID uint64, name string) {
-	if s.opts.ReloadFromDotInvariantLayer && parentID == 1 && name == ".invariant-layer" {
+	if parentID == 1 && name == ".invariant-layer" {
+		go s.handleLayerChange()
+		return
+	}
+	s.mu.RLock()
+	var fullPath string
+	if parentPath := s.getFullPath(parentID); parentPath != "" {
+		fullPath = parentPath + "/" + name
+	} else {
+		fullPath = name
+	}
+	var isDep bool
+	if s.layerDependencies != nil {
+		isDep = s.layerDependencies[fullPath]
+	}
+	s.mu.RUnlock()
+	if isDep {
 		go s.handleLayerChange()
 	}
 }
 
 func (s *InMemoryFiles) checkAndReloadNode(nodeID uint64) {
-	if !s.opts.ReloadFromDotInvariantLayer {
-		return
-	}
 	s.mu.RLock()
 	node, ok := s.nodes[nodeID]
-	isTarget := ok && node.Name == ".invariant-layer" && node.Parents[1]
+	var isDep bool
+	if ok {
+		if node.Name == ".invariant-layer" && node.Parents[1] {
+			isDep = true
+		} else {
+			fullPath := s.getFullPath(nodeID)
+			if s.layerDependencies != nil {
+				isDep = s.layerDependencies[fullPath]
+			}
+		}
+	}
 	s.mu.RUnlock()
-	if isTarget {
+
+	if isDep {
 		go s.handleLayerChange()
 	}
 }
@@ -1204,17 +1247,20 @@ func (s *InMemoryFiles) handleLayerChange() {
 
 	rc, err := s.ReadFile(s.ctx, layerNodeID, 0, 0)
 	if err != nil {
+		log.Printf("handleLayerChange ReadFile error: %v", err)
 		return
 	}
 	defer rc.Close()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
+		log.Printf("handleLayerChange ReadAll error: %v", err)
 		return
 	}
 
 	var layers []Layer
 	if err := json.Unmarshal(data, &layers); err != nil {
+		log.Printf("handleLayerChange Unmarshal error: %v, data: %s", err, string(data))
 		return
 	}
 
@@ -1232,6 +1278,13 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	newLayers = append(newLayers, Layer{
 		RootLink: s.opts.RootLink,
 	})
+
+	s.layerDependencies = make(map[string]bool)
+
+	for i := range newLayers {
+		newLayers[i].Includes = s.resolveLayerRulesLocked(newLayers[i].Includes)
+		newLayers[i].Excludes = s.resolveLayerRulesLocked(newLayers[i].Excludes)
+	}
 
 	s.opts.Layers = newLayers
 
@@ -1276,4 +1329,96 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	for _, id := range toDelete {
 		delete(s.nodes, id)
 	}
+}
+
+func (s *InMemoryFiles) resolveLayerRulesLocked(rules []string) []string {
+	var resolved []string
+	for _, rule := range rules {
+		if !strings.HasPrefix(rule, "$") {
+			resolved = append(resolved, rule)
+			continue
+		}
+
+		path := strings.TrimPrefix(rule, "$")
+		if path == "" {
+			continue
+		}
+
+		// Ensure path doesn't start with leading slashes structurally
+		path = strings.TrimPrefix(path, "/")
+
+		s.layerDependencies[path] = true
+
+		if s.nodes[1] == nil {
+			log.Printf("root node nil")
+			continue
+		}
+
+		parts := strings.Split(path, "/")
+		currID := uint64(1)
+		currNode := s.nodes[currID]
+		found := true
+
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+			s.ensureLoaded(currID)
+			if childID, ok := currNode.Children[part]; ok {
+				currID = childID
+				currNode = s.nodes[childID]
+			} else {
+				log.Printf("child part %q not found", part)
+				found = false
+				break
+			}
+		}
+
+		if !found || currNode.Kind != filetree.FileKind {
+			log.Printf("file not found or not filekind (found=%v, kind=%v)", found, currNode.Kind)
+			continue
+		}
+
+		// We must read it bypassing mutex read locks since applyNewLayers holds s.mu.Lock(),
+		// but ReadFile requires s.mu.RLock() which will deadlock if called directly.
+		// Instead we directly utilize content.Read.
+
+		// If node layer contents aren't populated natively, read standard Content
+		var link content.ContentLink
+		if currNode.Content.Address != "" {
+			link = currNode.Content
+		} else {
+			// Find first concrete layer mapping if flat content is missing
+			for _, layerLink := range currNode.LayerContents {
+				if layerLink.Address != "" {
+					link = layerLink
+					break
+				}
+			}
+		}
+
+		if link.Address == "" {
+			continue
+		}
+
+		rc, err := content.Read(link, s.opts.Storage, s.opts.Slots)
+		if err != nil {
+			continue
+		}
+
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				resolved = append(resolved, line)
+			}
+		}
+	}
+	return resolved
 }

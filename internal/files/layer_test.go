@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"invariant/internal/content"
 	"invariant/internal/filetree"
@@ -108,4 +109,68 @@ func TestFilesService_LayeredRouting(t *testing.T) {
 	// Ensure the parent is implicitly registered on layer 1 since the secret is inside it
 	// Actually root (node ID 1) layer membership semantics aren't mapped via node.LayerMembership
 	// typically, only children, but we enforce parent linkage internally so layers correctly link.
+}
+
+func TestFilesService_LayerDependencies(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slots")
+
+	ctx := context.Background()
+
+	rootLink := content.ContentLink{Slot: true}
+
+	// Initialize with a default layer, then we'll add more via .invariant-layer
+	fs, err := NewInMemoryFiles(Options{
+		Storage:       store,
+		Slots:         memSlots,
+		RootLink:      rootLink,
+		WriterOptions: content.WriterOptions{},
+		Layers: []Layer{
+			{RootLink: rootLink},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Create a dynamic ignore file
+	ignoreContent := "ignored.txt\nsecrets/\n# comment\n"
+	err = fs.CreateEntry(ctx, 1, ".myignore", filetree.FileKind, "", nil, strings.NewReader(ignoreContent))
+	if err != nil {
+		t.Fatalf("Failed creating .myignore: %v", err)
+	}
+
+	// Create .invariant-layer pointing to it
+	layerConfig := `[{"Excludes": ["$.myignore", "static.txt"]}]`
+	err = fs.CreateEntry(ctx, 1, ".invariant-layer", filetree.FileKind, "", nil, strings.NewReader(layerConfig))
+	if err != nil {
+		t.Fatalf("Failed creating .invariant-layer: %v", err)
+	}
+
+	// .invariant-layer mutation triggers handleLayerChange asynchronously
+	// Give it a moment to run
+	time.Sleep(100 * time.Millisecond)
+
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	if len(fs.opts.Layers) < 2 { // 0 + root layer
+		t.Fatalf("Expected at least 2 layers, got %d", len(fs.opts.Layers))
+	}
+
+	layer := fs.opts.Layers[0]
+	if len(layer.Excludes) != 3 {
+		t.Fatalf("Expected 3 excludes, got %v", layer.Excludes)
+	}
+
+	expectedExcludes := map[string]bool{"static.txt": true, "ignored.txt": true, "secrets/": true}
+	for _, ex := range layer.Excludes {
+		if !expectedExcludes[ex] {
+			t.Errorf("Unexpected exclude: %s", ex)
+		}
+	}
+
+	if !fs.layerDependencies[".myignore"] {
+		t.Errorf("Expected .myignore to be in layerDependencies")
+	}
 }

@@ -136,8 +136,6 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 					if err == nil {
 						if err := json.Unmarshal(ldata, &layers); err != nil {
 							log.Printf("Warning: failed to parse .invariant-layer: %v", err)
-						} else {
-							opts.ReloadFromDotInvariantLayer = true
 						}
 					}
 				}
