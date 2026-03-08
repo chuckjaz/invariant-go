@@ -77,6 +77,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 
 	var slotID string
 	var privKey ed25519.PrivateKey
+	policy := ""
 
 	if *protectedFlag {
 		fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
@@ -87,12 +88,14 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		}
 		slotID = hex.EncodeToString(pub)
 		privKey = priv
+		policy = "ecc"
 	} else {
 		b := make([]byte, 32)
 		rand.Read(b)
 		slotID = hex.EncodeToString(b)
 	}
-	err = slotsClient.Create(slotID, blockAddress)
+
+	err = slotsClient.Create(slotID, blockAddress, policy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to allocate slot: %v\n", err)
 		os.Exit(1)

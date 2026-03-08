@@ -3,6 +3,7 @@ package slots
 
 import (
 	"bufio"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,7 +23,7 @@ var _ Slots = (*FileSystemSlots)(nil)
 type FileSystemSlots struct {
 	id               string
 	mu               sync.RWMutex
-	store            map[string]string
+	store            map[string]SlotRecord
 	baseDir          string
 	journalFile      *os.File
 	journalName      string
@@ -35,6 +36,7 @@ type journalEntry struct {
 	Op      string `json:"op"` // "POST" (create) or "PUT" (update)
 	ID      string `json:"id"`
 	Address string `json:"address"`
+	Policy  string `json:"policy,omitempty"`
 }
 
 // NewFileSystemSlots creates a new FileSystemSlots instance.
@@ -56,7 +58,7 @@ func NewFileSystemSlots(baseDir string, snapshotInterval time.Duration) (*FileSy
 
 	fs := &FileSystemSlots{
 		id:               id,
-		store:            make(map[string]string),
+		store:            make(map[string]SlotRecord),
 		baseDir:          baseDir,
 		snapshotInterval: snapshotInterval,
 		stopCh:           make(chan struct{}),
@@ -125,7 +127,13 @@ func (s *FileSystemSlots) applyJournal(path string) error {
 		}
 		switch entry.Op {
 		case "POST", "PUT":
-			s.store[entry.ID] = entry.Address
+			policy := entry.Policy
+			if entry.Op == "PUT" {
+				if existing, ok := s.store[entry.ID]; ok {
+					policy = existing.Policy
+				}
+			}
+			s.store[entry.ID] = SlotRecord{Address: entry.Address, Policy: policy}
 		}
 	}
 	return scanner.Err()
@@ -166,16 +174,16 @@ func (s *FileSystemSlots) Get(id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	addr, ok := s.store[id]
+	record, ok := s.store[id]
 	if !ok {
 		return "", ErrSlotNotFound
 	}
 
-	return addr, nil
+	return record.Address, nil
 }
 
-// Create creates a new slot with the given address.
-func (s *FileSystemSlots) Create(id string, address string) error {
+// Create creates a new slot with the given address and policy.
+func (s *FileSystemSlots) Create(id string, address string, policy string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,6 +195,7 @@ func (s *FileSystemSlots) Create(id string, address string) error {
 		Op:      "POST",
 		ID:      id,
 		Address: address,
+		Policy:  policy,
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -201,7 +210,7 @@ func (s *FileSystemSlots) Create(id string, address string) error {
 		return err
 	}
 
-	s.store[id] = address
+	s.store[id] = SlotRecord{Address: address, Policy: policy}
 	s.notifySubscribers(id)
 	return nil
 }
@@ -255,15 +264,33 @@ func (s *FileSystemSlots) notifySubscribers(id string) {
 }
 
 // Update attempts to change the address of a slot, ensuring the previous address matches.
-func (s *FileSystemSlots) Update(id string, address string, previousAddress string) error {
+// If the slot policy is "ecc", it will verify the request using the passed ed25519 auth signature.
+func (s *FileSystemSlots) Update(id string, address string, previousAddress string, auth []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	currentAddr, ok := s.store[id]
+	record, ok := s.store[id]
 	if !ok {
 		return ErrSlotNotFound
 	}
-	if currentAddr != previousAddress {
+
+	if record.Policy == "ecc" {
+		pubKey, err := hex.DecodeString(id)
+		if err != nil || len(pubKey) != ed25519.PublicKeySize {
+			return ErrUnauthorized
+		}
+
+		reqData, _ := json.Marshal(SlotUpdate{
+			Address:         address,
+			PreviousAddress: previousAddress,
+		})
+
+		if !ed25519.Verify(pubKey, reqData, auth) {
+			return ErrUnauthorized
+		}
+	}
+
+	if record.Address != previousAddress {
 		return ErrConflict
 	}
 
@@ -285,7 +312,7 @@ func (s *FileSystemSlots) Update(id string, address string, previousAddress stri
 		return err
 	}
 
-	s.store[id] = address
+	s.store[id] = SlotRecord{Address: address, Policy: record.Policy}
 	return nil
 }
 
@@ -306,7 +333,7 @@ func (s *FileSystemSlots) snapshotLoop() {
 func (s *FileSystemSlots) doSnapshot() {
 	s.mu.Lock()
 	// Copy the map to safely marshal it outside the lock
-	storeCopy := make(map[string]string, len(s.store))
+	storeCopy := make(map[string]SlotRecord, len(s.store))
 	maps.Copy(storeCopy, s.store)
 
 	// Create new journal while holding the lock

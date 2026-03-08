@@ -2,6 +2,7 @@
 package slots
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -138,9 +139,20 @@ func (s *Server) handleUpdateSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if err := s.slots.Update(id, reqBody.Address, reqBody.PreviousAddress); err != nil {
+	var auth []byte
+	if authHex := r.Header.Get("Authorization"); authHex != "" {
+		if dec, err := hex.DecodeString(authHex); err == nil {
+			auth = dec
+		}
+	}
+
+	if err := s.slots.Update(id, reqBody.Address, reqBody.PreviousAddress, auth); err != nil {
 		if err == ErrSlotNotFound {
 			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		if err == ErrUnauthorized {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if err == ErrConflict {
@@ -168,7 +180,9 @@ func (s *Server) handleCreateSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if err := s.slots.Create(id, reqBody.Address); err != nil {
+	policy := r.URL.Query().Get("protected")
+
+	if err := s.slots.Create(id, reqBody.Address, policy); err != nil {
 		if err == ErrSlotExists {
 			http.Error(w, "Conflict: slot already exists", http.StatusConflict)
 			return

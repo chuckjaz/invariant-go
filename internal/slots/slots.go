@@ -12,6 +12,15 @@ var ErrConflict = errors.New("conflict: previous address does not match")
 // ErrSlotExists is returned when attempting to create a slot that already exists.
 var ErrSlotExists = errors.New("slot already exists")
 
+// ErrUnauthorized is returned when an authorization signature is missing or invalid.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// SlotRecord holds the storage values for a single slot.
+type SlotRecord struct {
+	Address string `json:"address"`
+	Policy  string `json:"policy,omitempty"`
+}
+
 // SlotUpdate represents a request to update a slot's address.
 type SlotUpdate struct {
 	Address         string `json:"address"`
@@ -33,10 +42,11 @@ type Slots interface {
 	Get(id string) (string, error)
 
 	// Update sets the new address for a generic id, expecting previousAddress to match the current value.
-	Update(id string, address string, previousAddress string) error
+	// The auth slice represents the authorization data (signature) needed to update protected slots.
+	Update(id string, address string, previousAddress string, auth []byte) error
 
-	// Create creates a new slot with the given id and address.
-	Create(id string, address string) error
+	// Create creates a new slot with the given id, initial address, and optional policy.
+	Create(id string, address string, policy string) error
 
 	// List returns a channel that yields chunks of all known slot IDs.
 	List(chunkSize int) <-chan []string

@@ -3,6 +3,8 @@ package slots
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,7 +82,8 @@ func (c *Client) Get(id string) (string, error) {
 }
 
 // Update updates a slot on the remote slots service.
-func (c *Client) Update(id string, address string, previousAddress string) error {
+// The auth parameter accepts an Ed25519 private key (64 bytes) to sign the update if the slot is protected.
+func (c *Client) Update(id string, address string, previousAddress string, auth []byte) error {
 	updateReq := SlotUpdate{
 		Address:         address,
 		PreviousAddress: previousAddress,
@@ -96,6 +99,11 @@ func (c *Client) Update(id string, address string, previousAddress string) error
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	if len(auth) == ed25519.PrivateKeySize {
+		signature := ed25519.Sign(auth, reqData)
+		req.Header.Set("Authorization", hex.EncodeToString(signature))
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -104,6 +112,9 @@ func (c *Client) Update(id string, address string, previousAddress string) error
 
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrSlotNotFound
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrUnauthorized
 	}
 	if resp.StatusCode == http.StatusConflict {
 		return ErrConflict
@@ -116,7 +127,7 @@ func (c *Client) Update(id string, address string, previousAddress string) error
 }
 
 // Create creates a new slot on the remote slots service.
-func (c *Client) Create(id string, address string) error {
+func (c *Client) Create(id string, address string, policy string) error {
 	createReq := SlotRegistration{
 		Address: address,
 	}
@@ -125,7 +136,12 @@ func (c *Client) Create(id string, address string) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/%s", c.baseURL, id), bytes.NewReader(reqData))
+	u := fmt.Sprintf("%s/%s", c.baseURL, id)
+	if policy != "" {
+		u = fmt.Sprintf("%s?protected=%s", u, policy)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(reqData))
 	if err != nil {
 		return err
 	}

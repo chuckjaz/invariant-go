@@ -1161,7 +1161,7 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 		for layerIdx := range node.LayerMembership {
 			l := s.opts.Layers[layerIdx]
 			if l.RootLink.Slot {
-				err := s.opts.Slots.Update(l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx])
+				err := s.opts.Slots.Update(l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx], nil)
 				if err == nil {
 					s.lastSlotAddresses[layerIdx] = node.LayerContents[layerIdx].Address
 				}

@@ -2,6 +2,9 @@
 package slots
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
 	"sync"
 )
 
@@ -9,7 +12,7 @@ import (
 type MemorySlots struct {
 	id          string
 	mu          sync.RWMutex
-	slots       map[string]string
+	slots       map[string]SlotRecord
 	subscribers []chan string
 }
 
@@ -17,7 +20,7 @@ type MemorySlots struct {
 func NewMemorySlots(id string) *MemorySlots {
 	return &MemorySlots{
 		id:    id,
-		slots: make(map[string]string),
+		slots: make(map[string]SlotRecord),
 	}
 }
 
@@ -31,33 +34,52 @@ func (m *MemorySlots) Get(id string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	addr, ok := m.slots[id]
+	record, ok := m.slots[id]
 	if !ok {
 		return "", ErrSlotNotFound
 	}
 
-	return addr, nil
+	return record.Address, nil
 }
 
 // Update attempts to change the address of a slot, ensuring the previous address matches.
-func (m *MemorySlots) Update(id string, address string, previousAddress string) error {
+// If the slot policy is "ecc", it will verify the request using the passed ed25519 auth signature.
+func (m *MemorySlots) Update(id string, address string, previousAddress string, auth []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	currentAddr, ok := m.slots[id]
+	record, ok := m.slots[id]
 	if !ok {
 		return ErrSlotNotFound
 	}
-	if currentAddr != previousAddress {
+
+	if record.Policy == "ecc" {
+		pubKey, err := hex.DecodeString(id)
+		if err != nil || len(pubKey) != ed25519.PublicKeySize {
+			return ErrUnauthorized
+		}
+
+		reqData, _ := json.Marshal(SlotUpdate{
+			Address:         address,
+			PreviousAddress: previousAddress,
+		})
+
+		if !ed25519.Verify(pubKey, reqData, auth) {
+			return ErrUnauthorized
+		}
+	}
+
+	if record.Address != previousAddress {
 		return ErrConflict
 	}
 
-	m.slots[id] = address
+	record.Address = address
+	m.slots[id] = record
 	return nil
 }
 
-// Create creates a new slot with the given address.
-func (m *MemorySlots) Create(id string, address string) error {
+// Create creates a new slot with the given address and policy.
+func (m *MemorySlots) Create(id string, address string, policy string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -65,7 +87,7 @@ func (m *MemorySlots) Create(id string, address string) error {
 		return ErrSlotExists
 	}
 
-	m.slots[id] = address
+	m.slots[id] = SlotRecord{Address: address, Policy: policy}
 	m.notifySubscribers(id)
 	return nil
 }
