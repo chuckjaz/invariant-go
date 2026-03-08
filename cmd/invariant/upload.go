@@ -41,6 +41,10 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags := flag.NewFlagSet("upload", flag.ExitOnError)
 	var discoveryURL string
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	var compress bool
+	var encrypt bool
+	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
+	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant upload [options] [directory]\n\n")
@@ -102,16 +106,29 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "Warning: failed to read .gitignore: %v\n", err)
 	}
 
-	rootEntry, err := processDirectory(absPath, absPath, storageClient, rules)
+	var opts content.WriterOptions
+	if compress {
+		opts.CompressAlgorithm = "gzip"
+	}
+	if encrypt {
+		opts.EncryptAlgorithm = "aes-256-cbc"
+	}
+
+	rootEntry, err := processDirectory(absPath, absPath, storageClient, rules, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s\n", rootEntry.Content.Address)
+	out, err := json.MarshalIndent(rootEntry.Content, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal output: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s\n", out)
 }
 
-func processDirectory(rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules) (*filetree.DirectoryEntry, error) {
+func processDirectory(rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err
@@ -127,7 +144,7 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 		}
 
 		if d.IsDir() {
-			subDirEntry, err := processDirectory(rootPath, filepath.Join(currentPath, d.Name()), store, rules)
+			subDirEntry, err := processDirectory(rootPath, filepath.Join(currentPath, d.Name()), store, rules, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -148,7 +165,7 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 			}
 			dir = append(dir, symlinkEntry)
 		} else if d.Type().IsRegular() {
-			fileEntry, err := processFile(filepath.Join(currentPath, d.Name()), d.Name(), store)
+			fileEntry, err := processFile(filepath.Join(currentPath, d.Name()), d.Name(), store, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -161,7 +178,7 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 		return nil, err
 	}
 
-	link, err := content.Write(strings.NewReader(string(data)), store, content.WriterOptions{})
+	link, err := content.Write(strings.NewReader(string(data)), store, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +193,7 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 	}, nil
 }
 
-func processFile(filePath, name string, store storage.Storage) (*filetree.FileEntry, error) {
+func processFile(filePath, name string, store storage.Storage, opts content.WriterOptions) (*filetree.FileEntry, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -188,7 +205,7 @@ func processFile(filePath, name string, store storage.Storage) (*filetree.FileEn
 		return nil, err
 	}
 
-	link, err := content.Write(file, store, content.WriterOptions{})
+	link, err := content.Write(file, store, opts)
 	if err != nil {
 		return nil, err
 	}
