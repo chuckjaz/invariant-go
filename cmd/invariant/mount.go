@@ -125,6 +125,33 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("Root directory content is not a valid directory format: %v", err)
 	}
 
+	var layers []files.Layer
+	for _, entry := range dir {
+		if entry.GetName() == ".invariant-layer" && entry.GetKind() == filetree.FileKind {
+			if fe, ok := entry.(*filetree.FileEntry); ok {
+				lrc, lerr := content.Read(fe.Content, finalStorage, slotsClient)
+				if lerr == nil {
+					ldata, err := io.ReadAll(lrc)
+					lrc.Close()
+					if err == nil {
+						if err := json.Unmarshal(ldata, &layers); err != nil {
+							log.Printf("Warning: failed to parse .invariant-layer: %v", err)
+						} else {
+							opts.ReloadFromDotInvariantLayer = true
+						}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	if len(layers) > 0 {
+		opts.Layers = append(layers, files.Layer{
+			RootLink: opts.RootLink,
+		})
+	}
+
 	filesrv, err := files.NewInMemoryFiles(opts)
 	if err != nil {
 		log.Fatalf("Failed to initialize files service: %v", err)

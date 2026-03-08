@@ -68,7 +68,7 @@ func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink,
 		n, err := r.Read(buf)
 		if n > 0 {
 			overallHasher.Write(buf[:n])
-			for i := 0; i < n; i++ {
+			for i := range n {
 				b := buf[i]
 				h := bh.WriteB(b)
 				currentChunk.WriteByte(b)

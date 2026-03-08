@@ -432,6 +432,8 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 	parentNode.Children[name] = childID
 	s.markDirty(parentID)
 
+	go s.checkAndReload(parentID, name)
+
 	return nil
 }
 
@@ -584,6 +586,8 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	node.Content = link
 	node.Size = uint64(max(int64(node.Size), startOffset+cr.n))
 	s.markDirty(nodeID)
+
+	go s.checkAndReloadNode(nodeID)
 
 	return nil
 }
@@ -820,6 +824,9 @@ func (s *InMemoryFiles) Remove(ctx context.Context, parentID uint64, name string
 	delete(parentNode.Children, name)
 	s.markDirty(parentID)
 	s.deleteNodeRecursively(childID, parentID)
+
+	go s.checkAndReload(parentID, name)
+
 	return nil
 }
 
@@ -869,6 +876,9 @@ func (s *InMemoryFiles) Rename(ctx context.Context, parentID uint64, oldName str
 	s.markDirty(parentID)
 	s.markDirty(newParentID)
 	s.markDirty(childID)
+
+	go s.checkAndReload(parentID, oldName)
+	go s.checkAndReload(newParentID, newName)
 
 	return nil
 }
@@ -1156,4 +1166,114 @@ func applyTransformsToOptions(transforms []content.ContentTransform, base conten
 		}
 	}
 	return opts
+}
+
+func (s *InMemoryFiles) checkAndReload(parentID uint64, name string) {
+	if s.opts.ReloadFromDotInvariantLayer && parentID == 1 && name == ".invariant-layer" {
+		go s.handleLayerChange()
+	}
+}
+
+func (s *InMemoryFiles) checkAndReloadNode(nodeID uint64) {
+	if !s.opts.ReloadFromDotInvariantLayer {
+		return
+	}
+	s.mu.RLock()
+	node, ok := s.nodes[nodeID]
+	isTarget := ok && node.Name == ".invariant-layer" && node.Parents[1]
+	s.mu.RUnlock()
+	if isTarget {
+		go s.handleLayerChange()
+	}
+}
+
+func (s *InMemoryFiles) handleLayerChange() {
+	s.mu.RLock()
+	rootNode, ok := s.nodes[1]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	layerNodeID, childOk := rootNode.Children[".invariant-layer"]
+	s.mu.RUnlock()
+
+	if !childOk {
+		s.applyNewLayers(nil)
+		return
+	}
+
+	rc, err := s.ReadFile(s.ctx, layerNodeID, 0, 0)
+	if err != nil {
+		return
+	}
+	defer rc.Close()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return
+	}
+
+	var layers []Layer
+	if err := json.Unmarshal(data, &layers); err != nil {
+		return
+	}
+
+	s.applyNewLayers(layers)
+}
+
+func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var newLayers []Layer
+	if len(layers) > 0 {
+		newLayers = append(newLayers, layers...)
+	}
+	newLayers = append(newLayers, Layer{
+		RootLink: s.opts.RootLink,
+	})
+
+	s.opts.Layers = newLayers
+
+	membership := make(map[int]bool)
+	contents := make(map[int]content.ContentLink)
+	for i, l := range s.opts.Layers {
+		membership[i] = true
+		contents[i] = l.RootLink
+	}
+
+	rootNode, ok := s.nodes[1]
+	if !ok {
+		return
+	}
+
+	rootNode.LayerMembership = membership
+	rootNode.LayerContents = contents
+	rootNode.IsLoaded = false
+
+	var toDelete []uint64
+	for id, node := range s.nodes {
+		if id == 1 {
+			continue
+		}
+		if !node.IsDirty {
+			toDelete = append(toDelete, id)
+		} else if node.Kind == filetree.DirectoryKind {
+			node.IsLoaded = false
+		}
+	}
+
+	for _, node := range s.nodes {
+		if node.Kind == filetree.DirectoryKind {
+			for name, childID := range node.Children {
+				if childNode, childExists := s.nodes[childID]; !childExists || !childNode.IsDirty {
+					delete(node.Children, name)
+				}
+			}
+		}
+	}
+
+	for _, id := range toDelete {
+		delete(s.nodes, id)
+	}
 }

@@ -62,13 +62,14 @@ type Layer struct {
 
 // Options configuring the internal Files service.
 type Options struct {
-	Slots            slots.Slots
-	Storage          storage.Storage
-	RootLink         content.ContentLink
-	Layers           []Layer
-	AutoSyncTimeout  time.Duration
-	SlotPollInterval time.Duration
-	WriterOptions    content.WriterOptions
+	Slots                       slots.Slots
+	Storage                     storage.Storage
+	RootLink                    content.ContentLink
+	Layers                      []Layer
+	AutoSyncTimeout             time.Duration
+	SlotPollInterval            time.Duration
+	WriterOptions               content.WriterOptions
+	ReloadFromDotInvariantLayer bool
 }
 
 // ContentInformationCommon represents the info returned by GET /info/:node

@@ -26,8 +26,8 @@ func (ir IgnoreRules) Matches(path string, isDir bool) bool {
 			return true
 		}
 		// Match directory trailing slashes
-		if strings.HasSuffix(rule, "/") {
-			cleanRule := strings.TrimSuffix(rule, "/")
+		if before, ok := strings.CutSuffix(rule, "/"); ok {
+			cleanRule := before
 			matched, _ := filepath.Match(cleanRule, base)
 			if isDir && matched {
 				return true
