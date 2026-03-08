@@ -12,6 +12,10 @@ A 32 byte hex encoded value.
 
 A string representing the sha256 hash of a content block.
 
+### `:policy`
+
+A string representing the policy for the slot. The policy can be `ecc` for an Ed25519 256-bit elliptic curve key pair.
+
 ## Endpoints
 
 ## `GET /id`
@@ -39,11 +43,13 @@ interface SlotUpdate {
 
 The request is rejected if the current :address is not equal to previousAddress. Clients should use GET /:id to get the :address before attempting an update. If the address has changed the client should attempt to merge the changes, which depends on the content, before attempting to update again. The slots service does not validate the merge, it just uses previousAddress to enforce a serialization of updates.
 
+When a slot is created with a :policy, the :address is the public key of the :policy. Request to update the slot require an authorization header with the signature of the request data using the private key of the :policy.
+
 ### Response
 
 The response is empty.
 
-### `POST /:id`
+### `POST /:id?protected=:policy`
 
 Create a new slot with the given :id.
 
