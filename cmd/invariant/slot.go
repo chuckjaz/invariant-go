@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"invariant/internal/config"
 	"invariant/internal/discovery"
@@ -17,6 +19,7 @@ import (
 func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("slot", flag.ExitOnError)
 	nameFlag := fs.String("name", "", "Optional name to register the newly allocated slot with")
+	protectedFlag := fs.Bool("protected", false, "Generate an Ed25519 256-bit elliptic curve key pair. The 32-byte public key becomes the slot ID, and the private key is saved in ~/.invariant/keys")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant slot [options] <block-address>\n")
 		fmt.Fprintf(os.Stderr, "Allocates a new slot using the discovery service and the given initial block address.\n\n")
@@ -72,10 +75,23 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 
 	slotsClient := slots.NewClient(id[0].Address, nil)
 
-	b := make([]byte, 32)
-	rand.Read(b)
-	slotID := hex.EncodeToString(b)
+	var slotID string
+	var privKey ed25519.PrivateKey
 
+	if *protectedFlag {
+		fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
+		pub, priv, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to generate key pair: %v\n", err)
+			os.Exit(1)
+		}
+		slotID = hex.EncodeToString(pub)
+		privKey = priv
+	} else {
+		b := make([]byte, 32)
+		rand.Read(b)
+		slotID = hex.EncodeToString(b)
+	}
 	err = slotsClient.Create(slotID, blockAddress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to allocate slot: %v\n", err)
@@ -83,6 +99,21 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	fmt.Printf("Allocated new slot: %s\n", slotID)
+
+	if *protectedFlag {
+		keysDir, err := config.KeysDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to locate keys directory: %v\n", err)
+		} else {
+			keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+			err = os.WriteFile(keyPath, privKey, 0600)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to save private key to %s: %v\n", keyPath, err)
+			} else {
+				fmt.Printf("Private key securely saved to: %s\n", keyPath)
+			}
+		}
+	}
 
 	if *nameFlag != "" {
 		namesID, err := dClient.Find("names-v1", 1)

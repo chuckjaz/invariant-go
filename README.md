@@ -65,6 +65,7 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 
 - `start`: Start services locally defined in a YAML configuration file.
 - `slot`: Allocate a new slot from the slots service.
+  - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
 - `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading).
 - `upload`: Upload a local directory to invariant storage as a file tree.
