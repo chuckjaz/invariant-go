@@ -53,11 +53,19 @@ type Files interface {
 	Sync(ctx context.Context, nodeID uint64, wait bool) error
 }
 
+// Layer defines a composed filetree tier with inclusion/exclusion rules.
+type Layer struct {
+	RootLink content.ContentLink
+	Includes []string
+	Excludes []string
+}
+
 // Options configuring the internal Files service.
 type Options struct {
 	Slots            slots.Slots
 	Storage          storage.Storage
 	RootLink         content.ContentLink
+	Layers           []Layer
 	AutoSyncTimeout  time.Duration
 	SlotPollInterval time.Duration
 	WriterOptions    content.WriterOptions

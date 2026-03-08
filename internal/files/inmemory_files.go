@@ -27,7 +27,7 @@ type InMemoryFiles struct {
 
 	dirtyNodes map[uint64]bool
 
-	lastSlotAddress string
+	lastSlotAddresses map[int]string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -47,6 +47,9 @@ type Node struct {
 	Type       string
 
 	Content content.ContentLink
+
+	LayerContents   map[int]content.ContentLink
+	LayerMembership map[int]bool
 
 	Children map[string]uint64
 	Target   string
@@ -68,40 +71,72 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 		opts.SlotPollInterval = 5 * time.Minute
 	}
 
+	// Migrate singular root into first layer
+	if len(opts.Layers) == 0 && opts.RootLink.Address != "" {
+		opts.Layers = append(opts.Layers, Layer{
+			RootLink: opts.RootLink,
+		})
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &InMemoryFiles{
-		opts:       opts,
-		nodes:      make(map[uint64]*Node),
-		root:       1,
-		next:       2,
-		dirtyNodes: make(map[uint64]bool),
-		ctx:        ctx,
-		cancel:     cancel,
+		opts:              opts,
+		nodes:             make(map[uint64]*Node),
+		root:              1,
+		next:              2,
+		dirtyNodes:        make(map[uint64]bool),
+		lastSlotAddresses: make(map[int]string),
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 
 	now := uint64(time.Now().Unix())
-	rootNode := &Node{
-		ID:         1,
-		Name:       "",
-		Kind:       filetree.DirectoryKind,
-		Parents:    make(map[uint64]bool),
-		CreateTime: &now,
-		ModifyTime: &now,
-		Content:    opts.RootLink,
-		Children:   make(map[string]uint64),
-		IsLoaded:   false,
+
+	membership := make(map[int]bool)
+	contents := make(map[int]content.ContentLink)
+	loaded := true
+
+	for i, l := range opts.Layers {
+		membership[i] = true
+		contents[i] = l.RootLink
+		if l.RootLink.Address != "" {
+			loaded = false
+		}
 	}
 
-	if opts.RootLink.Address == "" {
-		rootNode.IsLoaded = true
+	if len(opts.Layers) == 0 {
+		loaded = true
+	}
+
+	rootNode := &Node{
+		ID:              1,
+		Name:            "",
+		Kind:            filetree.DirectoryKind,
+		Parents:         make(map[uint64]bool),
+		CreateTime:      &now,
+		ModifyTime:      &now,
+		Content:         opts.RootLink,
+		LayerContents:   contents,
+		LayerMembership: membership,
+		Children:        make(map[string]uint64),
+		IsLoaded:        loaded,
 	}
 
 	s.nodes[1] = rootNode
 
 	go s.autoSyncLoop()
-	if opts.Slots != nil && opts.RootLink.Slot {
-		go s.pollSlotLoop()
+	if opts.Slots != nil {
+		pollSlots := false
+		for _, l := range opts.Layers {
+			if l.RootLink.Slot {
+				pollSlots = true
+				break
+			}
+		}
+		if pollSlots || opts.RootLink.Slot {
+			go s.pollSlotLoop()
+		}
 	}
 
 	return s, nil
@@ -133,7 +168,10 @@ func (s *InMemoryFiles) markDirty(id uint64) {
 }
 
 func (s *InMemoryFiles) isWritable() bool {
-	return s.opts.Slots != nil && s.opts.RootLink.Slot
+	if s.opts.Slots == nil || len(s.opts.Layers) == 0 {
+		return false
+	}
+	return s.opts.Layers[0].RootLink.Slot
 }
 
 func (s *InMemoryFiles) ensureLoaded(id uint64) error {
@@ -150,64 +188,121 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 		return nil
 	}
 
-	if node.Content.Address == "" {
+	// For legacy support when nodes were not layer-addressed explicitly
+	if len(node.LayerMembership) == 0 && node.Content.Address == "" {
 		node.IsLoaded = true
 		return nil
 	}
 
-	reader, err := content.Read(node.Content, s.opts.Storage, s.opts.Slots)
-	if err != nil {
-		return fmt.Errorf("failed to create reader for directory %d: %w", id, err)
-	}
-	defer reader.Close()
-
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %d content: %w", id, err)
-	}
-
-	var d filetree.Directory
-	if err := json.Unmarshal(data, &d); err != nil {
-		return fmt.Errorf("failed to unmarshal directory %d content: %w", id, err)
-	}
-
-	for _, entry := range d {
-		childID := s.getNextID()
-		childNode := &Node{
-			ID:      childID,
-			Name:    entry.GetName(),
-			Kind:    entry.GetKind(),
-			Parents: map[uint64]bool{id: true},
+	// We load each layer's directory content that this node belongs to
+	for layerIdx := range node.LayerMembership {
+		contentLink, ok := node.LayerContents[layerIdx]
+		if !ok || contentLink.Address == "" {
+			continue // This layer might not have this directory instantiated remotely yet
 		}
 
-		switch e := entry.(type) {
-		case *filetree.FileEntry:
-			childNode.CreateTime = e.CreateTime
-			childNode.ModifyTime = e.ModifyTime
-			childNode.Mode = e.Mode
-			childNode.Content = e.Content
-			childNode.Size = e.Size
-			childNode.Type = e.Type
-		case *filetree.DirectoryEntry:
-			childNode.CreateTime = e.CreateTime
-			childNode.ModifyTime = e.ModifyTime
-			childNode.Mode = e.Mode
-			childNode.Content = e.Content
-			childNode.Size = e.Size
-			childNode.Children = make(map[string]uint64)
-		case *filetree.SymbolicLinkEntry:
-			childNode.CreateTime = e.CreateTime
-			childNode.ModifyTime = e.ModifyTime
-			childNode.Mode = e.Mode
-			childNode.Target = e.Target
+		reader, err := content.Read(contentLink, s.opts.Storage, s.opts.Slots)
+		if err != nil {
+			return fmt.Errorf("failed to create reader for directory %d layer %d: %w", id, layerIdx, err)
 		}
 
-		s.nodes[childID] = childNode
-		node.Children[childNode.Name] = childID
+		data, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read directory %d content layer %d: %w", id, layerIdx, err)
+		}
+
+		var d filetree.Directory
+		if err := json.Unmarshal(data, &d); err != nil {
+			return fmt.Errorf("failed to unmarshal directory %d content layer %d: %w", id, layerIdx, err)
+		}
+
+		for _, entry := range d {
+			name := entry.GetName()
+			var childNode *Node
+
+			// Type switch to safely extract concrete content links from interface definitions
+			var entryContent content.ContentLink
+			switch e := entry.(type) {
+			case *filetree.FileEntry:
+				entryContent = e.Content
+			case *filetree.DirectoryEntry:
+				entryContent = e.Content
+			}
+
+			// Check if another layer already generated this child node here
+			if existingID, exists := node.Children[name]; exists {
+				childNode = s.nodes[existingID]
+				childNode.LayerMembership[layerIdx] = true
+
+				// Keep reference to this layer's content link.
+				if childNode.LayerContents == nil {
+					childNode.LayerContents = make(map[int]content.ContentLink)
+				}
+				childNode.LayerContents[layerIdx] = entryContent
+				continue
+			}
+
+			childID := s.getNextID()
+			childNode = &Node{
+				ID:              childID,
+				Name:            name,
+				Kind:            entry.GetKind(),
+				Parents:         map[uint64]bool{id: true},
+				LayerMembership: map[int]bool{layerIdx: true},
+				LayerContents:   map[int]content.ContentLink{layerIdx: entryContent},
+			}
+
+			switch e := entry.(type) {
+			case *filetree.FileEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Content = e.Content // Legacy compat fallback
+				childNode.Size = e.Size
+				childNode.Type = e.Type
+			case *filetree.DirectoryEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Content = e.Content // Legacy compat fallback
+				childNode.Size = e.Size
+				childNode.Children = make(map[string]uint64)
+			case *filetree.SymbolicLinkEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Target = e.Target
+			}
+
+			s.nodes[childID] = childNode
+			node.Children[name] = childID
+		}
 	}
 
 	node.IsLoaded = true
 	return nil
+}
+
+func (s *InMemoryFiles) getFullPath(id uint64) string {
+	if id == 1 {
+		return "" // Root
+	}
+
+	node, ok := s.nodes[id]
+	if !ok || len(node.Parents) == 0 {
+		return node.Name
+	}
+
+	// Assuming a single dominant parent for simple path resolution
+	for parentID := range node.Parents {
+		parentPath := s.getFullPath(parentID)
+		if parentPath == "" {
+			return node.Name
+		}
+		return parentPath + "/" + node.Name
+	}
+	return node.Name
 }
 
 func (s *InMemoryFiles) deleteNodeRecursively(id uint64, parentID uint64) {
@@ -246,13 +341,57 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 	childID := s.getNextID()
 	now := uint64(time.Now().Unix())
 
+	layerMembership := make(map[int]bool)
+	childPath := s.getFullPath(parentID)
+	if childPath == "" {
+		childPath = name
+	} else {
+		childPath = childPath + "/" + name
+	}
+
+	for i, layer := range s.opts.Layers {
+		isDir := kind == filetree.DirectoryKind
+
+		included := len(layer.Includes) == 0
+		if !included {
+			included = filetree.IgnoreRules(layer.Includes).Matches(childPath, isDir)
+		}
+
+		if included && len(layer.Excludes) > 0 {
+			if filetree.IgnoreRules(layer.Excludes).Matches(childPath, isDir) {
+				included = false
+			}
+		}
+
+		if included {
+			layerMembership[i] = true
+
+			// Implicitly include parent directories
+			currParent := parentNode
+			currID := parentID
+			for currID != 1 && !currParent.LayerMembership[i] {
+				currParent.LayerMembership[i] = true
+				s.markDirty(currID)
+
+				// Grab first parent
+				for pID := range currParent.Parents {
+					currID = pID
+					currParent = s.nodes[currID]
+					break
+				}
+			}
+		}
+	}
+
 	childNode := &Node{
-		ID:         childID,
-		Name:       name,
-		Kind:       kind,
-		Parents:    map[uint64]bool{parentID: true},
-		CreateTime: &now,
-		ModifyTime: &now,
+		ID:              childID,
+		Name:            name,
+		Kind:            kind,
+		Parents:         map[uint64]bool{parentID: true},
+		CreateTime:      &now,
+		ModifyTime:      &now,
+		LayerMembership: layerMembership,
+		LayerContents:   make(map[int]content.ContentLink),
 	}
 
 	switch kind {
@@ -820,43 +959,49 @@ func (s *InMemoryFiles) pollSlot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	address, err := s.opts.Slots.Get(s.opts.RootLink.Address)
-	if err != nil {
-		return
+	for i, l := range s.opts.Layers {
+		if !l.RootLink.Slot {
+			continue
+		}
+
+		address, err := s.opts.Slots.Get(l.RootLink.Address)
+		if err != nil {
+			continue
+		}
+
+		if address == s.lastSlotAddresses[i] || address == s.nodes[1].LayerContents[i].Address {
+			continue
+		}
+
+		newRootLink := l.RootLink
+		newRootLink.Address = address
+
+		reader, err := content.Read(newRootLink, s.opts.Storage, s.opts.Slots)
+		if err != nil {
+			continue
+		}
+
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			continue
+		}
+
+		var d filetree.Directory
+		if err := json.Unmarshal(data, &d); err != nil {
+			continue
+		}
+
+		remoteEntries := make(map[string]filetree.Entry)
+		for _, entry := range d {
+			remoteEntries[entry.GetName()] = entry
+		}
+
+		s.mergeRemoteIntoLocal(1, remoteEntries, i)
+		s.lastSlotAddresses[i] = address
 	}
-
-	if address == s.lastSlotAddress || address == s.nodes[1].Content.Address {
-		return
-	}
-
-	newRootLink := s.opts.RootLink
-	newRootLink.Address = address
-
-	reader, err := content.Read(newRootLink, s.opts.Storage, s.opts.Slots)
-	if err != nil {
-		return
-	}
-
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return
-	}
-
-	var d filetree.Directory
-	if err := json.Unmarshal(data, &d); err != nil {
-		return
-	}
-
-	remoteEntries := make(map[string]filetree.Entry)
-	for _, entry := range d {
-		remoteEntries[entry.GetName()] = entry
-	}
-
-	s.mergeRemoteIntoLocal(1, remoteEntries)
-	s.lastSlotAddress = address
 }
 
-func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[string]filetree.Entry) {
+func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[string]filetree.Entry, layerIdx int) {
 	localNode, ok := s.nodes[localID]
 	if !ok || localNode.Kind != filetree.DirectoryKind {
 		return
@@ -867,18 +1012,26 @@ func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[s
 	}
 
 	for name, childID := range localNode.Children {
-		if _, exists := remoteEntries[name]; !exists {
-			if !s.nodes[childID].IsDirty {
-				delete(localNode.Children, name)
-				s.markDirty(localID)
-				s.deleteNodeRecursively(childID, localID)
+		childNode := s.nodes[childID]
+		// If child belongs to this layer and remote doesn't have it, remove it
+		if childNode.LayerMembership[layerIdx] {
+			if _, exists := remoteEntries[name]; !exists {
+				if !childNode.IsDirty {
+					delete(childNode.LayerMembership, layerIdx)
+					if len(childNode.LayerMembership) == 0 {
+						delete(localNode.Children, name)
+						s.deleteNodeRecursively(childID, localID)
+					}
+					s.markDirty(localID)
+				}
 			}
 		}
 	}
 
-	for name, _ := range remoteEntries {
-		_ = name
-	}
+	// For pulling down newly added entries dynamically, we'd theoretically construct new Nodes
+	// based off remote properties matching `Layer.Includes` rules here if we wished to deeply implement
+	// reactive layered synchronization from remote peers. For now we only implement polling to avoid
+	// deleting explicitly layered entities.
 }
 
 func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
@@ -898,75 +1051,92 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 			}
 		}
 
-		var entries filetree.Directory
-		for name, childID := range node.Children {
-			child := s.nodes[childID]
+		// Write a variant of the directory for each layer the directory belongs to.
+		for layerIdx := range node.LayerMembership {
+			var entries filetree.Directory
+			for name, childID := range node.Children {
+				child := s.nodes[childID]
+				if !child.LayerMembership[layerIdx] {
+					continue
+				}
 
-			switch child.Kind {
-			case filetree.FileKind:
-				entries = append(entries, &filetree.FileEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.FileKind,
-						Name:       name,
-						CreateTime: child.CreateTime,
-						ModifyTime: child.ModifyTime,
-						Mode:       child.Mode,
-					},
-					Content: child.Content,
-					Size:    child.Size,
-					Type:    child.Type,
-				})
-			case filetree.DirectoryKind:
-				entries = append(entries, &filetree.DirectoryEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.DirectoryKind,
-						Name:       name,
-						CreateTime: child.CreateTime,
-						ModifyTime: child.ModifyTime,
-						Mode:       child.Mode,
-					},
-					Content: child.Content,
-					Size:    child.Size,
-				})
-			case filetree.SymbolicLinkKind:
-				entries = append(entries, &filetree.SymbolicLinkEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.SymbolicLinkKind,
-						Name:       name,
-						CreateTime: child.CreateTime,
-						ModifyTime: child.ModifyTime,
-						Mode:       child.Mode,
-					},
-					Target: child.Target,
-				})
+				switch child.Kind {
+				case filetree.FileKind:
+					entries = append(entries, &filetree.FileEntry{
+						BaseEntry: filetree.BaseEntry{
+							Kind:       filetree.FileKind,
+							Name:       name,
+							CreateTime: child.CreateTime,
+							ModifyTime: child.ModifyTime,
+							Mode:       child.Mode,
+						},
+						Content: child.LayerContents[layerIdx], // Use layer specific content if exists
+						Size:    child.Size,
+						Type:    child.Type,
+					})
+					// Fallback for flat files without divergence
+					if child.LayerContents[layerIdx].Address == "" && child.Content.Address != "" {
+						last := entries[len(entries)-1].(*filetree.FileEntry)
+						last.Content = child.Content
+					}
+				case filetree.DirectoryKind:
+					entries = append(entries, &filetree.DirectoryEntry{
+						BaseEntry: filetree.BaseEntry{
+							Kind:       filetree.DirectoryKind,
+							Name:       name,
+							CreateTime: child.CreateTime,
+							ModifyTime: child.ModifyTime,
+							Mode:       child.Mode,
+						},
+						Content: child.LayerContents[layerIdx],
+						Size:    child.Size, // Size is basically approximate for directories
+					})
+				case filetree.SymbolicLinkKind:
+					entries = append(entries, &filetree.SymbolicLinkEntry{
+						BaseEntry: filetree.BaseEntry{
+							Kind:       filetree.SymbolicLinkKind,
+							Name:       name,
+							CreateTime: child.CreateTime,
+							ModifyTime: child.ModifyTime,
+							Mode:       child.Mode,
+						},
+						Target: child.Target,
+					})
+				}
 			}
-		}
 
-		data, err := entries.MarshalJSON()
-		if err != nil {
-			return err
-		}
+			data, err := entries.MarshalJSON()
+			if err != nil {
+				return err
+			}
 
-		opts := s.opts.WriterOptions
-		if id == 1 {
-			opts = applyTransformsToOptions(s.opts.RootLink.Transforms, opts)
-		}
+			opts := s.opts.WriterOptions
+			if id == 1 {
+				opts = applyTransformsToOptions(s.opts.Layers[layerIdx].RootLink.Transforms, opts)
+			}
 
-		link, err := content.Write(bytes.NewReader(data), s.opts.Storage, opts)
-		if err != nil {
-			return err
-		}
+			link, err := content.Write(bytes.NewReader(data), s.opts.Storage, opts)
+			if err != nil {
+				return err
+			}
 
-		node.Content = link
+			node.LayerContents[layerIdx] = link
+			node.Content = link // Maintain legacy backward compat interface fallback
+		}
 	}
 
 	node.IsDirty = false
 	delete(s.dirtyNodes, id)
 
-	if id == 1 && s.opts.Slots != nil && s.opts.RootLink.Slot {
-		err := s.opts.Slots.Update(s.opts.RootLink.Address, node.Content.Address, s.lastSlotAddress)
-		if err == nil {
-			s.lastSlotAddress = node.Content.Address
+	if id == 1 && s.opts.Slots != nil {
+		for layerIdx := range node.LayerMembership {
+			l := s.opts.Layers[layerIdx]
+			if l.RootLink.Slot {
+				err := s.opts.Slots.Update(l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx])
+				if err == nil {
+					s.lastSlotAddresses[layerIdx] = node.LayerContents[layerIdx].Address
+				}
+			}
 		}
 	}
 

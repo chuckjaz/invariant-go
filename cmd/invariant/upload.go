@@ -16,9 +16,7 @@ import (
 	"invariant/internal/storage"
 )
 
-type ignoreRules []string
-
-func parseIgnoreFile(path string) (ignoreRules, error) {
+func parseIgnoreFile(path string) (filetree.IgnoreRules, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -37,34 +35,6 @@ func parseIgnoreFile(path string) (ignoreRules, error) {
 		rules = append(rules, line)
 	}
 	return rules, nil
-}
-
-func (ir ignoreRules) matches(path string, isDir bool) bool {
-	base := filepath.Base(path)
-	if base == ".invariant" {
-		return true
-	}
-	if ir != nil && base == ".git" {
-		return true
-	}
-
-	for _, rule := range ir {
-		// Basic glob match against the base name
-		if matched, _ := filepath.Match(rule, base); matched {
-			return true
-		}
-		// Match directory trailing slashes
-		if isDir && strings.HasSuffix(rule, "/") {
-			if matched, _ := filepath.Match(strings.TrimSuffix(rule, "/"), base); matched {
-				return true
-			}
-		}
-		// Also match exact paths relative to root if it contains a slash (simplification)
-		if matched, _ := filepath.Match(rule, path); matched {
-			return true
-		}
-	}
-	return false
 }
 
 func runUpload(globalCfg *config.InvariantConfig, args []string) {
@@ -141,7 +111,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("%s\n", rootEntry.Content.Address)
 }
 
-func processDirectory(rootPath, currentPath string, store storage.Storage, rules ignoreRules) (*filetree.DirectoryEntry, error) {
+func processDirectory(rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules) (*filetree.DirectoryEntry, error) {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err
@@ -152,7 +122,7 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 	for _, d := range entries {
 		relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
 
-		if rules.matches(relPath, d.IsDir()) {
+		if rules.Matches(relPath, d.IsDir()) {
 			continue
 		}
 

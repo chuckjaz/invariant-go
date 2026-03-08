@@ -1,0 +1,111 @@
+package files
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"invariant/internal/content"
+	"invariant/internal/filetree"
+	"invariant/internal/slots"
+	"invariant/internal/storage"
+)
+
+func TestFilesService_LayeredRouting(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	slotsSvc := slots.NewMemorySlots("test-slots")
+
+	ctx := context.Background()
+
+	opts := Options{
+		Storage:       store,
+		Slots:         slotsSvc,
+		WriterOptions: content.WriterOptions{},
+		Layers: []Layer{
+			{
+				Includes: []string{}, // Match all unless excluded
+				Excludes: []string{"secrets/", "*.tmp"},
+				RootLink: content.ContentLink{Slot: true},
+			},
+			{
+				Includes: []string{"secrets/"}, // Only match secrets
+				Excludes: []string{},
+				RootLink: content.ContentLink{Slot: true},
+			},
+		},
+	}
+
+	fs, err := NewInMemoryFiles(opts)
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// 1: Write public file
+	err = fs.CreateEntry(ctx, 1, "hello.txt", filetree.FileKind, "", nil, strings.NewReader("public content"))
+	if err != nil {
+		t.Fatalf("Failed creating public file: %v", err)
+	}
+
+	// 2: Write temporary file (should go to neither layer or layer 0 depending on defaults if not strictly bounded, but ideally layer 0 without sync visibility or rejected. Actually our logic creates it in memory but doesn't map it to a layer if both exclude/not-include it)
+	err = fs.CreateEntry(ctx, 1, "test.tmp", filetree.FileKind, "", nil, strings.NewReader("temp content"))
+	if err != nil {
+		t.Fatalf("Failed creating temp file: %v", err)
+	}
+
+	// 3: Create 'secrets' directory
+	err = fs.CreateEntry(ctx, 1, "secrets", filetree.DirectoryKind, "", nil, nil)
+	if err != nil {
+		t.Fatalf("Failed creating secrets dir: %v", err)
+	}
+
+	// Lookup secrets to get ID
+	info, err := fs.Lookup(ctx, 1, "secrets")
+	if err != nil {
+		t.Fatalf("Failed looking up secrets dir: %v", err)
+	}
+
+	// 4: Write protected secret inside the secrets directory
+	err = fs.CreateEntry(ctx, info.Node, "key.pem", filetree.FileKind, "", nil, strings.NewReader("secret key data"))
+	if err != nil {
+		t.Fatalf("Failed creating secret key file: %v", err)
+	}
+
+	// Sync
+	err = fs.Sync(ctx, 1, true)
+	if err != nil {
+		t.Fatalf("Failed to sync root: %v", err)
+	}
+
+	// Now check the internal nodes for LayerMembership to verify our routing worked.
+	internalFs := fs
+	internalFs.mu.RLock()
+	defer internalFs.mu.RUnlock()
+
+	verifyLayer := func(name string, expectedLayer0 bool, expectedLayer1 bool) {
+		t.Helper()
+		var found bool
+		for _, node := range internalFs.nodes {
+			if node.Name == name {
+				found = true
+				if node.LayerMembership[0] != expectedLayer0 {
+					t.Errorf("Node %q Layer 0 membership mismatch. Expected: %v, Got: %v", name, expectedLayer0, node.LayerMembership[0])
+				}
+				if node.LayerMembership[1] != expectedLayer1 {
+					t.Errorf("Node %q Layer 1 membership mismatch. Expected: %v, Got: %v", name, expectedLayer1, node.LayerMembership[1])
+				}
+			}
+		}
+		if !found {
+			t.Errorf("Node %q not found in internal nodes", name)
+		}
+	}
+
+	verifyLayer("hello.txt", true, false)
+	verifyLayer("test.tmp", false, false)
+	verifyLayer("secrets", false, true)
+	verifyLayer("key.pem", false, true)
+
+	// Ensure the parent is implicitly registered on layer 1 since the secret is inside it
+	// Actually root (node ID 1) layer membership semantics aren't mapped via node.LayerMembership
+	// typically, only children, but we enforce parent linkage internally so layers correctly link.
+}
