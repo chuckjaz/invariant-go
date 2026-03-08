@@ -30,8 +30,9 @@ The storage service ([protocol description](docs/Storage.md)) is responsible for
 go run ./cmd/storage -port 3000
 
 # Run with persistent nested file system blocks and register with discovery & distribute services
-go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -has has-service-id
+go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -has notify-service-id
 ```
+*(Note: The `-has` flag points to IDs implementing the Notify protocol.)*
 
 ### Distribute Service
 The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication logic. It can pull available names/IDs from the discovery service.
@@ -44,7 +45,7 @@ go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003 -name d
 ```
 
 ### Finder Service
-The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing logic.
+The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing logic, interacting via the Peer protocol.
 ```bash
 # Start a standalone finder
 go run ./cmd/finder -port 3002
@@ -53,8 +54,22 @@ go run ./cmd/finder -port 3002
 go run ./cmd/finder -port 3002 -discovery http://localhost:3003
 ```
 
-### Invariant Utility (Testing Orchestrator & CLI)
-The `invariant` command lets you execute multiple services governed by a single YAML configuration file, as well as interact with the cluster (e.g., allocating slots). It is **not** an industrial-strength orchestrator, but rather a utility designed locally for prototyping and testing.
+### Slots Service
+A service to allocate and manage mutable slots.
+```bash
+go run ./cmd/slots -port 3004 -discovery http://localhost:3003
+```
+
+### Invariant CLI Utility
+The `invariant` utility is the main client and orchestrator for the system. It reads global configuration from `~/.invariant` and provides subcommands for cluster interaction:
+
+- `start`: Start services locally defined in a YAML configuration file.
+- `slot`: Allocate a new slot from the slots service.
+- `name`: Register a logical name to a slot.
+- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading).
+- `upload`: Upload a local directory to invariant storage as a file tree.
+- `files`: Manage and interact with files backed by AggregateClient storage.
+- `print`: Print a block's contents to standard output.
 
 ```bash
 # Start services defined in services.yaml
