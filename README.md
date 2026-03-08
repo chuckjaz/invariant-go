@@ -68,6 +68,8 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 - `name`: Register a logical name to a slot.
 - `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading).
 - `upload`: Upload a local directory to invariant storage as a file tree.
+  - Supports `--compress` and `--encrypt`.
+  - Supports `--key-policy` (e.g. `RandomPerBlock`, `RandomAllKey`, `Deterministic`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
 - `files`: Manage and interact with files backed by AggregateClient storage.
 - `print`: Print a block's contents to standard output.
 

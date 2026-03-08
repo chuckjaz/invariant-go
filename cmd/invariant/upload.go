@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,8 +44,12 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var compress bool
 	var encrypt bool
+	var keyPolicyStr string
+	var keyStr string
 	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
 	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
+	fsFlags.StringVar(&keyPolicyStr, "key-policy", "RandomPerBlock", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
+	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant upload [options] [directory]\n\n")
@@ -112,6 +117,35 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	}
 	if encrypt {
 		opts.EncryptAlgorithm = "aes-256-cbc"
+
+		switch keyPolicyStr {
+		case "RandomPerBlock":
+			opts.KeyPolicy = content.RandomPerBlock
+		case "RandomAllKey":
+			opts.KeyPolicy = content.RandomAllKey
+		case "Deterministic":
+			opts.KeyPolicy = content.Deterministic
+		case "SuppliedAllKey":
+			opts.KeyPolicy = content.SuppliedAllKey
+			if keyStr == "" {
+				fmt.Fprintf(os.Stderr, "Error: --key is required when --key-policy is SuppliedAllKey\n")
+				os.Exit(1)
+			}
+
+			importHex, err := hex.DecodeString(keyStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error parsing --key: %v\n", err)
+				os.Exit(1)
+			}
+			if len(importHex) != 32 {
+				fmt.Fprintf(os.Stderr, "Error: --key must be a 32-byte hex-encoded string (got %d bytes)\n", len(importHex))
+				os.Exit(1)
+			}
+			opts.SuppliedKey = importHex
+		default:
+			fmt.Fprintf(os.Stderr, "Error: unsupported key-policy '%s'\n", keyPolicyStr)
+			os.Exit(1)
+		}
 	}
 
 	rootEntry, err := processDirectory(absPath, absPath, storageClient, rules, opts)
