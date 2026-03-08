@@ -61,7 +61,7 @@ go run ./cmd/slots -port 3004 -discovery http://localhost:3003
 ```
 
 ### Invariant CLI Utility
-The `invariant` utility is the main client and orchestrator for the system. It reads global configuration from `~/.invariant` and provides subcommands for cluster interaction:
+The `invariant` utility is the main client and orchestrator for the system. It reads global configuration from `~/.invariant/config.yaml` and provides subcommands for cluster interaction:
 
 - `start`: Start services locally defined in a YAML configuration file.
 - `slot`: Allocate a new slot from the slots service.

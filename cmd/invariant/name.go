@@ -43,7 +43,7 @@ func runName(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if globalCfg == nil || globalCfg.Discovery == "" {
-		fmt.Fprintf(os.Stderr, "Discovery service URL is not configured. Please ensure ~/.invariant is valid with a discovery URL.\n")
+		fmt.Fprintf(os.Stderr, "Discovery service URL is not configured. Please ensure ~/.invariant/config.yaml is valid with a discovery URL.\n")
 		os.Exit(1)
 	}
 
