@@ -53,7 +53,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	var keyStr string
 	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
 	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
-	fsFlags.StringVar(&keyPolicyStr, "key-policy", "RandomPerBlock", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
+	fsFlags.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	fsFlags.Usage = func() {
