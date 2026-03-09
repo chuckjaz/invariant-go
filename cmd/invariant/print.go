@@ -1,14 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"invariant/internal/config"
+	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
@@ -41,11 +45,6 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	var dClient discovery.Discovery
 	dClient = discovery.NewClient(discoveryURL, nil)
 
-	resolved, err := discovery.ResolveName(dClient, targetAddr)
-	if err == nil && resolved != "" {
-		targetAddr = resolved
-	}
-
 	findService := func(kind string) string {
 		id, err := dClient.Find(kind, 1)
 		if err != nil {
@@ -63,9 +62,27 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	finderClient := finder.NewClient(finderAddr, nil)
 	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 
-	reader, ok := storageClient.Get(targetAddr)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Block not found: %s\n", targetAddr)
+	var link content.ContentLink
+	if strings.HasPrefix(strings.TrimSpace(targetAddr), "{") {
+		err := json.Unmarshal([]byte(targetAddr), &link)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: argument looks like JSON but failed to parse as ContentLink: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		resolved, err := discovery.ResolveName(dClient, targetAddr)
+		if err == nil && resolved != "" {
+			targetAddr = resolved
+		}
+		link.Address = targetAddr
+	}
+
+	slotsAddr := findService("slots-v1")
+	slotsClient := slots.NewClient(slotsAddr, nil)
+
+	reader, err := content.Read(link, storageClient, slotsClient)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Block not found or failed to read: %v\n", err)
 		os.Exit(1)
 	}
 	defer reader.Close()
