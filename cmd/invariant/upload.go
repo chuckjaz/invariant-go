@@ -14,6 +14,7 @@ import (
 	"invariant/internal/discovery"
 	"invariant/internal/filetree"
 	"invariant/internal/finder"
+	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
@@ -41,7 +42,9 @@ func parseIgnoreFile(path string) (filetree.IgnoreRules, error) {
 func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags := flag.NewFlagSet("upload", flag.ExitOnError)
 	var discoveryURL string
+	var slotID string
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	fsFlags.StringVar(&slotID, "slot", "", "Optional 32-byte hex Slot ID to update after successful upload")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
@@ -89,6 +92,34 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, nil)
 	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+
+	var previousAddress string
+	var privKeyHex []byte
+
+	if slotID != "" {
+		if len(slotID) != 64 {
+			fmt.Fprintf(os.Stderr, "Error: --slot must be a 64-character (32-byte) hex string\n")
+			os.Exit(1)
+		}
+
+		slotsAddr := findService("slots-v1")
+		slotsClient := slots.NewClient(slotsAddr, nil)
+
+		prev, err := slotsClient.Get(slotID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to fetch previous slot address for %s: %v\n", slotID, err)
+			os.Exit(1)
+		}
+		previousAddress = prev
+
+		keysDir, err := config.KeysDir()
+		if err == nil {
+			keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+			if data, err := os.ReadFile(keyPath); err == nil {
+				privKeyHex = data
+			}
+		}
+	}
 
 	absPath, err := filepath.Abs(dirPath)
 	if err != nil {
@@ -159,6 +190,32 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "Failed to marshal output: %v\n", err)
 		os.Exit(1)
 	}
+
+	if slotID != "" {
+		slotsAddr := findService("slots-v1")
+		slotsClient := slots.NewClient(slotsAddr, nil)
+
+		err = slotsClient.Update(slotID, rootEntry.Content.Address, previousAddress, privKeyHex)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to update slot: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Updated slot %s from %s to %s\n", slotID, previousAddress, rootEntry.Content.Address)
+
+		globalDir, err := config.ConfigDir()
+		if err == nil {
+			slotsDir := filepath.Join(globalDir, "slots")
+			os.MkdirAll(slotsDir, 0755)
+
+			prevPath := filepath.Join(slotsDir, fmt.Sprintf("%s.prev", slotID))
+			err = os.WriteFile(prevPath, []byte(previousAddress), 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to write previous value to %s: %v\n", prevPath, err)
+			}
+		}
+	}
+
 	fmt.Printf("%s\n", out)
 }
 
