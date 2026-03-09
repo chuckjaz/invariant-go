@@ -43,8 +43,10 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags := flag.NewFlagSet("upload", flag.ExitOnError)
 	var discoveryURL string
 	var slotID string
+	var prevFlag string
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	fsFlags.StringVar(&slotID, "slot", "", "Optional 32-byte hex Slot ID to update after successful upload")
+	fsFlags.StringVar(&prevFlag, "prev", "", "Optional 32-byte hex previous Slot address (required if not locally cached)")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
@@ -102,15 +104,22 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 			os.Exit(1)
 		}
 
-		slotsAddr := findService("slots-v1")
-		slotsClient := slots.NewClient(slotsAddr, nil)
-
-		prev, err := slotsClient.Get(slotID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to fetch previous slot address for %s: %v\n", slotID, err)
-			os.Exit(1)
+		globalDir, err := config.ConfigDir()
+		if err == nil {
+			prevPath := filepath.Join(globalDir, "slots", fmt.Sprintf("%s.prev", slotID))
+			if data, err := os.ReadFile(prevPath); err == nil {
+				previousAddress = strings.TrimSpace(string(data))
+			}
 		}
-		previousAddress = prev
+
+		if previousAddress == "" {
+			if prevFlag != "" {
+				previousAddress = prevFlag
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: previous slot address not found locally. Please provide it via --prev\n")
+				os.Exit(1)
+			}
+		}
 
 		keysDir, err := config.KeysDir()
 		if err == nil {
