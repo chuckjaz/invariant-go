@@ -16,6 +16,21 @@ import (
 	"invariant/internal/storage"
 )
 
+func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay time.Duration) (string, error) {
+	var id string
+	var err error
+	for i := 0; i < retries; i++ {
+		id, err = discovery.ResolveName(dClient, name)
+		if err == nil {
+			return id, nil
+		}
+		if i < retries-1 {
+			time.Sleep(delay)
+		}
+	}
+	return "", err
+}
+
 func main() {
 	var dir string
 	flag.StringVar(&dir, "dir", "", "Base directory for file system storage")
@@ -87,7 +102,7 @@ func main() {
 				continue
 			}
 
-			hid, err = discovery.ResolveName(dClient, hid)
+			hid, err = resolveWithRetry(dClient, hid, 5, 2*time.Second)
 			if err != nil {
 				log.Fatalf("Could not resolve notify name/id %s: %v", hid, err)
 				continue
@@ -112,7 +127,7 @@ func main() {
 		var distID string
 
 		// If it's a 64-character hex string, it's an ID. Otherwise, resolve it via names service.
-		distID, err = discovery.ResolveName(dClient, distributeArg)
+		distID, err = resolveWithRetry(dClient, distributeArg, 5, 2*time.Second)
 		if err != nil {
 			log.Fatalf("Warning: Could not resolve distribute name %v", err)
 		}

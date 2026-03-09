@@ -27,7 +27,7 @@ func (s *FinderServer) Handler() http.Handler {
 
 	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("GET /{address}", s.handleFind)
-	mux.HandleFunc("PUT /has/{id}", s.handleNotify)
+	mux.HandleFunc("PUT /notify/{id}", s.handleNotify)
 	mux.HandleFunc("PUT /peer/{id}", s.handlePeer)
 
 	return mux

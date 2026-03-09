@@ -39,7 +39,7 @@ func (c *Client) Notify(storageID string, addresses []string) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/has/%s", c.baseURL, storageID), bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/notify/%s", c.baseURL, storageID), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
