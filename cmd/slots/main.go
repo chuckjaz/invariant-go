@@ -36,12 +36,12 @@ func main() {
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
-	var hasIDs string
-	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol (e.g. finder)")
-	var hasBatchSize int
-	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of slot IDs to send per request")
-	var hasBatchDuration time.Duration
-	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new slot notifications")
+	var notifyIDs string
+	flag.StringVar(&notifyIDs, "notify", "", "Comma-separated list of IDs implementing the Notify protocol (e.g. finder)")
+	var notifyBatchSize int
+	flag.IntVar(&notifyBatchSize, "notify-batch-size", 10000, "Number of slot IDs to send per request")
+	var notifyBatchDuration time.Duration
+	flag.DurationVar(&notifyBatchDuration, "notify-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new slot notifications")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
@@ -96,33 +96,33 @@ func main() {
 
 	var notifyClients []slots.NotifyClient
 	if disc != nil {
-		for hid := range strings.SplitSeq(hasIDs, ",") {
-			hid = strings.TrimSpace(hid)
-			if hid == "" {
+		for nid := range strings.SplitSeq(notifyIDs, ",") {
+			nid = strings.TrimSpace(nid)
+			if nid == "" {
 				continue
 			}
 
 			// Resolve name to ID if it's not a hex ID
-			resolvedID, err := discovery.ResolveName(disc, hid)
+			resolvedID, err := discovery.ResolveName(disc, nid)
 			if err != nil {
-				log.Fatalf("Could not resolve has name/id %s: %v", hid, err)
+				log.Fatalf("Could not resolve notify name/id %s: %v", nid, err)
 				continue
 			}
 
 			desc, ok := disc.Get(resolvedID)
 			if !ok {
-				log.Fatalf("Could not find address for Has service %s", resolvedID)
+				log.Fatalf("Could not find address for Notify service %s", resolvedID)
 				continue
 			}
 
 			notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
 		}
-	} else if hasIDs != "" {
-		log.Fatalf("a discovery service is required to use the -has flag")
+	} else if notifyIDs != "" {
+		log.Fatalf("a discovery service is required to use the -notify flag")
 	}
 
 	if len(notifyClients) > 0 {
-		server.StartNotification(notifyClients, hasBatchSize, hasBatchDuration)
+		server.StartNotification(notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
 	log.Printf("Slots service (ID %s) listening on :%d...", s.ID(), actualPort)
