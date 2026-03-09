@@ -100,8 +100,12 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 	if slotID != "" {
 		if len(slotID) != 64 {
-			fmt.Fprintf(os.Stderr, "Error: --slot must be a 64-character (32-byte) hex string\n")
-			os.Exit(1)
+			resolved, err := discovery.ResolveName(dClient, slotID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: --slot must be a 64-character hex string or valid registered name (resolution failed: %v)\n", err)
+				os.Exit(1)
+			}
+			slotID = resolved
 		}
 
 		globalDir, err := config.ConfigDir()
