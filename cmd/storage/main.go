@@ -25,12 +25,12 @@ func main() {
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	var distributeArg string
 	flag.StringVar(&distributeArg, "distribute", "", "ID or Name of the distribute service to register with")
-	var hasIDs string
-	flag.StringVar(&hasIDs, "has", "", "Comma-separated list of IDs implementing the Has protocol")
-	var hasBatchSize int
-	flag.IntVar(&hasBatchSize, "has-batch-size", 10000, "Number of block addresses to send per request")
-	var hasBatchDuration time.Duration
-	flag.DurationVar(&hasBatchDuration, "has-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
+	var notifyIDs string
+	flag.StringVar(&notifyIDs, "notify", "", "Comma-separated list of IDs implementing the Notify protocol")
+	var notifyBatchSize int
+	flag.IntVar(&notifyBatchSize, "notify-batch-size", 10000, "Number of block addresses to send per request")
+	var notifyBatchDuration time.Duration
+	flag.DurationVar(&notifyBatchDuration, "notify-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var name string
@@ -81,7 +81,7 @@ func main() {
 
 	var notifyClients []storage.NotifyClient
 	if dClient != nil {
-		for hid := range strings.SplitSeq(hasIDs, ",") {
+		for hid := range strings.SplitSeq(notifyIDs, ",") {
 			hid = strings.TrimSpace(hid)
 			if hid == "" {
 				continue
@@ -89,13 +89,13 @@ func main() {
 
 			hid, err = discovery.ResolveName(dClient, hid)
 			if err != nil {
-				log.Fatalf("Could not resolve has name/id %s: %v", hid, err)
+				log.Fatalf("Could not resolve notify name/id %s: %v", hid, err)
 				continue
 			}
 
 			desc, ok := dClient.Get(hid)
 			if !ok {
-				log.Fatalf("Could not find address for Has service ID %s", hid)
+				log.Fatalf("Could not find address for Notify service ID %s", hid)
 				continue
 			}
 
@@ -133,7 +133,7 @@ func main() {
 	}
 
 	if len(notifyClients) > 0 {
-		server.StartNotification(notifyClients, hasBatchSize, hasBatchDuration)
+		server.StartNotification(notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
 	log.Printf("Listening on :%d...", actualPort)
