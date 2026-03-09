@@ -30,9 +30,9 @@ The storage service ([protocol description](docs/Storage.md)) is responsible for
 go run ./cmd/storage -port 3000
 
 # Run with persistent nested file system blocks and register with discovery & distribute services
-go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -has notify-service-id
+go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify notify-service-id
 ```
-*(Note: The `-has` flag points to IDs implementing the Notify protocol.)*
+*(Note: The `-notify` flag points to IDs implementing the Notify protocol.)*
 
 ### Distribute Service
 The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication logic. It can pull available names/IDs from the discovery service.
@@ -55,9 +55,9 @@ go run ./cmd/finder -port 3002 -discovery http://localhost:3003
 ```
 
 ### Slots Service
-A service to allocate and manage mutable slots.
+A service to allocate and manage mutable slots. It can also notify other services.
 ```bash
-go run ./cmd/slots -port 3004 -discovery http://localhost:3003
+go run ./cmd/slots -port 3004 -discovery http://localhost:3003 -notify notify-service-id
 ```
 
 ### Invariant CLI Utility
@@ -67,10 +67,12 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 - `slot`: Allocate a new slot from the slots service.
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
-- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading).
+- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading and name-to-address resolution).
 - `upload`: Upload a local directory to invariant storage as a file tree.
   - Supports `--compress` and `--encrypt`.
   - Supports `--key-policy` (e.g. `RandomPerBlock`, `RandomAllKey`, `Deterministic`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
+  - Supports `--slot <hex_id>` to automatically update a mutable slot to point to the new content tree on successful upload.
+  - Supports `--prev <hex_id>` to supply the parent payload state if the local slot cache (`~/.invariant/slots/`) is empty.
 - `files`: Manage and interact with files backed by AggregateClient storage.
 - `print`: Print a block's contents to standard output.
 
@@ -107,13 +109,13 @@ services:
     use: [discovery, distribute]
     args:
         dir: "*/storage-1"
-        has: "distribute-1"
+        notify: "distribute-1"
 
   - command: storage
     use: [discovery, distribute]
     args:
         dir: "*/storage-2"
-        has: "distribute-1"
+        notify: "distribute-1"
 ```
 
 ### Docker Compose
@@ -154,7 +156,7 @@ services:
 
   storage-1:
     build: .
-    command: ["./bin/storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-has", "distribute-1"]
+    command: ["./bin/storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
       - ./data/storage-1:/data/storage-1
     depends_on:
@@ -163,7 +165,7 @@ services:
 
   storage-2:
     build: .
-    command: ["./bin/storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-has", "distribute-1"]
+    command: ["./bin/storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
       - ./data/storage-2:/data/storage-2
     depends_on:
