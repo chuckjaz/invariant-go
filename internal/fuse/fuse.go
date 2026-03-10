@@ -3,7 +3,9 @@ package fuse
 import (
 	"context"
 	"io"
+	"os"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -192,12 +194,94 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	return fs.NewListDirStream(entries), 0
 }
 
+type fileHandle struct {
+	mu    sync.Mutex
+	node  *Node
+	f     *os.File
+	dirty bool
+}
+
+var _ = (fs.FileReader)((*fileHandle)(nil))
+var _ = (fs.FileWriter)((*fileHandle)(nil))
+var _ = (fs.FileFlusher)((*fileHandle)(nil))
+var _ = (fs.FileReleaser)((*fileHandle)(nil))
+
+func (fh *fileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+	if fh.f != nil {
+		n, err := fh.f.ReadAt(dest, off)
+		if err != nil && err != io.EOF {
+			return nil, syscall.EIO
+		}
+		return fuse.ReadResultData(dest[:n]), 0
+	}
+	return fh.node.Read(ctx, nil, dest, off)
+}
+
+func (fh *fileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+
+	if fh.f == nil {
+		f, err := os.CreateTemp("", "invariant-fuse-*")
+		if err != nil {
+			return 0, syscall.EIO
+		}
+		os.Remove(f.Name())
+		fh.f = f
+
+		reader, err := fh.node.filesrv.ReadFile(ctx, fh.node.nodeID, 0, 0)
+		if err == nil {
+			io.Copy(f, reader)
+			reader.Close()
+		}
+	}
+
+	_, err := fh.f.WriteAt(data, off)
+	if err != nil {
+		return 0, syscall.EIO
+	}
+	fh.dirty = true
+
+	return uint32(len(data)), 0
+}
+
+func (fh *fileHandle) Flush(ctx context.Context) syscall.Errno {
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+
+	if fh.f != nil && fh.dirty {
+		fh.f.Seek(0, io.SeekStart)
+		err := fh.node.filesrv.WriteFile(ctx, fh.node.nodeID, 0, false, fh.f)
+		if err != nil {
+			return syscall.EIO
+		}
+		fh.dirty = false
+	}
+	return 0
+}
+
+func (fh *fileHandle) Release(ctx context.Context) syscall.Errno {
+	fh.Flush(ctx)
+
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+	if fh.f != nil {
+		fh.f.Close()
+		fh.f = nil
+	}
+	return 0
+}
+
 func (n *Node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	// We don't need a custom file handle. NodeReader/NodeWriter handle data.
-	return nil, 0, 0
+	return &fileHandle{node: n}, 0, 0
 }
 
 func (n *Node) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	if fh, ok := f.(*fileHandle); ok {
+		return fh.Read(ctx, dest, off)
+	}
 	reader, err := n.filesrv.ReadFile(ctx, n.nodeID, off, int64(len(dest)))
 	if err != nil {
 		return nil, syscall.EIO
@@ -226,6 +310,9 @@ func (r *bytesReader) Read(p []byte) (n int, err error) {
 }
 
 func (n *Node) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (uint32, syscall.Errno) {
+	if fh, ok := f.(*fileHandle); ok {
+		return fh.Write(ctx, data, off)
+	}
 	err := n.filesrv.WriteFile(ctx, n.nodeID, off, false, &bytesReader{b: data})
 	if err != nil {
 		return 0, syscall.EIO
@@ -249,7 +336,9 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	smode := strconv.FormatUint(uint64(mode&07777), 8)
 	_, _ = n.filesrv.SetAttributes(ctx, out.Ino, files.EntryAttributes{Mode: &smode})
 
-	return inode, nil, 0, 0
+	fh := &fileHandle{node: inode.Operations().(*Node)}
+
+	return inode, fh, 0, 0
 }
 
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
