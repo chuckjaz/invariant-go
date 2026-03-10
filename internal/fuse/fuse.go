@@ -195,10 +195,12 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 type fileHandle struct {
-	mu    sync.Mutex
-	node  *Node
-	f     *os.File
-	dirty bool
+	mu           sync.Mutex
+	node         *Node
+	f            *os.File
+	dirty        bool
+	reader       io.ReadCloser
+	readerOffset int64
 }
 
 var _ = (fs.FileReader)((*fileHandle)(nil))
@@ -216,7 +218,42 @@ func (fh *fileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.Re
 		}
 		return fuse.ReadResultData(dest[:n]), 0
 	}
-	return fh.node.Read(ctx, nil, dest, off)
+
+	if fh.reader == nil {
+		r, err := fh.node.filesrv.ReadFile(ctx, fh.node.nodeID, 0, 0)
+		if err != nil {
+			return nil, syscall.EIO
+		}
+		fh.reader = r
+		fh.readerOffset = 0
+	}
+
+	if fh.readerOffset != off {
+		if seeker, ok := fh.reader.(io.Seeker); ok {
+			_, err := seeker.Seek(off, io.SeekStart)
+			if err != nil {
+				return nil, syscall.EIO
+			}
+			fh.readerOffset = off
+		} else {
+			fh.reader.Close()
+			r, err := fh.node.filesrv.ReadFile(ctx, fh.node.nodeID, off, 0)
+			if err != nil {
+				fh.reader = nil
+				return nil, syscall.EIO
+			}
+			fh.reader = r
+			fh.readerOffset = off
+		}
+	}
+
+	nread, err := io.ReadFull(fh.reader, dest)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, syscall.EIO
+	}
+	fh.readerOffset += int64(nread)
+
+	return fuse.ReadResultData(dest[:nread]), 0
 }
 
 func (fh *fileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
@@ -270,6 +307,10 @@ func (fh *fileHandle) Release(ctx context.Context) syscall.Errno {
 	if fh.f != nil {
 		fh.f.Close()
 		fh.f = nil
+	}
+	if fh.reader != nil {
+		fh.reader.Close()
+		fh.reader = nil
 	}
 	return 0
 }

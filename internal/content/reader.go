@@ -166,11 +166,61 @@ func (w *wrappedReadCloser) Close() error {
 }
 
 type blockListReader struct {
-	blocks      []BlockListItem
-	store       storage.Storage
-	slotService slots.Slots
-	current     io.ReadCloser
-	idx         int
+	blocks           []BlockListItem
+	store            storage.Storage
+	slotService      slots.Slots
+	current          io.ReadCloser
+	idx              int
+	intraBlockOffset int64
+}
+
+func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
+	if whence != io.SeekStart {
+		return 0, errors.New("only SeekStart is supported")
+	}
+
+	var currentOffset int64 = 0
+	var targetIdx int = 0
+
+	for i, b := range r.blocks {
+		if currentOffset+int64(b.Size) > offset {
+			targetIdx = i
+			break
+		}
+		currentOffset += int64(b.Size)
+	}
+
+	if targetIdx == len(r.blocks) {
+		// Seeking past the end
+		r.idx = len(r.blocks)
+		if r.current != nil {
+			r.current.Close()
+			r.current = nil
+		}
+		r.intraBlockOffset = 0
+		return offset, nil
+	}
+
+	// If we jump to a different block, close current.
+	if r.idx != targetIdx || r.current == nil {
+		if r.current != nil {
+			r.current.Close()
+			r.current = nil
+		}
+		r.idx = targetIdx
+	}
+
+	r.intraBlockOffset = offset - currentOffset
+
+	// If we stayed in the same block, but moved backward or forward?
+	// To be safe, if we are in the same block, we should probably reopen it to seek properly
+	// unless we implement a more complex skip. Let's just always reopen to keep it simple.
+	if r.current != nil {
+		r.current.Close()
+		r.current = nil
+	}
+
+	return offset, nil
 }
 
 func (r *blockListReader) Read(p []byte) (int, error) {
@@ -185,6 +235,14 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 				return 0, err
 			}
 			r.current = rc
+
+			if r.intraBlockOffset > 0 {
+				_, err := io.CopyN(io.Discard, r.current, r.intraBlockOffset)
+				r.intraBlockOffset = 0 // consumed
+				if err != nil {
+					return 0, err
+				}
+			}
 			r.idx++
 		}
 
@@ -213,6 +271,16 @@ type hashCheckerReader struct {
 	hasher   hash.Hash
 	expected string
 	err      error
+}
+
+func (r *hashCheckerReader) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := r.ReadCloser.(io.Seeker)
+	if !ok {
+		return 0, errors.New("underlying reader does not support Seek")
+	}
+	// Seeking invalidates the continuous stream hash check
+	r.expected = ""
+	return seeker.Seek(offset, whence)
 }
 
 func (r *hashCheckerReader) Read(p []byte) (int, error) {

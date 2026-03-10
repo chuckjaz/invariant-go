@@ -479,10 +479,18 @@ func (s *InMemoryFiles) ReadFile(ctx context.Context, nodeID uint64, offset, len
 	}
 
 	if offset > 0 {
-		_, err := io.CopyN(io.Discard, reader, offset)
-		if err != nil && err != io.EOF {
-			reader.Close()
-			return nil, err
+		if seeker, ok := reader.(io.Seeker); ok {
+			_, err := seeker.Seek(offset, io.SeekStart)
+			if err != nil {
+				reader.Close()
+				return nil, err
+			}
+		} else {
+			_, err := io.CopyN(io.Discard, reader, offset)
+			if err != nil && err != io.EOF {
+				reader.Close()
+				return nil, err
+			}
 		}
 	}
 

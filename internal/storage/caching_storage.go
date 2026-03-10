@@ -174,7 +174,7 @@ func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
 			destSize, hasSize := s.destination.Size(address)
 			if hasSize {
 				s.mu.Lock()
-				hasRoom := s.currentSize+destSize <= s.maxSize
+				hasRoom := destSize <= s.maxSize
 				s.mu.Unlock()
 
 				if hasRoom {

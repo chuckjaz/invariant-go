@@ -97,7 +97,9 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	var finalStorage storage.Storage = storageClient
 	if cacheSizeMB > 0 {
 		localStore := storage.NewInMemoryStorage()
-		finalStorage = storage.NewCachingStorage(localStore, storageClient, int64(cacheSizeMB)*1024*1024, 0, true)
+		maxSizeBytes := int64(cacheSizeMB) * 1024 * 1024
+		desiredSizeBytes := maxSizeBytes * 8 / 10
+		finalStorage = storage.NewCachingStorage(localStore, storageClient, maxSizeBytes, desiredSizeBytes, true)
 	}
 
 	opts := files.Options{
