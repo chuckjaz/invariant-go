@@ -124,15 +124,6 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 		return nil, syscall.ENOENT
 	}
 
-	childNode := NewNode(n.filesrv, info.Node)
-	inode := n.NewInode(ctx, childNode, fs.StableAttr{Ino: info.Node})
-
-	out.Ino = info.Node
-
-	if attrs.Size != nil {
-		out.Attr.Size = *attrs.Size
-	}
-
 	mode := uint32(0)
 	switch info.Kind {
 	case string(filetree.DirectoryKind):
@@ -152,6 +143,15 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 		} else {
 			mode |= 0644
 		}
+	}
+
+	childNode := NewNode(n.filesrv, info.Node)
+	inode := n.NewInode(ctx, childNode, fs.StableAttr{Ino: info.Node, Mode: mode})
+
+	out.Ino = info.Node
+
+	if attrs.Size != nil {
+		out.Attr.Size = *attrs.Size
 	}
 
 	out.Attr.Mode = mode
