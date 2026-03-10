@@ -240,6 +240,12 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 
 	var dir filetree.Directory
 
+	info, err := os.Stat(currentPath)
+	if err != nil {
+		return nil, err
+	}
+	ctime, mtime := getEntryTimes(info)
+
 	for _, d := range entries {
 		relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
 
@@ -260,10 +266,17 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 			if err != nil {
 				return nil, err
 			}
+			info, err := d.Info()
+			if err != nil {
+				return nil, err
+			}
+			symCtime, symMtime := getEntryTimes(info)
 			symlinkEntry := &filetree.SymbolicLinkEntry{
 				BaseEntry: filetree.BaseEntry{
-					Kind: filetree.SymbolicLinkKind,
-					Name: d.Name(),
+					Kind:       filetree.SymbolicLinkKind,
+					Name:       d.Name(),
+					CreateTime: symCtime,
+					ModifyTime: symMtime,
 				},
 				Target: target,
 			}
@@ -289,8 +302,10 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 
 	return &filetree.DirectoryEntry{
 		BaseEntry: filetree.BaseEntry{
-			Kind: filetree.DirectoryKind,
-			Name: filepath.Base(currentPath),
+			Kind:       filetree.DirectoryKind,
+			Name:       filepath.Base(currentPath),
+			CreateTime: ctime,
+			ModifyTime: mtime,
 		},
 		Content: link,
 		Size:    uint64(len(data)),
@@ -315,12 +330,15 @@ func processFile(filePath, name string, store storage.Storage, opts content.Writ
 	}
 
 	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
+	ctime, mtime := getEntryTimes(info)
 
 	return &filetree.FileEntry{
 		BaseEntry: filetree.BaseEntry{
-			Kind: filetree.FileKind,
-			Name: name,
-			Mode: &modeStr,
+			Kind:       filetree.FileKind,
+			Name:       name,
+			Mode:       &modeStr,
+			CreateTime: ctime,
+			ModifyTime: mtime,
 		},
 		Content: link,
 		Size:    uint64(info.Size()),

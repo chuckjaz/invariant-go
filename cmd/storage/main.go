@@ -19,7 +19,7 @@ import (
 func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay time.Duration) (string, error) {
 	var id string
 	var err error
-	for i := 0; i < retries; i++ {
+	for i := range retries {
 		id, err = discovery.ResolveName(dClient, name)
 		if err == nil {
 			return id, nil
