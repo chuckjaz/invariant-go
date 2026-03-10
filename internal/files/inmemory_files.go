@@ -1298,10 +1298,17 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 
 	membership := make(map[int]bool)
 	contents := make(map[int]content.ContentLink)
+	newLastSlotAddresses := make(map[int]string)
 	for i, l := range s.opts.Layers {
 		membership[i] = true
 		contents[i] = l.RootLink
+		if l.RootLink.Slot && s.opts.Slots != nil {
+			if addr, err := s.opts.Slots.Get(l.RootLink.Address); err == nil {
+				newLastSlotAddresses[i] = addr
+			}
+		}
 	}
+	s.lastSlotAddresses = newLastSlotAddresses
 
 	rootNode, ok := s.nodes[1]
 	if !ok {

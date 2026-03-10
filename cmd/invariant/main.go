@@ -13,6 +13,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  start    Start invariant services from configuration\n")
 	fmt.Fprintf(os.Stderr, "  slot     Allocate a new slot from the slots service\n")
 	fmt.Fprintf(os.Stderr, "  name     Register a name to a 32-byte hex value\n")
+	fmt.Fprintf(os.Stderr, "  lookup   Lookup a name and print the resolved address\n")
 	fmt.Fprintf(os.Stderr, "  mount    Mount the invariant file system\n")
 	fmt.Fprintf(os.Stderr, "  upload   Upload a local directory as a file tree\n")
 	fmt.Fprintf(os.Stderr, "  print    Print a block's contents to standard output\n")
@@ -37,6 +38,8 @@ func main() {
 		runSlot(cfg, os.Args[2:])
 	case "name":
 		runName(cfg, os.Args[2:])
+	case "lookup":
+		runLookup(cfg, os.Args[2:])
 	case "mount":
 		runMount(cfg, os.Args[2:])
 	case "upload":
