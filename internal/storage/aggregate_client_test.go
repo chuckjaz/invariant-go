@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -208,5 +209,51 @@ func TestAggregateClient_BadTransportHandling(t *testing.T) {
 
 	if count != 0 {
 		t.Errorf("expected bad node to be removed after write failure")
+	}
+}
+
+type mockSyncStorage struct {
+	*InMemoryStorage
+	syncCount int
+}
+
+func (m *mockSyncStorage) Sync(ctx context.Context) error {
+	m.syncCount++
+	return nil
+}
+
+func TestAggregateClient_Sync(t *testing.T) {
+	c := NewAggregateClient(nil, nil, 0, 10)
+
+	mock := &mockSyncStorage{InMemoryStorage: NewInMemoryStorage()}
+
+	c.liveMu.Lock()
+	c.liveServers["mock1"] = mock
+	c.liveIDs = []string{"mock1"}
+	c.liveMu.Unlock()
+
+	// Should not sync anything yet (no writes)
+	ctx := context.Background()
+	c.Sync(ctx)
+	if mock.syncCount != 0 {
+		t.Errorf("expected 0 syncs, got %d", mock.syncCount)
+	}
+
+	// Perform a write
+	_, err := c.Store(bytes.NewReader([]byte("test data")))
+	if err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+
+	// Now it should sync
+	c.Sync(ctx)
+	if mock.syncCount != 1 {
+		t.Errorf("expected 1 sync, got %d", mock.syncCount)
+	}
+
+	// Call again with no new writes, shouldn't sync mock again
+	c.Sync(ctx)
+	if mock.syncCount != 1 {
+		t.Errorf("expected still 1 sync, got %d", mock.syncCount)
 	}
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -173,5 +174,36 @@ func TestCachingStorageDelegateOnMax(t *testing.T) {
 	}
 	if !remote.Has(addrA) {
 		t.Errorf("Block A should be in remote storage due to active delegation")
+	}
+}
+
+func TestCachingStorageSync(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+
+	cs := NewCachingStorage(local, remote, 100, 50, false)
+	defer cs.Close()
+
+	// Store directly in local to simulate blocks that haven't been synced
+	addrA, _ := local.Store(strings.NewReader("block A"))
+	addrB, _ := local.Store(strings.NewReader("block B"))
+
+	ctx := context.Background()
+	if err := cs.Sync(ctx); err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	if !remote.Has(addrA) || !remote.Has(addrB) {
+		t.Errorf("Sync failed to upload blocks to destination")
+	}
+
+	// Double check destHas map
+	cs.destHasMu.RLock()
+	_, hasA := cs.destHas[addrA]
+	_, hasB := cs.destHas[addrB]
+	cs.destHasMu.RUnlock()
+
+	if !hasA || !hasB {
+		t.Errorf("Sync failed to mark blocks as present in destHas")
 	}
 }

@@ -1,6 +1,9 @@
 package storage
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 // Storage dictates the necessary requirements for standard invariant byte chunk blocks mapping
 type Storage interface {
@@ -9,6 +12,12 @@ type Storage interface {
 	Store(r io.Reader) (string, error)
 	StoreAt(address string, r io.Reader) (bool, error)
 	Size(address string) (int64, bool)
+}
+
+// SyncStorage is an optional interface allowing storage backends to persist metadata/data.
+type SyncStorage interface {
+	Storage
+	Sync(ctx context.Context) error
 }
 
 // ControlledStorage adds capabilities to iterate and subscribe to a Storage

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +63,9 @@ type AggregateClient struct {
 	lruMu     sync.Mutex
 	lruList   *list.List
 	lruMap    map[string]*list.Element // address -> *list.Element (holding blockLocation)
+
+	writtenMu      sync.Mutex
+	writtenServers map[string]struct{}
 }
 
 // NewAggregateClient creates a new Storage client that aggregates multiple services.
@@ -77,6 +81,7 @@ func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers,
 		maxBlocks:       maxBlocks,
 		lruList:         list.New(),
 		lruMap:          make(map[string]*list.Element),
+		writtenServers:  make(map[string]struct{}),
 	}
 }
 
@@ -384,6 +389,9 @@ func (c *AggregateClient) writeOperation(doOp func(client Storage) (any, error))
 		if ok {
 			res, errOp := doOp(client)
 			if errOp == nil {
+				c.writtenMu.Lock()
+				c.writtenServers[id] = struct{}{}
+				c.writtenMu.Unlock()
 				return res, nil
 			} else {
 				// Immediate removal on write error since we know it's a real failure.
@@ -429,5 +437,36 @@ func (c *AggregateClient) StoreAt(address string, r io.Reader) (bool, error) {
 	return success, nil
 }
 
+// Sync iterates over all servers modified since the last sync and calls their Sync method.
+func (c *AggregateClient) Sync(ctx context.Context) error {
+	c.writtenMu.Lock()
+	serversToSync := make([]string, 0, len(c.writtenServers))
+	for id := range c.writtenServers {
+		serversToSync = append(serversToSync, id)
+	}
+	// Clear the set of written servers
+	c.writtenServers = make(map[string]struct{})
+	c.writtenMu.Unlock()
+
+	var firstErr error
+
+	for _, id := range serversToSync {
+		c.liveMu.RLock()
+		client, ok := c.liveServers[id]
+		c.liveMu.RUnlock()
+
+		if ok {
+			if syncClient, isSync := client.(SyncStorage); isSync {
+				if err := syncClient.Sync(ctx); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+	}
+
+	return firstErr
+}
+
 // Assert that AggregateClient implements the Storage interface
 var _ Storage = (*AggregateClient)(nil)
+var _ SyncStorage = (*AggregateClient)(nil)

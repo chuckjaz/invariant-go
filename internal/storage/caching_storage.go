@@ -30,6 +30,9 @@ type CachingStorage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	evict  chan struct{}
+
+	destHasMu sync.RWMutex
+	destHas   map[string]struct{}
 }
 
 // Assert that CachingStorage implements the Storage interface
@@ -49,6 +52,7 @@ func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, de
 		ctx:           ctx,
 		cancel:        cancel,
 		evict:         make(chan struct{}, 1),
+		destHas:       make(map[string]struct{}),
 	}
 
 	cs.init()
@@ -156,7 +160,12 @@ func (s *CachingStorage) Has(address string) bool {
 		return true
 	}
 	if s.destination != nil {
-		return s.destination.Has(address)
+		if s.destination.Has(address) {
+			s.destHasMu.Lock()
+			s.destHas[address] = struct{}{}
+			s.destHasMu.Unlock()
+			return true
+		}
 	}
 	return false
 }
@@ -171,6 +180,10 @@ func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
 	if s.destination != nil {
 		rc, ok = s.destination.Get(address)
 		if ok {
+			s.destHasMu.Lock()
+			s.destHas[address] = struct{}{}
+			s.destHasMu.Unlock()
+
 			destSize, hasSize := s.destination.Size(address)
 			if hasSize {
 				s.mu.Lock()
@@ -209,7 +222,13 @@ func (s *CachingStorage) Size(address string) (int64, bool) {
 		return size, true
 	}
 	if s.destination != nil {
-		return s.destination.Size(address)
+		size, ok := s.destination.Size(address)
+		if ok {
+			s.destHasMu.Lock()
+			s.destHas[address] = struct{}{}
+			s.destHasMu.Unlock()
+		}
+		return size, ok
 	}
 	return 0, false
 }
@@ -259,7 +278,13 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		if s.delegateOnMax && s.destination != nil {
-			return s.destination.Store(r)
+			addr, err := s.destination.Store(r)
+			if err == nil {
+				s.destHasMu.Lock()
+				s.destHas[addr] = struct{}{}
+				s.destHasMu.Unlock()
+			}
+			return addr, err
 		}
 		return "", ErrMaxSizeExceeded
 	}
@@ -316,7 +341,13 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		if s.delegateOnMax && s.destination != nil {
-			return s.destination.StoreAt(address, r)
+			ok, err := s.destination.StoreAt(address, r)
+			if err == nil && ok {
+				s.destHasMu.Lock()
+				s.destHas[address] = struct{}{}
+				s.destHasMu.Unlock()
+			}
+			return ok, err
 		}
 		return false, ErrMaxSizeExceeded
 	}
@@ -394,7 +425,11 @@ func (s *CachingStorage) doEvict() {
 		// Found a candidate for eviction.
 		// Upload to destination if it doesn't have it.
 		if s.destination != nil {
-			if !s.destination.Has(addr) {
+			s.destHasMu.RLock()
+			_, hasDest := s.destHas[addr]
+			s.destHasMu.RUnlock()
+
+			if !hasDest && !s.destination.Has(addr) {
 				rc, ok := s.local.Get(addr)
 				if ok {
 					_, err := s.destination.StoreAt(addr, rc)
@@ -405,6 +440,9 @@ func (s *CachingStorage) doEvict() {
 						time.Sleep(1 * time.Second)
 						break
 					}
+					s.destHasMu.Lock()
+					s.destHas[addr] = struct{}{}
+					s.destHasMu.Unlock()
 				}
 			}
 		}
@@ -441,4 +479,61 @@ func (s *CachingStorage) doEvict() {
 			break
 		}
 	}
+}
+
+// Sync ensures that all blocks in the local storage have been propagated to the destination.
+func (s *CachingStorage) Sync(ctx context.Context) error {
+	if s.destination == nil {
+		return nil
+	}
+
+	for batch := range s.local.List(100) {
+		for _, addr := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			s.destHasMu.RLock()
+			_, hasDest := s.destHas[addr]
+			s.destHasMu.RUnlock()
+
+			if hasDest {
+				continue
+			}
+
+			if s.destination.Has(addr) {
+				s.destHasMu.Lock()
+				s.destHas[addr] = struct{}{}
+				s.destHasMu.Unlock()
+				continue
+			}
+
+			rc, ok := s.local.Get(addr)
+			if !ok {
+				continue
+			}
+
+			storeOk, err := s.destination.StoreAt(addr, rc)
+			rc.Close()
+
+			if err != nil {
+				return err
+			}
+			if storeOk {
+				s.destHasMu.Lock()
+				s.destHas[addr] = struct{}{}
+				s.destHasMu.Unlock()
+			}
+		}
+	}
+
+	if syncDest, ok := s.destination.(SyncStorage); ok {
+		if err := syncDest.Sync(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
