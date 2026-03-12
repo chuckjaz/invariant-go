@@ -1,6 +1,9 @@
 package names
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var (
 	ErrNotFound           = errors.New("name not found")
@@ -15,7 +18,7 @@ type NameEntry struct {
 
 // Names defines the interface for the names service
 type Names interface {
-	Get(name string) (NameEntry, error)
-	Put(name string, value string, tokens []string) error
-	Delete(name string, expectedValue string) error
+	Get(ctx context.Context, name string) (NameEntry, error)
+	Put(ctx context.Context, name string, value string, tokens []string) error
+	Delete(ctx context.Context, name string, expectedValue string) error
 }

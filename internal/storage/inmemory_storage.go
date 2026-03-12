@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,14 +39,14 @@ func (s *InMemoryStorage) ID() string {
 	return s.id
 }
 
-func (s *InMemoryStorage) Has(address string) bool {
+func (s *InMemoryStorage) Has(ctx context.Context, address string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, ok := s.store[address]
 	return ok
 }
 
-func (s *InMemoryStorage) Get(address string) (io.ReadCloser, bool) {
+func (s *InMemoryStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	data, ok := s.store[address]
@@ -55,7 +56,7 @@ func (s *InMemoryStorage) Get(address string) (io.ReadCloser, bool) {
 	return io.NopCloser(bytes.NewReader(data)), true
 }
 
-func (s *InMemoryStorage) Store(r io.Reader) (string, error) {
+func (s *InMemoryStorage) Store(ctx context.Context, r io.Reader) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
@@ -70,7 +71,7 @@ func (s *InMemoryStorage) Store(r io.Reader) (string, error) {
 	return address, nil
 }
 
-func (s *InMemoryStorage) StoreAt(address string, r io.Reader) (bool, error) {
+func (s *InMemoryStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return false, err
@@ -89,7 +90,7 @@ func (s *InMemoryStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	return true, nil
 }
 
-func (s *InMemoryStorage) Size(address string) (int64, bool) {
+func (s *InMemoryStorage) Size(ctx context.Context, address string) (int64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	data, ok := s.store[address]
@@ -99,7 +100,7 @@ func (s *InMemoryStorage) Size(address string) (int64, bool) {
 	return int64(len(data)), true
 }
 
-func (s *InMemoryStorage) List(chunkSize int) <-chan []string {
+func (s *InMemoryStorage) List(ctx context.Context, chunkSize int) <-chan []string {
 	if chunkSize <= 0 {
 		chunkSize = 10000
 	}
@@ -126,7 +127,7 @@ func (s *InMemoryStorage) List(chunkSize int) <-chan []string {
 	return ch
 }
 
-func (s *InMemoryStorage) Subscribe() <-chan string {
+func (s *InMemoryStorage) Subscribe(ctx context.Context) <-chan string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := make(chan string, 100)
@@ -145,7 +146,7 @@ func (s *InMemoryStorage) notifySubscribers(address string) {
 	}
 }
 
-func (s *InMemoryStorage) Remove(address string) (bool, error) {
+func (s *InMemoryStorage) Remove(ctx context.Context, address string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.store[address]; !ok {

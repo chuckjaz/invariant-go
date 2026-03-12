@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,8 +29,8 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 }
 
 // Get retrieves the service description for the given ID.
-func (c *Client) Get(id string) (ServiceDescription, bool) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
+func (c *Client) Get(ctx context.Context, id string) (ServiceDescription, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
 	if err != nil {
 		return ServiceDescription{}, false
 	}
@@ -52,7 +53,7 @@ func (c *Client) Get(id string) (ServiceDescription, bool) {
 }
 
 // Find searches for services by protocol up to a certain count.
-func (c *Client) Find(protocol string, count int) ([]ServiceDescription, error) {
+func (c *Client) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/", c.baseURL))
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func (c *Client) Find(protocol string, count int) ([]ServiceDescription, error) 
 	q.Set("count", strconv.Itoa(count))
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,13 +88,13 @@ func (c *Client) Find(protocol string, count int) ([]ServiceDescription, error) 
 }
 
 // Register registers a new service.
-func (c *Client) Register(reg ServiceRegistration) error {
+func (c *Client) Register(ctx context.Context, reg ServiceRegistration) error {
 	data, err := json.Marshal(reg)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, reg.ID), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, reg.ID), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}

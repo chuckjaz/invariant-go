@@ -108,7 +108,7 @@ func TestDNSClientGet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewDNSClient(tt.resolver)
-			entry, err := client.Get(tt.queryName)
+			entry, err := client.Get(context.Background(), tt.queryName)
 
 			if err != tt.expectedErr {
 				t.Fatalf("expected error: %v, got: %v", tt.expectedErr, err)
@@ -124,12 +124,12 @@ func TestDNSClientGet(t *testing.T) {
 func TestDNSClientUnsupportedMethods(t *testing.T) {
 	client := NewDNSClient(&mockResolver{})
 
-	err := client.Put("test", "value", []string{"token1"})
+	err := client.Put(context.Background(), "test", "value", []string{"token1"})
 	if err != ErrNotSupported {
 		t.Errorf("expected Put to return ErrNotSupported, got: %v", err)
 	}
 
-	err = client.Delete("test", "value")
+	err = client.Delete(context.Background(), "test", "value")
 	if err != ErrNotSupported {
 		t.Errorf("expected Delete to return ErrNotSupported, got: %v", err)
 	}

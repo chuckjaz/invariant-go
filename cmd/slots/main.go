@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -74,7 +75,7 @@ func main() {
 	if discoveryURL != "" {
 		disc = discovery.NewClient(discoveryURL, nil)
 
-		err := discovery.AdvertiseAndRegister(disc, s.ID(), advertiseAddr, actualPort, []string{"slots-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), disc, s.ID(), advertiseAddr, actualPort, []string{"slots-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -85,7 +86,7 @@ func main() {
 		if disc == nil {
 			log.Fatalf("Cannot register name without a valid discovery service")
 		}
-		err := discovery.RegisterName(disc, name, s.ID(), []string{"slots-v1"})
+		err := discovery.RegisterName(context.Background(), disc, name, s.ID(), []string{"slots-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register name %q: %v", name, err)
 		}
@@ -103,13 +104,13 @@ func main() {
 			}
 
 			// Resolve name to ID if it's not a hex ID
-			resolvedID, err := discovery.ResolveName(disc, nid)
+			resolvedID, err := discovery.ResolveName(context.Background(), disc, nid)
 			if err != nil {
 				log.Fatalf("Could not resolve notify name/id %s: %v", nid, err)
 				continue
 			}
 
-			desc, ok := disc.Get(resolvedID)
+			desc, ok := disc.Get(context.Background(), resolvedID)
 			if !ok {
 				log.Fatalf("Could not find address for Notify service %s", resolvedID)
 				continue
@@ -122,7 +123,7 @@ func main() {
 	}
 
 	if len(notifyClients) > 0 {
-		server.StartNotification(notifyClients, notifyBatchSize, notifyBatchDuration)
+		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
 	log.Printf("Slots service (ID %s) listening on :%d...", s.ID(), actualPort)

@@ -1,6 +1,7 @@
 package names
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,8 +27,8 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 }
 
 // Get retrieves the name entry for a given name.
-func (c *Client) Get(name string) (NameEntry, error) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
+func (c *Client) Get(ctx context.Context, name string) (NameEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
 	if err != nil {
 		return NameEntry{}, err
 	}
@@ -54,7 +55,7 @@ func (c *Client) Get(name string) (NameEntry, error) {
 }
 
 // Put updates or creates a name entry.
-func (c *Client) Put(name string, value string, tokens []string) error {
+func (c *Client) Put(ctx context.Context, name string, value string, tokens []string) error {
 	u, err := url.Parse(fmt.Sprintf("%s/%s", c.baseURL, name))
 	if err != nil {
 		return err
@@ -68,7 +69,7 @@ func (c *Client) Put(name string, value string, tokens []string) error {
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest(http.MethodPut, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -87,8 +88,8 @@ func (c *Client) Put(name string, value string, tokens []string) error {
 }
 
 // Delete removes a name entry.
-func (c *Client) Delete(name string, expectedValue string) error {
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
+func (c *Client) Delete(ctx context.Context, name string, expectedValue string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
 	if err != nil {
 		return err
 	}

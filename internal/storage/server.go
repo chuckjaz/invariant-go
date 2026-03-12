@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -48,7 +49,7 @@ func (s *StorageServer) WithDiscovery(d discovery.Discovery) *StorageServer {
 
 // StartNotification starts a background goroutine that sends all stored
 // block addresses to the provided Has clients in batches.
-func (s *StorageServer) StartNotification(clients []NotifyClient, batchSize int, batchDuration time.Duration) {
+func (s *StorageServer) StartNotification(ctx context.Context, clients []NotifyClient, batchSize int, batchDuration time.Duration) {
 	if len(clients) == 0 {
 		return
 	}
@@ -66,14 +67,14 @@ func (s *StorageServer) StartNotification(clients []NotifyClient, batchSize int,
 		}
 
 		// 1. Send initial batch of all existing blocks
-		for batch := range cStorage.List(batchSize) {
+		for batch := range cStorage.List(ctx, batchSize) {
 			for _, client := range clients {
 				_ = client.Notify(s.id, batch)
 			}
 		}
 
 		// 2. Listen for new blocks and send them in batches
-		sub := cStorage.Subscribe()
+		sub := cStorage.Subscribe(ctx)
 		var currentBatch []string
 		ticker := time.NewTicker(batchDuration)
 		defer ticker.Stop()
@@ -166,13 +167,13 @@ func (s *StorageServer) handleFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Local optimization: if we already have it, just return success
-	if s.storage.Has(reqBody.Address) {
+	if s.storage.Has(r.Context(), reqBody.Address) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	// Lookup the container ID via Discovery to get its HTTP address
-	desc, ok := s.discovery.Get(reqBody.Container)
+	desc, ok := s.discovery.Get(r.Context(), reqBody.Container)
 	if !ok {
 		http.Error(w, "Bad Gateway: container not found in discovery", http.StatusBadGateway)
 		return
@@ -182,14 +183,14 @@ func (s *StorageServer) handleFetch(w http.ResponseWriter, r *http.Request) {
 	remoteClient := NewClient(desc.Address, nil)
 
 	// Stream the data directly from the remote node to our local storage
-	data, ok := remoteClient.Get(reqBody.Address)
+	data, ok := remoteClient.Get(r.Context(), reqBody.Address)
 	if !ok {
 		http.Error(w, "Bad Gateway: failed to get block from remote", http.StatusBadGateway)
 		return
 	}
 	defer data.Close()
 
-	success, err := s.storage.StoreAt(reqBody.Address, data)
+	success, err := s.storage.StoreAt(r.Context(), reqBody.Address, data)
 	if err != nil || !success {
 		http.Error(w, "Internal Server Error: failed to store fetched block", http.StatusInternalServerError)
 		return
@@ -201,7 +202,7 @@ func (s *StorageServer) handleFetch(w http.ResponseWriter, r *http.Request) {
 func (s *StorageServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	address, err := s.storage.Store(r.Body)
+	address, err := s.storage.Store(r.Context(), r.Body)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -216,7 +217,7 @@ func (s *StorageServer) handlePut(w http.ResponseWriter, r *http.Request) {
 	address := r.PathValue("address")
 	defer r.Body.Close()
 
-	success, err := s.storage.StoreAt(address, r.Body)
+	success, err := s.storage.StoreAt(r.Context(), address, r.Body)
 	if err != nil || !success {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -229,7 +230,7 @@ func (s *StorageServer) handlePut(w http.ResponseWriter, r *http.Request) {
 
 func (s *StorageServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	address := r.PathValue("address")
-	data, ok := s.storage.Get(address)
+	data, ok := s.storage.Get(r.Context(), address)
 	if !ok {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
@@ -240,7 +241,7 @@ func (s *StorageServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "immutable")
 	w.Header().Set("ETag", address)
 
-	size, ok := s.storage.Size(address)
+	size, ok := s.storage.Size(r.Context(), address)
 	if ok {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	}
@@ -251,7 +252,7 @@ func (s *StorageServer) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *StorageServer) handleHead(w http.ResponseWriter, r *http.Request) {
 	address := r.PathValue("address")
-	size, ok := s.storage.Size(address)
+	size, ok := s.storage.Size(r.Context(), address)
 	if !ok {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return

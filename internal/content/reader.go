@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
@@ -35,13 +36,13 @@ func Read(link ContentLink, store storage.Storage, slotService slots.Slots) (io.
 			return nil, ErrSlotServiceMissing
 		}
 		var err error
-		address, err = slotService.Get(link.Address)
+		address, err = slotService.Get(context.Background(), link.Address)
 		if err != nil {
 			return nil, fmt.Errorf("failed to lookup slot %s: %w", link.Address, err)
 		}
 	}
 
-	rc, found := store.Get(address)
+	rc, found := store.Get(context.Background(), address)
 	if !found {
 		return nil, fmt.Errorf("%w: %s", ErrBlockNotFound, address)
 	}

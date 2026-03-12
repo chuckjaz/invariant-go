@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -79,7 +80,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	dClient = discovery.NewClient(discoveryURL, nil)
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(kind, 1)
+		id, err := dClient.Find(context.Background(), kind, 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not find %s service: %v\n", kind, err)
 			os.Exit(1)
@@ -100,7 +101,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 	if slotID != "" {
 		if len(slotID) != 64 {
-			resolved, err := discovery.ResolveName(dClient, slotID)
+			resolved, err := discovery.ResolveName(context.Background(), dClient, slotID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: --slot must be a 64-character hex string or valid registered name (resolution failed: %v)\n", err)
 				os.Exit(1)
@@ -208,7 +209,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		slotsAddr := findService("slots-v1")
 		slotsClient := slots.NewClient(slotsAddr, nil)
 
-		err = slotsClient.Update(slotID, rootEntry.Content.Address, previousAddress, privKeyHex)
+		err = slotsClient.Update(context.Background(), slotID, rootEntry.Content.Address, previousAddress, privKeyHex)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to update slot: %v\n", err)
 			os.Exit(1)

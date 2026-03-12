@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"invariant/internal/notify"
@@ -30,8 +31,8 @@ func (c *Client) ID() string {
 }
 
 // Find looks up a block address.
-func (c *Client) Find(address string) ([]FindResponse, error) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
+func (c *Client) Find(ctx context.Context, address string) ([]FindResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +56,14 @@ func (c *Client) Find(address string) ([]FindResponse, error) {
 }
 
 // Has notifies the finder service that a storage node holds the given blocks.
-func (c *Client) Notify(storageID string, addresses []string) error {
+func (c *Client) Notify(ctx context.Context, storageID string, addresses []string) error {
 	hasClient := notify.NewClient(c.baseURL, c.httpClient)
 	return hasClient.Notify(storageID, addresses)
 }
 
 // Peer pings the remote finder to notify it of a new finder's existence.
-func (c *Client) Peer(finderID string) error {
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/peer/%s", c.baseURL, finderID), nil)
+func (c *Client) Peer(ctx context.Context, finderID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/peer/%s", c.baseURL, finderID), nil)
 	if err != nil {
 		return err
 	}

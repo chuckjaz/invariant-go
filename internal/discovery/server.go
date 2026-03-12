@@ -50,7 +50,7 @@ func (s *DiscoveryServer) handleGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
-	desc, ok := s.discovery.Get(id)
+	desc, ok := s.discovery.Get(r.Context(), id)
 	if !ok {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
@@ -75,7 +75,7 @@ func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	descs, err := s.discovery.Find(protocol, count)
+	descs, err := s.discovery.Find(r.Context(), protocol, count)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -97,7 +97,7 @@ func (s *DiscoveryServer) handlePut(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if err := s.discovery.Register(reg); err != nil {
+	if err := s.discovery.Register(r.Context(), reg); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

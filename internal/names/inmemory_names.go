@@ -1,6 +1,7 @@
 package names
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"invariant/internal/identity"
@@ -34,7 +35,7 @@ func (s *InMemoryNames) ID() string {
 	return s.id
 }
 
-func (s *InMemoryNames) Get(name string) (NameEntry, error) {
+func (s *InMemoryNames) Get(ctx context.Context, name string) (NameEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -51,7 +52,7 @@ func (s *InMemoryNames) Get(name string) (NameEntry, error) {
 	}, nil
 }
 
-func (s *InMemoryNames) Put(name string, value string, tokens []string) error {
+func (s *InMemoryNames) Put(ctx context.Context, name string, value string, tokens []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -65,7 +66,7 @@ func (s *InMemoryNames) Put(name string, value string, tokens []string) error {
 	return nil
 }
 
-func (s *InMemoryNames) Delete(name string, expectedValue string) error {
+func (s *InMemoryNames) Delete(ctx context.Context, name string, expectedValue string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

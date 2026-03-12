@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -63,14 +64,14 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 
 	rootIsSlot := false
 	if slot != "" {
-		resolved, err := discovery.ResolveName(dClient, slot)
+		resolved, err := discovery.ResolveName(context.Background(), dClient, slot)
 		if err != nil {
 			log.Fatalf("Could not resolve slot name: %v", err)
 		}
 		rootAddr = resolved
 		rootIsSlot = true
 	} else {
-		resolved, err := discovery.ResolveName(dClient, rootAddr)
+		resolved, err := discovery.ResolveName(context.Background(), dClient, rootAddr)
 		if err != nil {
 			log.Fatalf("Could not resolve root name: %v", err)
 		}
@@ -78,7 +79,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(kind, 1)
+		id, err := dClient.Find(context.Background(), kind, 1)
 		if err != nil {
 			log.Fatalf("Could not find %s service: %v", kind, err)
 		}

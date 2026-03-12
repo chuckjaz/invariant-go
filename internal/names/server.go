@@ -33,7 +33,7 @@ func (s *NamesServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *NamesServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	entry, err := s.names.Get(name)
+	entry, err := s.names.Get(r.Context(), name)
 	if err == ErrNotFound {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
@@ -67,7 +67,7 @@ func (s *NamesServer) handlePut(w http.ResponseWriter, r *http.Request) {
 	}
 	// Proceed with normal Put, ETag precondition is only specified for DELETE in the protocol.
 
-	err := s.names.Put(name, value, tokens)
+	err := s.names.Put(r.Context(), name, value, tokens)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -82,7 +82,7 @@ func (s *NamesServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	expectedValue := r.Header.Get("If-Match")
 
-	err := s.names.Delete(name, expectedValue)
+	err := s.names.Delete(r.Context(), name, expectedValue)
 	if err == ErrNotFound {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return

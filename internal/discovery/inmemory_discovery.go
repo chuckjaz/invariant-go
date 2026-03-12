@@ -1,8 +1,10 @@
 package discovery
 
-import "slices"
-
-import "sync"
+import (
+	"context"
+	"slices"
+	"sync"
+)
 
 // Assert that InMemoryDiscovery implements the Discovery interface
 var _ Discovery = (*InMemoryDiscovery)(nil)
@@ -18,7 +20,7 @@ func NewInMemoryDiscovery() *InMemoryDiscovery {
 	}
 }
 
-func (d *InMemoryDiscovery) Get(id string) (ServiceDescription, bool) {
+func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescription, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	reg, ok := d.services[id]
@@ -32,7 +34,7 @@ func (d *InMemoryDiscovery) Get(id string) (ServiceDescription, bool) {
 	}, true
 }
 
-func (d *InMemoryDiscovery) Find(protocol string, count int) ([]ServiceDescription, error) {
+func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -59,7 +61,7 @@ func (d *InMemoryDiscovery) Find(protocol string, count int) ([]ServiceDescripti
 	return results, nil
 }
 
-func (d *InMemoryDiscovery) Register(reg ServiceRegistration) error {
+func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.services[reg.ID] = reg

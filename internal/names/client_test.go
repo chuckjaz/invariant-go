@@ -1,6 +1,7 @@
 package names_test
 
 import (
+	"context"
 	"invariant/internal/names"
 	"net/http/httptest"
 	"testing"
@@ -20,13 +21,13 @@ func TestClient(t *testing.T) {
 	tokens := []string{"block-v1"}
 
 	// 1. Put
-	err := client.Put(name, value, tokens)
+	err := client.Put(context.Background(), name, value, tokens)
 	if err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
 
 	// 2. Get
-	entry, err := client.Get(name)
+	entry, err := client.Get(context.Background(), name)
 	if err != nil {
 		t.Fatalf("Get error: %v", err)
 	}
@@ -38,25 +39,25 @@ func TestClient(t *testing.T) {
 	}
 
 	// 3. Delete with wrong precondition
-	err = client.Delete(name, "wrong-value")
+	err = client.Delete(context.Background(), name, "wrong-value")
 	if err != names.ErrPreconditionFailed {
 		t.Fatalf("expected ErrPreconditionFailed, got %v", err)
 	}
 
 	// 4. Delete correctly
-	err = client.Delete(name, value)
+	err = client.Delete(context.Background(), name, value)
 	if err != nil {
 		t.Fatalf("Delete error: %v", err)
 	}
 
 	// 5. Get after delete
-	_, err = client.Get(name)
+	_, err = client.Get(context.Background(), name)
 	if err != names.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
 	// 6. Delete already deleted
-	err = client.Delete(name, value)
+	err = client.Delete(context.Background(), name, value)
 	if err != names.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}

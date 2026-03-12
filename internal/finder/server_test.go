@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"context"
 	"fmt"
 	"invariant/internal/discovery"
 	"invariant/internal/notify"
@@ -21,12 +22,12 @@ func newMockDiscovery() *mockDiscovery {
 	}
 }
 
-func (m *mockDiscovery) Get(id string) (discovery.ServiceDescription, bool) {
+func (m *mockDiscovery) Get(ctx context.Context, id string) (discovery.ServiceDescription, bool) {
 	desc, ok := m.services[id]
 	return desc, ok
 }
 
-func (m *mockDiscovery) Find(protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
 	var results []discovery.ServiceDescription
 	for _, desc := range m.services {
 		for _, p := range desc.Protocols {
@@ -38,7 +39,7 @@ func (m *mockDiscovery) Find(protocol string, count int) ([]discovery.ServiceDes
 	return results, nil
 }
 
-func (m *mockDiscovery) Register(reg discovery.ServiceRegistration) error {
+func (m *mockDiscovery) Register(ctx context.Context, reg discovery.ServiceRegistration) error {
 	m.services[reg.ID] = discovery.ServiceDescription{
 		ID:        reg.ID,
 		Address:   reg.Address,
@@ -64,7 +65,7 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 	blockAddr := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 	// 2. Client queries the finder - shouldn't find block
-	res, err := client.Find(blockAddr)
+	res, err := client.Find(context.Background(), blockAddr)
 	if err != nil {
 		t.Fatalf("Failed to find: %v", err)
 	}
@@ -75,10 +76,10 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 	// 3. Register a block from a simulated storage node
 	storageID := "storage-1"
 	reqBody := notify.NotifyRequest{Addresses: []string{blockAddr}}
-	err = client.Notify(storageID, reqBody.Addresses)
+	err = client.Notify(context.Background(), storageID, reqBody.Addresses)
 
 	// 4. Client queries - should now find the block on storage-1
-	res, err = client.Find(blockAddr)
+	res, err = client.Find(context.Background(), blockAddr)
 	if err != nil {
 		t.Fatalf("Failed to find: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestFinderPeerAndPushBlocks(t *testing.T) {
 	defer tsB.Close()
 
 	// Register Finder B in discovery so Finder A can push to it
-	disc.Register(discovery.ServiceRegistration{
+	disc.Register(context.Background(), discovery.ServiceRegistration{
 		ID:        idB,
 		Address:   tsB.URL,
 		Protocols: []string{"finder-v1"},
@@ -128,11 +129,11 @@ func TestFinderPeerAndPushBlocks(t *testing.T) {
 
 	// Tell Finder A that storage-1 has the block
 	clientA := NewClient(tsA.URL, nil)
-	clientA.Notify("storage-1", []string{blockAddr})
+	clientA.Notify(context.Background(), "storage-1", []string{blockAddr})
 
 	// Notify Finder A about Peer Finder B
 	fmt.Printf("Peering A about B\n")
-	err := clientA.Peer(idB)
+	err := clientA.Peer(context.Background(), idB)
 	if err != nil {
 		t.Fatalf("Failed to notify: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestFinderPeerAndPushBlocks(t *testing.T) {
 	// Now ask Finder B if it knows about the block.
 	// It should respond that "storage-1" has it.
 	clientB := NewClient(tsB.URL, nil)
-	res, err := clientB.Find(blockAddr)
+	res, err := clientB.Find(context.Background(), blockAddr)
 	if err != nil {
 		t.Fatalf("Failed to find on B: %v", err)
 	}
@@ -172,17 +173,17 @@ func TestFinderReturnsFinders(t *testing.T) {
 	clientA := NewClient(tsA.URL, nil)
 
 	// Register them in discovery (though Peer doesn't strictly need this unless it's pushing blocks)
-	disc.Register(discovery.ServiceRegistration{ID: idB, Address: "http://b", Protocols: []string{"finder-v1"}})
-	disc.Register(discovery.ServiceRegistration{ID: idC, Address: "http://c", Protocols: []string{"finder-v1"}})
+	disc.Register(context.Background(), discovery.ServiceRegistration{ID: idB, Address: "http://b", Protocols: []string{"finder-v1"}})
+	disc.Register(context.Background(), discovery.ServiceRegistration{ID: idC, Address: "http://c", Protocols: []string{"finder-v1"}})
 
 	// Notify A about Peer B and C
-	clientA.Peer(idB)
-	clientA.Peer(idC)
+	clientA.Peer(context.Background(), idB)
+	clientA.Peer(context.Background(), idC)
 
 	// Now ask A for a block it DOES NOT know about. It should return its closest finders.
 	blockAddr := "0000000000000000000000000000000000000000000000000000000000000000"
 
-	res, err := clientA.Find(blockAddr)
+	res, err := clientA.Find(context.Background(), blockAddr)
 	if err != nil {
 		t.Fatalf("Failed to find: %v", err)
 	}

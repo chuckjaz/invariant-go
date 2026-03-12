@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -41,7 +42,7 @@ func main() {
 	}
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(kind, 1)
+		id, err := dClient.Find(context.Background(), kind, 1)
 		if err != nil {
 			log.Fatalf("Could not find %s service: %v", kind, err)
 		}

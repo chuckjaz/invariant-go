@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,8 +28,8 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 }
 
 // Has checks if the storage contains the given address.
-func (c *Client) Has(address string) bool {
-	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
+func (c *Client) Has(ctx context.Context, address string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return false
 	}
@@ -43,8 +44,8 @@ func (c *Client) Has(address string) bool {
 }
 
 // Get retrieves the data for the given address.
-func (c *Client) Get(address string) (io.ReadCloser, bool) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
+func (c *Client) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return nil, false
 	}
@@ -61,8 +62,8 @@ func (c *Client) Get(address string) (io.ReadCloser, bool) {
 }
 
 // Store saves data and returns its content-based address.
-func (c *Client) Store(r io.Reader) (string, error) {
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/", c.baseURL), r)
+func (c *Client) Store(ctx context.Context, r io.Reader) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/", c.baseURL), r)
 	if err != nil {
 		return "", err
 	}
@@ -86,8 +87,8 @@ func (c *Client) Store(r io.Reader) (string, error) {
 }
 
 // StoreAt saves data at the specified address.
-func (c *Client) StoreAt(address string, r io.Reader) (bool, error) {
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, address), r)
+func (c *Client) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, address), r)
 	if err != nil {
 		return false, err
 	}
@@ -106,8 +107,8 @@ func (c *Client) StoreAt(address string, r io.Reader) (bool, error) {
 }
 
 // Size returns the size of the data at the given address.
-func (c *Client) Size(address string) (int64, bool) {
-	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
+func (c *Client) Size(ctx context.Context, address string) (int64, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, fmt.Sprintf("%s/%s", c.baseURL, address), nil)
 	if err != nil {
 		return 0, false
 	}
@@ -135,7 +136,7 @@ func (c *Client) Size(address string) (int64, bool) {
 }
 
 // Fetch instructs the remote server to fetch data from another container.
-func (c *Client) Fetch(address, container string) error {
+func (c *Client) Fetch(ctx context.Context, address, container string) error {
 	reqBody := StorageFetchRequest{
 		Address:   address,
 		Container: container,
@@ -145,7 +146,7 @@ func (c *Client) Fetch(address, container string) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/fetch", c.baseURL), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/fetch", c.baseURL), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -165,14 +166,14 @@ func (c *Client) Fetch(address, container string) error {
 }
 
 // List returns all addresses stored in the remote storage. Not currently supported via HTTP.
-func (c *Client) List(chunkSize int) <-chan []string {
+func (c *Client) List(ctx context.Context, chunkSize int) <-chan []string {
 	ch := make(chan []string)
 	close(ch)
 	return ch
 }
 
 // Subscribe provides a channel for live updates. Not currently supported via HTTP.
-func (c *Client) Subscribe() <-chan string {
+func (c *Client) Subscribe(ctx context.Context) <-chan string {
 	ch := make(chan string)
 	close(ch)
 	return ch

@@ -1,7 +1,10 @@
 // Package slots provides the core interface for the slots service.
 package slots
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // ErrSlotNotFound is returned when a slot doesn't exist.
 var ErrSlotNotFound = errors.New("slot not found")
@@ -39,18 +42,18 @@ type Slots interface {
 	ID() string
 
 	// Get returns the address for the given slot ID.
-	Get(id string) (string, error)
+	Get(ctx context.Context, id string) (string, error)
 
 	// Update sets the new address for a generic id, expecting previousAddress to match the current value.
 	// The auth slice represents the authorization data (signature) needed to update protected slots.
-	Update(id string, address string, previousAddress string, auth []byte) error
+	Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error
 
 	// Create creates a new slot with the given id, initial address, and optional policy.
-	Create(id string, address string, policy string) error
+	Create(ctx context.Context, id string, address string, policy string) error
 
 	// List returns a channel that yields chunks of all known slot IDs.
-	List(chunkSize int) <-chan []string
+	List(ctx context.Context, chunkSize int) <-chan []string
 
 	// Subscribe returns a channel that yields the IDs of newly created slots.
-	Subscribe() <-chan string
+	Subscribe(ctx context.Context) <-chan string
 }

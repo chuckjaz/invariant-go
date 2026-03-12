@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -46,7 +47,7 @@ func main() {
 	if discoveryURL != "" {
 		disc = discovery.NewClient(discoveryURL, nil)
 
-		err := discovery.AdvertiseAndRegister(disc, id, advertiseAddr, port, []string{"finder-v1", "notify-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), disc, id, advertiseAddr, port, []string{"finder-v1", "notify-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -54,7 +55,7 @@ func main() {
 	}
 
 	if name != "" {
-		err := discovery.RegisterName(disc, name, id, []string{"finder-v1", "notify-v1"})
+		err := discovery.RegisterName(context.Background(), disc, name, id, []string{"finder-v1", "notify-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register name %q: %v", name, err)
 		}

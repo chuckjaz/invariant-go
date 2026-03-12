@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -20,7 +21,7 @@ func TestFileSystemStorage(t *testing.T) {
 	expectedAddress := hex.EncodeToString(hash1[:])
 
 	// 2. Store content
-	address, err := fs.Store(bytes.NewReader(content))
+	address, err := fs.Store(context.Background(), bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store error: %v", err)
 	}
@@ -36,18 +37,18 @@ func TestFileSystemStorage(t *testing.T) {
 	}
 
 	// 4. Verify Has
-	if !fs.Has(expectedAddress) {
+	if !fs.Has(context.Background(), expectedAddress) {
 		t.Fatal("Expected Has to return true")
 	}
 
 	// 5. Verify Size
-	size, ok := fs.Size(expectedAddress)
+	size, ok := fs.Size(context.Background(), expectedAddress)
 	if !ok || size != int64(len(content)) {
 		t.Fatalf("Expected size %d, got %d (ok: %t)", len(content), size, ok)
 	}
 
 	// 6. Verify Get
-	r, ok := fs.Get(expectedAddress)
+	r, ok := fs.Get(context.Background(), expectedAddress)
 	if !ok {
 		t.Fatal("Expected Get to return true")
 	}
@@ -64,7 +65,7 @@ func TestFileSystemStorage(t *testing.T) {
 	newExpectedHash := hex.EncodeToString(hash2[:])
 
 	// Incorrect store attempts
-	success, err := fs.StoreAt(newExpectedHash, bytes.NewReader(content))
+	success, err := fs.StoreAt(context.Background(), newExpectedHash, bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("StoreAt error: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestFileSystemStorage(t *testing.T) {
 	}
 
 	// Correct store attempts
-	success, err = fs.StoreAt(newExpectedHash, bytes.NewReader(newContent))
+	success, err = fs.StoreAt(context.Background(), newExpectedHash, bytes.NewReader(newContent))
 	if err != nil {
 		t.Fatalf("StoreAt error: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestFileSystemStorage(t *testing.T) {
 
 	// 8. Verify List
 	var list []string
-	for chunk := range fs.List(10) {
+	for chunk := range fs.List(context.Background(), 10) {
 		list = append(list, chunk...)
 	}
 

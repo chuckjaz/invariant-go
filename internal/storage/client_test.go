@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -23,7 +24,7 @@ func TestClient(t *testing.T) {
 	expectedAddress := hex.EncodeToString(hash[:])
 
 	// 1. Store
-	address, err := client.Store(bytes.NewReader(content))
+	address, err := client.Store(context.Background(), bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store error: %v", err)
 	}
@@ -33,18 +34,18 @@ func TestClient(t *testing.T) {
 	}
 
 	// 2. Has
-	if !client.Has(expectedAddress) {
+	if !client.Has(context.Background(), expectedAddress) {
 		t.Fatal("Expected Has to return true")
 	}
 
 	// 3. Size
-	size, ok := client.Size(expectedAddress)
+	size, ok := client.Size(context.Background(), expectedAddress)
 	if !ok || size != int64(len(content)) {
 		t.Fatalf("Expected size %d, got %d (ok: %t)", len(content), size, ok)
 	}
 
 	// 4. Get
-	r, ok := client.Get(expectedAddress)
+	r, ok := client.Get(context.Background(), expectedAddress)
 	if !ok {
 		t.Fatal("Expected Get to return true")
 	}
@@ -61,7 +62,7 @@ func TestClient(t *testing.T) {
 	newExpectedHash := hex.EncodeToString(hash2[:])
 
 	// Incorrect store attempts
-	success, err := client.StoreAt(newExpectedHash, bytes.NewReader(content))
+	success, err := client.StoreAt(context.Background(), newExpectedHash, bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("StoreAt error: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// Correct store attempts
-	success, err = client.StoreAt(newExpectedHash, bytes.NewReader(newContent))
+	success, err = client.StoreAt(context.Background(), newExpectedHash, bytes.NewReader(newContent))
 	if err != nil {
 		t.Fatalf("StoreAt error: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestClient(t *testing.T) {
 		t.Fatal("Expected StoreAt to succeed")
 	}
 
-	if !client.Has(newExpectedHash) {
+	if !client.Has(context.Background(), newExpectedHash) {
 		t.Fatal("Expected Has to return true for StoreAt content")
 	}
 
@@ -86,16 +87,16 @@ func TestClient(t *testing.T) {
 	badHash := sha256.Sum256([]byte("missing"))
 	badAddress := hex.EncodeToString(badHash[:])
 
-	if client.Has(badAddress) {
+	if client.Has(context.Background(), badAddress) {
 		t.Fatal("Expected Has to return false for non-existent data")
 	}
 
-	_, ok = client.Size(badAddress)
+	_, ok = client.Size(context.Background(), badAddress)
 	if ok {
 		t.Fatal("Expected Size to return false for non-existent data")
 	}
 
-	_, ok = client.Get(badAddress)
+	_, ok = client.Get(context.Background(), badAddress)
 	if ok {
 		t.Fatal("Expected Get to return false for non-existent data")
 	}

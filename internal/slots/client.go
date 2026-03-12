@@ -3,6 +3,7 @@ package slots
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -54,8 +55,8 @@ func (c *Client) ID() string {
 }
 
 // Get fetches the address for the given slot ID from the remote slots service.
-func (c *Client) Get(id string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
+func (c *Client) Get(ctx context.Context, id string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +84,7 @@ func (c *Client) Get(id string) (string, error) {
 
 // Update updates a slot on the remote slots service.
 // The auth parameter accepts an Ed25519 private key (64 bytes) to sign the update if the slot is protected.
-func (c *Client) Update(id string, address string, previousAddress string, auth []byte) error {
+func (c *Client) Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error {
 	updateReq := SlotUpdate{
 		Address:         address,
 		PreviousAddress: previousAddress,
@@ -93,7 +94,7 @@ func (c *Client) Update(id string, address string, previousAddress string, auth 
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, id), bytes.NewReader(reqData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/%s", c.baseURL, id), bytes.NewReader(reqData))
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func (c *Client) Update(id string, address string, previousAddress string, auth 
 }
 
 // Create creates a new slot on the remote slots service.
-func (c *Client) Create(id string, address string, policy string) error {
+func (c *Client) Create(ctx context.Context, id string, address string, policy string) error {
 	createReq := SlotRegistration{
 		Address: address,
 	}
@@ -141,7 +142,7 @@ func (c *Client) Create(id string, address string, policy string) error {
 		u = fmt.Sprintf("%s?protected=%s", u, policy)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(reqData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(reqData))
 	if err != nil {
 		return err
 	}
@@ -164,14 +165,14 @@ func (c *Client) Create(id string, address string, policy string) error {
 }
 
 // List is not supported on the client side at this time.
-func (c *Client) List(chunkSize int) <-chan []string {
+func (c *Client) List(ctx context.Context, chunkSize int) <-chan []string {
 	ch := make(chan []string)
 	close(ch)
 	return ch
 }
 
 // Subscribe is not supported on the client side at this time.
-func (c *Client) Subscribe() <-chan string {
+func (c *Client) Subscribe(ctx context.Context) <-chan string {
 	ch := make(chan string)
 	close(ch)
 	return ch

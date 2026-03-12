@@ -63,13 +63,13 @@ func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, de
 
 func (s *CachingStorage) init() {
 	// 1. Load existing blocks from local storage into LRU
-	for batch := range s.local.List(1000) {
+	for batch := range s.local.List(context.Background(), 1000) {
 		var sizesToAdd []int64
 		var addrsToAdd []string
 
 		// Get capacities without holding the lock
 		for _, addr := range batch {
-			size, ok := s.local.Size(addr)
+			size, ok := s.local.Size(context.Background(), addr)
 			if ok {
 				addrsToAdd = append(addrsToAdd, addr)
 				sizesToAdd = append(sizesToAdd, size)
@@ -154,13 +154,13 @@ func (t *trackingReadCloser) Close() error {
 	return t.c.Close()
 }
 
-func (s *CachingStorage) Has(address string) bool {
-	if ok := s.local.Has(address); ok {
+func (s *CachingStorage) Has(ctx context.Context, address string) bool {
+	if ok := s.local.Has(ctx, address); ok {
 		s.markUsed(address)
 		return true
 	}
 	if s.destination != nil {
-		if s.destination.Has(address) {
+		if s.destination.Has(ctx, address) {
 			s.destHasMu.Lock()
 			s.destHas[address] = struct{}{}
 			s.destHasMu.Unlock()
@@ -170,21 +170,21 @@ func (s *CachingStorage) Has(address string) bool {
 	return false
 }
 
-func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
-	rc, ok := s.local.Get(address)
+func (s *CachingStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
+	rc, ok := s.local.Get(ctx, address)
 	if ok {
 		s.markUsed(address)
 		return rc, true
 	}
 
 	if s.destination != nil {
-		rc, ok = s.destination.Get(address)
+		rc, ok = s.destination.Get(ctx, address)
 		if ok {
 			s.destHasMu.Lock()
 			s.destHas[address] = struct{}{}
 			s.destHasMu.Unlock()
 
-			destSize, hasSize := s.destination.Size(address)
+			destSize, hasSize := s.destination.Size(ctx, address)
 			if hasSize {
 				s.mu.Lock()
 				hasRoom := destSize <= s.maxSize
@@ -194,9 +194,9 @@ func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
 					pr, pw := io.Pipe()
 					go func() {
 						defer pr.Close()
-						okL, errL := s.local.StoreAt(address, pr)
+						okL, errL := s.local.StoreAt(context.Background(), address, pr)
 						if errL == nil && okL {
-							actualSize, hasSizeL := s.local.Size(address)
+							actualSize, hasSizeL := s.local.Size(context.Background(), address)
 							if hasSizeL {
 								s.addUsed(address, actualSize)
 							}
@@ -215,14 +215,14 @@ func (s *CachingStorage) Get(address string) (io.ReadCloser, bool) {
 	return nil, false
 }
 
-func (s *CachingStorage) Size(address string) (int64, bool) {
-	size, ok := s.local.Size(address)
+func (s *CachingStorage) Size(ctx context.Context, address string) (int64, bool) {
+	size, ok := s.local.Size(ctx, address)
 	if ok {
 		s.markUsed(address)
 		return size, true
 	}
 	if s.destination != nil {
-		size, ok := s.destination.Size(address)
+		size, ok := s.destination.Size(ctx, address)
 		if ok {
 			s.destHasMu.Lock()
 			s.destHas[address] = struct{}{}
@@ -273,12 +273,12 @@ func (tr *trackingReader) Close() error {
 	return nil
 }
 
-func (s *CachingStorage) Store(r io.Reader) (string, error) {
+func (s *CachingStorage) Store(ctx context.Context, r io.Reader) (string, error) {
 	s.mu.Lock()
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		if s.delegateOnMax && s.destination != nil {
-			addr, err := s.destination.Store(r)
+			addr, err := s.destination.Store(ctx, r)
 			if err == nil {
 				s.destHasMu.Lock()
 				s.destHas[addr] = struct{}{}
@@ -309,7 +309,7 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 		},
 	}
 
-	addr, err := s.local.Store(tr)
+	addr, err := s.local.Store(ctx, tr)
 	if err != nil {
 		return "", err
 	}
@@ -318,7 +318,7 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 	// (or simply rely on tr.size if it was newly read).
 	tr.Close()
 
-	actualSize, ok := s.local.Size(addr)
+	actualSize, ok := s.local.Size(ctx, addr)
 	if !ok {
 		actualSize = finalSize
 	}
@@ -328,8 +328,8 @@ func (s *CachingStorage) Store(r io.Reader) (string, error) {
 	return addr, nil
 }
 
-func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
-	if s.local.Has(address) {
+func (s *CachingStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	if s.local.Has(ctx, address) {
 		s.markUsed(address)
 		if closer, ok := r.(io.Closer); ok {
 			closer.Close()
@@ -341,7 +341,7 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	if s.currentSize >= s.maxSize {
 		s.mu.Unlock()
 		if s.delegateOnMax && s.destination != nil {
-			ok, err := s.destination.StoreAt(address, r)
+			ok, err := s.destination.StoreAt(ctx, address, r)
 			if err == nil && ok {
 				s.destHasMu.Lock()
 				s.destHas[address] = struct{}{}
@@ -372,7 +372,7 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 		},
 	}
 
-	ok, err := s.local.StoreAt(address, tr)
+	ok, err := s.local.StoreAt(ctx, address, tr)
 	if err != nil {
 		return false, err
 	}
@@ -380,7 +380,7 @@ func (s *CachingStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	tr.Close()
 
 	if ok {
-		actualSize, hasSize := s.local.Size(address)
+		actualSize, hasSize := s.local.Size(ctx, address)
 		if !hasSize {
 			actualSize = finalSize
 		}
@@ -429,10 +429,10 @@ func (s *CachingStorage) doEvict() {
 			_, hasDest := s.destHas[addr]
 			s.destHasMu.RUnlock()
 
-			if !hasDest && !s.destination.Has(addr) {
-				rc, ok := s.local.Get(addr)
+			if !hasDest && !s.destination.Has(context.Background(), addr) {
+				rc, ok := s.local.Get(context.Background(), addr)
 				if ok {
-					_, err := s.destination.StoreAt(addr, rc)
+					_, err := s.destination.StoreAt(context.Background(), addr, rc)
 					rc.Close()
 					if err != nil {
 						log.Printf("caching storage: failed to evict block %s to destination: %v", addr, err)
@@ -461,7 +461,7 @@ func (s *CachingStorage) doEvict() {
 			continue
 		}
 
-		size, hasSize := s.local.Size(addr)
+		size, hasSize := s.local.Size(context.Background(), addr)
 		if !hasSize {
 			// If it's already gone, just clean it up from LRU with 0 size
 			size = 0
@@ -473,7 +473,7 @@ func (s *CachingStorage) doEvict() {
 		s.mu.Unlock()
 
 		// Remove from local storage
-		ok, err := s.local.Remove(addr)
+		ok, err := s.local.Remove(context.Background(), addr)
 		if err != nil || !ok {
 			log.Printf("caching storage: failed to explicitly remove block %s from local storage: %v", addr, err)
 			break
@@ -487,7 +487,7 @@ func (s *CachingStorage) Sync(ctx context.Context) error {
 		return nil
 	}
 
-	for batch := range s.local.List(100) {
+	for batch := range s.local.List(ctx, 100) {
 		for _, addr := range batch {
 			select {
 			case <-ctx.Done():
@@ -503,19 +503,19 @@ func (s *CachingStorage) Sync(ctx context.Context) error {
 				continue
 			}
 
-			if s.destination.Has(addr) {
+			if s.destination.Has(ctx, addr) {
 				s.destHasMu.Lock()
 				s.destHas[addr] = struct{}{}
 				s.destHasMu.Unlock()
 				continue
 			}
 
-			rc, ok := s.local.Get(addr)
+			rc, ok := s.local.Get(ctx, addr)
 			if !ok {
 				continue
 			}
 
-			storeOk, err := s.destination.StoreAt(addr, rc)
+			storeOk, err := s.destination.StoreAt(ctx, addr, rc)
 			rc.Close()
 
 			if err != nil {

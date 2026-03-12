@@ -1,6 +1,7 @@
 package names
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,12 @@ func TestFileSystemNames_PutAndGet(t *testing.T) {
 	}
 	defer fsn.Close()
 
-	err = fsn.Put("service-a", "1234", []string{"storage-v1"})
+	err = fsn.Put(context.Background(), "service-a", "1234", []string{"storage-v1"})
 	if err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	entry, err := fsn.Get("service-a")
+	entry, err := fsn.Get(context.Background(), "service-a")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -41,21 +42,21 @@ func TestFileSystemNames_DeleteAndPrecondition(t *testing.T) {
 	}
 	defer fsn.Close()
 
-	fsn.Put("service-a", "1234", nil)
+	fsn.Put(context.Background(), "service-a", "1234", nil)
 
 	// Precondition fail
-	err = fsn.Delete("service-a", "wrong-etag")
+	err = fsn.Delete(context.Background(), "service-a", "wrong-etag")
 	if err != ErrPreconditionFailed {
 		t.Errorf("Expected ErrPreconditionFailed, got %v", err)
 	}
 
 	// Delete
-	err = fsn.Delete("service-a", "1234")
+	err = fsn.Delete(context.Background(), "service-a", "1234")
 	if err != nil {
 		t.Errorf("Delete failed: %v", err)
 	}
 
-	_, err = fsn.Get("service-a")
+	_, err = fsn.Get(context.Background(), "service-a")
 	if err != ErrNotFound {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
@@ -68,13 +69,13 @@ func TestFileSystemNames_Recovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create FileSystemNames: %v", err)
 	}
-	fsn1.Put("service-a", "1234", []string{"storage-v1"})
-	fsn1.Put("service-b", "5678", []string{"names-v1"})
+	fsn1.Put(context.Background(), "service-a", "1234", []string{"storage-v1"})
+	fsn1.Put(context.Background(), "service-b", "5678", []string{"names-v1"})
 
 	// Some time passes so journals order properly
 	time.Sleep(2 * time.Millisecond)
 
-	fsn1.Delete("service-a", "")
+	fsn1.Delete(context.Background(), "service-a", "")
 	fsn1.Close()
 
 	// Should recover from journal
@@ -83,12 +84,12 @@ func TestFileSystemNames_Recovery(t *testing.T) {
 		t.Fatalf("Failed to create FileSystemNames: %v", err)
 	}
 
-	_, err = fsn2.Get("service-a")
+	_, err = fsn2.Get(context.Background(), "service-a")
 	if err != ErrNotFound {
 		t.Errorf("Expected ErrNotFound for service-a, got %v", err)
 	}
 
-	entry, err := fsn2.Get("service-b")
+	entry, err := fsn2.Get(context.Background(), "service-b")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestFileSystemNames_SnapshotAndRotation(t *testing.T) {
 		t.Fatalf("Failed to create FileSystemNames: %v", err)
 	}
 
-	fsn.Put("service-a", "1234", []string{"storage-v1"})
+	fsn.Put(context.Background(), "service-a", "1234", []string{"storage-v1"})
 
 	// Wait for a snapshot or two
 	time.Sleep(100 * time.Millisecond)
@@ -134,7 +135,7 @@ func TestFileSystemNames_SnapshotAndRotation(t *testing.T) {
 		t.Errorf("Expected at most 2 journal files due to rotation, found %d", count)
 	}
 
-	fsn.Put("service-b", "5678", []string{"names-v1"})
+	fsn.Put(context.Background(), "service-b", "5678", []string{"names-v1"})
 	fsn.Close()
 
 	// Verify snapshot exists
@@ -149,7 +150,7 @@ func TestFileSystemNames_SnapshotAndRotation(t *testing.T) {
 	}
 	defer fsn2.Close()
 
-	entryA, err := fsn2.Get("service-a")
+	entryA, err := fsn2.Get(context.Background(), "service-a")
 	if err != nil {
 		t.Fatalf("Get service-a failed: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestFileSystemNames_SnapshotAndRotation(t *testing.T) {
 		t.Errorf("Expected 1234 for service-a")
 	}
 
-	entryB, err := fsn2.Get("service-b")
+	entryB, err := fsn2.Get(context.Background(), "service-b")
 	if err != nil {
 		t.Fatalf("Get service-b failed: %v", err)
 	}

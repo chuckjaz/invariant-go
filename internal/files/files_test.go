@@ -52,7 +52,7 @@ func TestFilesService_WriteAndSync(t *testing.T) {
 
 	dirData, _ := json.Marshal(filetree.Directory{})
 	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
-	err := memSlots.Create("test-slot", initLink.Address, "")
+	err := memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestFilesService_WriteAndSync(t *testing.T) {
 	}
 
 	// Check slot
-	addr, err := memSlots.Get("test-slot")
+	addr, err := memSlots.Get(context.Background(), "test-slot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestFilesService_WriteAndSyncMultipleParents(t *testing.T) {
 
 	dirData, _ := json.Marshal(filetree.Directory{})
 	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
-	err := memSlots.Create("test-slot-multi", initLink.Address, "")
+	err := memSlots.Create(context.Background(), "test-slot-multi", initLink.Address, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestFilesService_WriteFile_AppendAndOffset(t *testing.T) {
 
 	dirData, _ := json.Marshal(filetree.Directory{})
 	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
-	memSlots.Create("test-slot", initLink.Address, "")
+	memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
 
 	rootLink := content.ContentLink{
 		Address: "test-slot",

@@ -60,7 +60,7 @@ func (s *DistributeServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.distribute.Register(id); err != nil {
+	if err := s.distribute.Register(r.Context(), id); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -82,7 +82,7 @@ func (s *DistributeServer) handleNotify(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 
-	if err := s.distribute.Notify(id, req.Addresses); err != nil {
+	if err := s.distribute.Notify(r.Context(), id, req.Addresses); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

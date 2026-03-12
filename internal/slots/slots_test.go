@@ -2,6 +2,7 @@
 package slots_test
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -29,25 +30,25 @@ func runEndToEndTest(t *testing.T, service slots.Slots) {
 	address2 := "hash-2"
 
 	// 2. Get non-existent
-	_, err := client.Get(slotID)
+	_, err := client.Get(context.Background(), slotID)
 	if err != slots.ErrSlotNotFound {
 		t.Fatalf("expected ErrSlotNotFound, got %v", err)
 	}
 
 	// 3. Create new
-	err = client.Create(slotID, address1, "")
+	err = client.Create(context.Background(), slotID, address1, "")
 	if err != nil {
 		t.Fatalf("failed to create slot: %v", err)
 	}
 
 	// 4. Create already existing (Conflict)
-	err = client.Create(slotID, address2, "")
+	err = client.Create(context.Background(), slotID, address2, "")
 	if err != slots.ErrSlotExists {
 		t.Fatalf("expected ErrSlotExists, got %v", err)
 	}
 
 	// 5. Get existing
-	addr, err := client.Get(slotID)
+	addr, err := client.Get(context.Background(), slotID)
 	if err != nil {
 		t.Fatalf("failed to get slot: %v", err)
 	}
@@ -56,13 +57,13 @@ func runEndToEndTest(t *testing.T, service slots.Slots) {
 	}
 
 	// 6. Update with correct previous address
-	err = client.Update(slotID, address2, address1, nil)
+	err = client.Update(context.Background(), slotID, address2, address1, nil)
 	if err != nil {
 		t.Fatalf("failed to update slot: %v", err)
 	}
 
 	// 7. Verify update
-	addr, err = client.Get(slotID)
+	addr, err = client.Get(context.Background(), slotID)
 	if err != nil {
 		t.Fatalf("failed to get slot: %v", err)
 	}
@@ -71,13 +72,13 @@ func runEndToEndTest(t *testing.T, service slots.Slots) {
 	}
 
 	// 8. Update with incorrect previous address (Conflict)
-	err = client.Update(slotID, "hash-3", address1, nil)
+	err = client.Update(context.Background(), slotID, "hash-3", address1, nil)
 	if err != slots.ErrConflict {
 		t.Fatalf("expected ErrConflict, got %v", err)
 	}
 
 	// 9. Verify rollback/no-change
-	addr, err = client.Get(slotID)
+	addr, err = client.Get(context.Background(), slotID)
 	if err != nil {
 		t.Fatalf("failed to get slot: %v", err)
 	}
@@ -123,10 +124,10 @@ func TestSlots_FileSystemPersistence(t *testing.T) {
 	addr1 := "address-1"
 	addr2 := "address-2"
 
-	if err := fsSlots.Create(slotID, addr1, ""); err != nil {
+	if err := fsSlots.Create(context.Background(), slotID, addr1, ""); err != nil {
 		t.Fatalf("failed to create block: %v", err)
 	}
-	if err := fsSlots.Update(slotID, addr2, addr1, nil); err != nil {
+	if err := fsSlots.Update(context.Background(), slotID, addr2, addr1, nil); err != nil {
 		t.Fatalf("failed to update block: %v", err)
 	}
 
@@ -147,7 +148,7 @@ func TestSlots_FileSystemPersistence(t *testing.T) {
 		t.Fatalf("expected id %q, got %q", id, fsSlots2.ID())
 	}
 
-	val, err := fsSlots2.Get(slotID)
+	val, err := fsSlots2.Get(context.Background(), slotID)
 	if err != nil {
 		t.Fatalf("failed to get block: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestSlots_FileSystemPersistence(t *testing.T) {
 	}
 
 	// Write again to trigger snapshotting logic over time...
-	if err := fsSlots2.Update(slotID, "address-3", addr2, nil); err != nil {
+	if err := fsSlots2.Update(context.Background(), slotID, "address-3", addr2, nil); err != nil {
 		t.Fatalf("failed to update block: %v", err)
 	}
 }
@@ -175,7 +176,7 @@ func TestSlots_FileSystemSnapshots(t *testing.T) {
 	}
 
 	slotID := "snapshot-slot"
-	if err := fsSlots.Create(slotID, "val-1", ""); err != nil {
+	if err := fsSlots.Create(context.Background(), slotID, "val-1", ""); err != nil {
 		t.Fatalf("failed to create block: %v", err)
 	}
 
@@ -197,7 +198,7 @@ func TestSlots_FileSystemSnapshots(t *testing.T) {
 	}
 	defer fsSlots2.Close()
 
-	val, err := fsSlots2.Get(slotID)
+	val, err := fsSlots2.Get(context.Background(), slotID)
 	if err != nil {
 		t.Fatalf("expected to get block from snapshot, got error: %v", err)
 	}

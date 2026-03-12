@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -50,7 +51,7 @@ func main() {
 
 	if discoveryURL != "" {
 		id := n.(identity.Provider).ID()
-		err := discovery.AdvertiseAndRegister(discovery.NewClient(discoveryURL, nil), id, advertiseAddr, actualPort, []string{"names-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), discovery.NewClient(discoveryURL, nil), id, advertiseAddr, actualPort, []string{"names-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

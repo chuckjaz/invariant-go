@@ -29,14 +29,14 @@ func TestAggregateClient_StoreAndRead(t *testing.T) {
 	ts2, _ := setupTestServer()
 	defer ts2.Close()
 
-	d.Register(discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
-	d.Register(discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 2, 10)
 
 	// Write operation (round-robin)
 	content := []byte("hello cluster")
-	addr, err := c.Store(bytes.NewReader(content))
+	addr, err := c.Store(context.Background(), bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store error: %v", err)
 	}
@@ -47,17 +47,17 @@ func TestAggregateClient_StoreAndRead(t *testing.T) {
 	// Because of round robin we don't know which got it, but one did.
 	// Since readOperation will check live servers (which now has node1 & node2 populated by ensureLiveServers),
 	// read should succeed!
-	has := c.Has(addr)
+	has := c.Has(context.Background(), addr)
 	if !has {
 		t.Errorf("expected to have block %s", addr)
 	}
 
-	size, ok := c.Size(addr)
+	size, ok := c.Size(context.Background(), addr)
 	if !ok || size != int64(len(content)) {
 		t.Errorf("expected size %d, got %d", len(content), size)
 	}
 
-	rc, ok := c.Get(addr)
+	rc, ok := c.Get(context.Background(), addr)
 	if !ok {
 		t.Fatalf("expected GET to succeed")
 	}
@@ -72,12 +72,12 @@ func TestAggregateClient_LiveServerFailure(t *testing.T) {
 	d := discovery.NewInMemoryDiscovery()
 	ts1, _ := setupTestServer()
 
-	d.Register(discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 2, 10)
 
 	content := []byte("hello failover")
-	addr, err := c.Store(bytes.NewReader(content))
+	addr, err := c.Store(context.Background(), bytes.NewReader(content))
 	if err != nil {
 		t.Fatalf("Store error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestAggregateClient_LiveServerFailure(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Attempting to read should fail and remove the live server
-	has := c.Has(addr)
+	has := c.Has(context.Background(), addr)
 	if has {
 		t.Errorf("expected false for dead server")
 	}
@@ -106,9 +106,9 @@ func TestAggregateClient_LiveServerFailure(t *testing.T) {
 	// We add a new server to discovery.
 	ts2, _ := setupTestServer()
 	defer ts2.Close()
-	d.Register(discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
 
-	_, err = c.Store(bytes.NewReader([]byte("new stuff")))
+	_, err = c.Store(context.Background(), bytes.NewReader([]byte("new stuff")))
 	if err != nil {
 		t.Fatalf("expected store to succeed after requerying discovery: %v", err)
 	}
@@ -133,17 +133,17 @@ func TestAggregateClient_FinderFallback(t *testing.T) {
 	ts1, store1 := setupTestServer()
 	defer ts1.Close()
 
-	d.Register(discovery.ServiceRegistration{ID: "node-remote", Address: ts1.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node-remote", Address: ts1.URL, Protocols: []string{"storage-v1"}})
 
-	addr, _ := store1.Store(bytes.NewReader([]byte("remote block")))
+	addr, _ := store1.Store(context.Background(), bytes.NewReader([]byte("remote block")))
 
 	// Finder knows about it
-	f.Notify("node-remote", []string{addr})
+	f.Notify(context.Background(), "node-remote", []string{addr})
 
 	c := NewAggregateClient(f, d, 2, 10)
 
 	// Read should consult finder, then discovery to resolve it, then fetch it!
-	has := c.Has(addr)
+	has := c.Has(context.Background(), addr)
 	if !has {
 		t.Fatalf("expected finder fallback to discover storage server")
 	}
@@ -196,12 +196,12 @@ func TestAggregateClient_BadTransportHandling(t *testing.T) {
 	defer ts.Close()
 
 	d := discovery.NewInMemoryDiscovery()
-	d.Register(discovery.ServiceRegistration{ID: "bad-node", Address: ts.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "bad-node", Address: ts.URL, Protocols: []string{"storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 1, 10)
 
 	// Populate live list
-	c.Store(bytes.NewReader([]byte("stuff"))) // will fail, removing node immediately!
+	c.Store(context.Background(), bytes.NewReader([]byte("stuff"))) // will fail, removing node immediately!
 
 	c.liveMu.RLock()
 	count := len(c.liveIDs)
@@ -240,7 +240,7 @@ func TestAggregateClient_Sync(t *testing.T) {
 	}
 
 	// Perform a write
-	_, err := c.Store(bytes.NewReader([]byte("test data")))
+	_, err := c.Store(context.Background(), bytes.NewReader([]byte("test data")))
 	if err != nil {
 		t.Fatalf("Store failed: %v", err)
 	}

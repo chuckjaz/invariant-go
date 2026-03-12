@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 
@@ -10,7 +11,7 @@ import (
 // AdvertiseAndRegister forms the complete advertise URL and registers the service
 // with the discovery service. If the advertise address is empty, it uses localhost.
 // If it lacks a port, the port is appended.
-func AdvertiseAndRegister(disc Discovery, id, advertiseAddr string, port int, protocols []string) error {
+func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols []string) error {
 	if advertiseAddr == "" {
 		advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 	} else {
@@ -24,7 +25,7 @@ func AdvertiseAndRegister(disc Discovery, id, advertiseAddr string, port int, pr
 		}
 	}
 
-	return disc.Register(ServiceRegistration{
+	return disc.Register(ctx, ServiceRegistration{
 		ID:        id,
 		Address:   advertiseAddr,
 		Protocols: protocols,
@@ -33,16 +34,16 @@ func AdvertiseAndRegister(disc Discovery, id, advertiseAddr string, port int, pr
 
 // RegisterName uses the discovery service to find a "names-v1" service
 // and registers the given name for the given ID with the specified protocols.
-func RegisterName(disc Discovery, name, id string, protocols []string) error {
+func RegisterName(ctx context.Context, disc Discovery, name, id string, protocols []string) error {
 	if disc == nil {
 		return fmt.Errorf("a discovery service is required for the service to be named")
 	}
 
-	nameServices, err := disc.Find("names-v1", 1)
+	nameServices, err := disc.Find(ctx, "names-v1", 1)
 	if err != nil || len(nameServices) == 0 {
 		return fmt.Errorf("a discovery service with a registered names service is required for the service to be named")
 	}
 
 	nameClient := names.NewClient(nameServices[0].Address, nil)
-	return nameClient.Put(name, id, protocols)
+	return nameClient.Put(ctx, name, id, protocols)
 }

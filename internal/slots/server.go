@@ -2,6 +2,7 @@
 package slots
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -29,7 +30,7 @@ type NotifyClient interface {
 
 // StartNotification starts a background goroutine that sends all stored
 // slot IDs to the provided Has clients in batches.
-func (s *Server) StartNotification(clients []NotifyClient, batchSize int, batchDuration time.Duration) {
+func (s *Server) StartNotification(ctx context.Context, clients []NotifyClient, batchSize int, batchDuration time.Duration) {
 	if len(clients) == 0 {
 		return
 	}
@@ -42,14 +43,14 @@ func (s *Server) StartNotification(clients []NotifyClient, batchSize int, batchD
 
 	go func() {
 		// 1. Send initial batch of all existing slots
-		for batch := range s.slots.List(batchSize) {
+		for batch := range s.slots.List(ctx, batchSize) {
 			for _, client := range clients {
 				_ = client.Notify(s.id, batch)
 			}
 		}
 
 		// 2. Listen for new slots and send them in batches
-		sub := s.slots.Subscribe()
+		sub := s.slots.Subscribe(ctx)
 		var currentBatch []string
 		ticker := time.NewTicker(batchDuration)
 		defer ticker.Stop()
@@ -111,7 +112,7 @@ func (s *Server) handleGetSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addr, err := s.slots.Get(id)
+	addr, err := s.slots.Get(r.Context(), id)
 	if err != nil {
 		if err == ErrSlotNotFound {
 			http.Error(w, "Not Found", http.StatusNotFound)
@@ -146,7 +147,7 @@ func (s *Server) handleUpdateSlot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.slots.Update(id, reqBody.Address, reqBody.PreviousAddress, auth); err != nil {
+	if err := s.slots.Update(r.Context(), id, reqBody.Address, reqBody.PreviousAddress, auth); err != nil {
 		if err == ErrSlotNotFound {
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
@@ -182,7 +183,7 @@ func (s *Server) handleCreateSlot(w http.ResponseWriter, r *http.Request) {
 
 	policy := r.URL.Query().Get("protected")
 
-	if err := s.slots.Create(id, reqBody.Address, policy); err != nil {
+	if err := s.slots.Create(r.Context(), id, reqBody.Address, policy); err != nil {
 		if err == ErrSlotExists {
 			http.Error(w, "Conflict: slot already exists", http.StatusConflict)
 			return

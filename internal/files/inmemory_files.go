@@ -1001,7 +1001,7 @@ func (s *InMemoryFiles) pollSlot() {
 			continue
 		}
 
-		address, err := s.opts.Slots.Get(l.RootLink.Address)
+		address, err := s.opts.Slots.Get(context.Background(), l.RootLink.Address)
 		if err != nil {
 			continue
 		}
@@ -1169,7 +1169,7 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 		for layerIdx := range node.LayerMembership {
 			l := s.opts.Layers[layerIdx]
 			if l.RootLink.Slot {
-				err := s.opts.Slots.Update(l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx], nil)
+				err := s.opts.Slots.Update(context.Background(), l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx], nil)
 				if err == nil {
 					s.lastSlotAddresses[layerIdx] = node.LayerContents[layerIdx].Address
 				}
@@ -1303,7 +1303,7 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 		membership[i] = true
 		contents[i] = l.RootLink
 		if l.RootLink.Slot && s.opts.Slots != nil {
-			if addr, err := s.opts.Slots.Get(l.RootLink.Address); err == nil {
+			if addr, err := s.opts.Slots.Get(context.Background(), l.RootLink.Address); err == nil {
 				newLastSlotAddresses[i] = addr
 			}
 		}

@@ -2,6 +2,7 @@ package names
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -163,7 +164,7 @@ func (s *FileSystemNames) Close() error {
 	return nil
 }
 
-func (s *FileSystemNames) Get(name string) (NameEntry, error) {
+func (s *FileSystemNames) Get(ctx context.Context, name string) (NameEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -180,7 +181,7 @@ func (s *FileSystemNames) Get(name string) (NameEntry, error) {
 	}, nil
 }
 
-func (s *FileSystemNames) Put(name string, value string, tokens []string) error {
+func (s *FileSystemNames) Put(ctx context.Context, name string, value string, tokens []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -213,7 +214,7 @@ func (s *FileSystemNames) Put(name string, value string, tokens []string) error 
 	return nil
 }
 
-func (s *FileSystemNames) Delete(name string, expectedValue string) error {
+func (s *FileSystemNames) Delete(ctx context.Context, name string, expectedValue string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

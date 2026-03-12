@@ -130,7 +130,9 @@ func (c *AggregateClient) addLiveServer(serverID string) Storage {
 		return nil
 	}
 
-	svc, ok := c.discovery.Get(serverID)
+	// For adding live server, we're not inside a specific request, so we use Background.
+	// Normally we might want to attach a context to `addLiveServer`, but it's internal caching.
+	svc, ok := c.discovery.Get(context.Background(), serverID)
 	if !ok {
 		return nil
 	}
@@ -211,7 +213,7 @@ func (c *AggregateClient) getServersForBlock(address string) []string {
 
 // readOperation maps over LRU, then live servers, then finder.
 // We don't remove servers on false here, because the transport onError does it on connection issues.
-func (c *AggregateClient) readOperation(address string,
+func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	doOp func(client Storage) (any, bool)) (any, bool) {
 
 	// 1. Check LRU
@@ -251,7 +253,7 @@ func (c *AggregateClient) readOperation(address string,
 
 	// 3. Try Finder
 	if c.finder != nil {
-		responses, err := c.finder.Find(address)
+		responses, err := c.finder.Find(ctx, address)
 		if err == nil {
 			var successfulIDs []string
 			var finalVal any
@@ -282,9 +284,9 @@ func (c *AggregateClient) readOperation(address string,
 }
 
 // Has checks if any storage service contains the given address.
-func (c *AggregateClient) Has(address string) bool {
-	res, ok := c.readOperation(address, func(client Storage) (any, bool) {
-		success := client.Has(address)
+func (c *AggregateClient) Has(ctx context.Context, address string) bool {
+	res, ok := c.readOperation(ctx, address, func(client Storage) (any, bool) {
+		success := client.Has(ctx, address)
 		if success {
 			return true, true
 		}
@@ -297,9 +299,9 @@ func (c *AggregateClient) Has(address string) bool {
 }
 
 // Get checks if any storage service contains the given address and returns it.
-func (c *AggregateClient) Get(address string) (io.ReadCloser, bool) {
-	res, ok := c.readOperation(address, func(client Storage) (any, bool) {
-		rc, success := client.Get(address)
+func (c *AggregateClient) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
+	res, ok := c.readOperation(ctx, address, func(client Storage) (any, bool) {
+		rc, success := client.Get(ctx, address)
 		if success {
 			return rc, true
 		}
@@ -312,9 +314,9 @@ func (c *AggregateClient) Get(address string) (io.ReadCloser, bool) {
 }
 
 // Size checks if any storage service contains the given address and returns its size.
-func (c *AggregateClient) Size(address string) (int64, bool) {
-	res, ok := c.readOperation(address, func(client Storage) (any, bool) {
-		size, success := client.Size(address)
+func (c *AggregateClient) Size(ctx context.Context, address string) (int64, bool) {
+	res, ok := c.readOperation(ctx, address, func(client Storage) (any, bool) {
+		size, success := client.Size(ctx, address)
 		if success {
 			return size, true
 		}
@@ -340,7 +342,7 @@ func (c *AggregateClient) ensureLiveServers() error {
 		return ErrNoLiveServers
 	}
 
-	services, err := c.discovery.Find("storage-v1", c.numStoreServers)
+	services, err := c.discovery.Find(context.Background(), "storage-v1", c.numStoreServers)
 	if err != nil {
 		return fmt.Errorf("failed to discover storage services: %w", err)
 	}
@@ -365,7 +367,7 @@ func (c *AggregateClient) ensureLiveServers() error {
 }
 
 // writeOperation selects a set of live servers and executes a write operation.
-func (c *AggregateClient) writeOperation(doOp func(client Storage) (any, error)) (any, error) {
+func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client Storage) (any, error)) (any, error) {
 	err := c.ensureLiveServers()
 	if err != nil {
 		return nil, err
@@ -405,14 +407,14 @@ func (c *AggregateClient) writeOperation(doOp func(client Storage) (any, error))
 }
 
 // Store saves data and returns its content-based address to one round-robined live server.
-func (c *AggregateClient) Store(r io.Reader) (string, error) {
+func (c *AggregateClient) Store(ctx context.Context, r io.Reader) (string, error) {
 	// Need to handle streaming readers by keeping them readable?
 	// If the first write fails partway, the reader is consumed!
 	// Typically, we only retry if it fails *before* writing or we copy it.
 	// But `io.Reader` can't be rewound generically.
 	// We'll just try to execute the operation. If it fails, the reader might be consumed.
-	res, err := c.writeOperation(func(client Storage) (any, error) {
-		return client.Store(r)
+	res, err := c.writeOperation(ctx, func(client Storage) (any, error) {
+		return client.Store(ctx, r)
 	})
 	if err != nil {
 		return "", err
@@ -421,9 +423,9 @@ func (c *AggregateClient) Store(r io.Reader) (string, error) {
 }
 
 // StoreAt saves data at the specified address using round-robined live servers.
-func (c *AggregateClient) StoreAt(address string, r io.Reader) (bool, error) {
-	res, err := c.writeOperation(func(client Storage) (any, error) {
-		return client.StoreAt(address, r)
+func (c *AggregateClient) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	res, err := c.writeOperation(ctx, func(client Storage) (any, error) {
+		return client.StoreAt(ctx, address, r)
 	})
 	if err != nil {
 		return false, err

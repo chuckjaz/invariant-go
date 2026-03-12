@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -15,9 +16,9 @@ type FindResponse struct {
 // Finder defines the interface for the Kademlia-based finder service.
 type Finder interface {
 	ID() string
-	Find(address string) ([]FindResponse, error)
-	Notify(storageID string, addresses []string) error
-	Peer(finderID string) error
+	Find(ctx context.Context, address string) ([]FindResponse, error)
+	Notify(ctx context.Context, storageID string, addresses []string) error
+	Peer(ctx context.Context, finderID string) error
 }
 
 // FinderTest provides testing and diagnostic methods.
@@ -61,7 +62,7 @@ func (f *MemoryFinder) ID() string {
 // Find looks up a block address. First, it checks if any known storage
 // nodes have it. If so, it returns them. Otherwise, it returns the k-closest
 // finder nodes to the address from its routing table.
-func (f *MemoryFinder) Find(address string) ([]FindResponse, error) {
+func (f *MemoryFinder) Find(ctx context.Context, address string) ([]FindResponse, error) {
 	f.mu.RLock()
 	storages, ok := f.knownBlocks[address]
 	f.mu.RUnlock()
@@ -104,7 +105,7 @@ func (f *MemoryFinder) Find(address string) ([]FindResponse, error) {
 }
 
 // Has registers that a storage ID holds the given blocks.
-func (f *MemoryFinder) Notify(storageID string, addresses []string) error {
+func (f *MemoryFinder) Notify(ctx context.Context, storageID string, addresses []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -119,7 +120,7 @@ func (f *MemoryFinder) Notify(storageID string, addresses []string) error {
 }
 
 // Peer is called when another finder notifies us of their existence.
-func (f *MemoryFinder) Peer(finderID string) error {
+func (f *MemoryFinder) Peer(ctx context.Context, finderID string) error {
 	nodeID, err := ParseNodeID(finderID)
 	if err != nil {
 		return fmt.Errorf("invalid finder ID in notify: %w", err)

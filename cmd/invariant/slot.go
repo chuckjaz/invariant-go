@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -52,18 +53,16 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 
 	dClient := discovery.NewClient(globalCfg.Discovery, nil)
 
-	// verify with finder
-	finderID, err := dClient.Find("finder-v1", 1)
+	finderID, err := dClient.Find(context.Background(), "finder-v1", 1)
 	if err == nil && len(finderID) > 0 {
 		fClient := finder.NewClient(finderID[0].Address, nil)
-		res, err := fClient.Find(blockAddress)
+		res, err := fClient.Find(context.Background(), blockAddress)
 		if err != nil || len(res) == 0 {
 			fmt.Fprintf(os.Stderr, "Warning: Block address %s could not be found via finder service.\n", blockAddress)
 		}
 	}
 
-	// find slots service
-	id, err := dClient.Find("slots-v1", 1)
+	id, err := dClient.Find(context.Background(), "slots-v1", 1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not query discovery service: %v\n", err)
 		os.Exit(1)
@@ -95,7 +94,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		slotID = hex.EncodeToString(b)
 	}
 
-	err = slotsClient.Create(slotID, blockAddress, policy)
+	err = slotsClient.Create(context.Background(), slotID, blockAddress, policy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to allocate slot: %v\n", err)
 		os.Exit(1)
@@ -119,7 +118,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if *nameFlag != "" {
-		namesID, err := dClient.Find("names-v1", 1)
+		namesID, err := dClient.Find(context.Background(), "names-v1", 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not query discovery service for names-v1: %v\n", err)
 			os.Exit(1)
@@ -128,7 +127,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 			fmt.Fprintf(os.Stderr, "Warning: Could not find any names-v1 service to register name.\n")
 		} else {
 			namesClient := names.NewClient(namesID[0].Address, nil)
-			err = namesClient.Put(*nameFlag, slotID, []string{"slot-v1"})
+			err = namesClient.Put(context.Background(), *nameFlag, slotID, []string{"slot-v1"})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to register name: %v\n", err)
 				os.Exit(1)

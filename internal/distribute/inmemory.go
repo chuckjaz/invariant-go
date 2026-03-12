@@ -1,6 +1,7 @@
 package distribute
 
 import (
+	"context"
 	"encoding/hex"
 	"log"
 	"slices"
@@ -38,7 +39,7 @@ func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts 
 }
 
 // Register registers a storage service with the distribute service.
-func (d *InMemoryDistribute) Register(id string) error {
+func (d *InMemoryDistribute) Register(ctx context.Context, id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -52,7 +53,7 @@ func (d *InMemoryDistribute) Register(id string) error {
 
 // Has notifies the distribute service that the storage service with the given
 // id has the specified data blocks.
-func (d *InMemoryDistribute) Notify(id string, addresses []string) error {
+func (d *InMemoryDistribute) Notify(ctx context.Context, id string, addresses []string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -110,7 +111,7 @@ func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (st
 	}
 
 	// Fetch from discovery
-	desc, ok := d.discovery.Get(id)
+	desc, ok := d.discovery.Get(context.Background(), id)
 	if !ok {
 		return "", false
 	}
@@ -230,12 +231,12 @@ func (d *InMemoryDistribute) Sync() {
 					// Create store client from destSrv URL
 					// And tell dest to fetch from source via its ID so dest looks it up in discovery
 					c := storage.NewClient(destAddr, nil)
-					err := c.Fetch(block, sourceSrvID)
+					err := c.Fetch(context.Background(), block, sourceSrvID)
 					if err != nil {
 						// Fallback: try using get and put directly
 						sourceClient := storage.NewClient(sourceAddr, nil)
-						if data, ok := sourceClient.Get(block); ok {
-							storeSuccess, errStore := c.StoreAt(block, data)
+						if data, ok := sourceClient.Get(context.Background(), block); ok {
+							storeSuccess, errStore := c.StoreAt(context.Background(), block, data)
 							data.Close()
 							if errStore == nil && storeSuccess {
 								log.Printf("Fallback synced block %s from %s to %s via direct relay", block, sourceAddr, destAddr)

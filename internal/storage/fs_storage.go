@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -65,13 +66,13 @@ func (s *FileSystemStorage) addressToPath(address string) string {
 	return filepath.Join(s.baseDir, dir1, dir2, filename)
 }
 
-func (s *FileSystemStorage) Has(address string) bool {
+func (s *FileSystemStorage) Has(ctx context.Context, address string) bool {
 	path := s.addressToPath(address)
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func (s *FileSystemStorage) Get(address string) (io.ReadCloser, bool) {
+func (s *FileSystemStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
 	path := s.addressToPath(address)
 	file, err := os.Open(path)
 	if err != nil {
@@ -80,7 +81,7 @@ func (s *FileSystemStorage) Get(address string) (io.ReadCloser, bool) {
 	return file, true
 }
 
-func (s *FileSystemStorage) Store(r io.Reader) (string, error) {
+func (s *FileSystemStorage) Store(ctx context.Context, r io.Reader) (string, error) {
 	// 1. Create a temporary file to read the stream and calculate the hash
 	tmpFile, err := os.CreateTemp(s.baseDir, "upload-*")
 	if err != nil {
@@ -125,7 +126,7 @@ func (s *FileSystemStorage) Store(r io.Reader) (string, error) {
 	return address, nil
 }
 
-func (s *FileSystemStorage) StoreAt(address string, r io.Reader) (bool, error) {
+func (s *FileSystemStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
 	// 1. Create a temporary file to read the stream and calculate the hash
 	tmpFile, err := os.CreateTemp(s.baseDir, "upload-*")
 	if err != nil {
@@ -165,7 +166,7 @@ func (s *FileSystemStorage) StoreAt(address string, r io.Reader) (bool, error) {
 	return true, nil
 }
 
-func (s *FileSystemStorage) Size(address string) (int64, bool) {
+func (s *FileSystemStorage) Size(ctx context.Context, address string) (int64, bool) {
 	path := s.addressToPath(address)
 	stat, err := os.Stat(path)
 	if err != nil {
@@ -174,7 +175,7 @@ func (s *FileSystemStorage) Size(address string) (int64, bool) {
 	return stat.Size(), true
 }
 
-func (s *FileSystemStorage) List(chunkSize int) <-chan []string {
+func (s *FileSystemStorage) List(ctx context.Context, chunkSize int) <-chan []string {
 	if chunkSize <= 0 {
 		chunkSize = 10000
 	}
@@ -229,7 +230,7 @@ func (s *FileSystemStorage) List(chunkSize int) <-chan []string {
 	return ch
 }
 
-func (s *FileSystemStorage) Subscribe() <-chan string {
+func (s *FileSystemStorage) Subscribe(ctx context.Context) <-chan string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := make(chan string, 100)
@@ -249,7 +250,7 @@ func (s *FileSystemStorage) notifySubscribers(address string) {
 	}
 }
 
-func (s *FileSystemStorage) Remove(address string) (bool, error) {
+func (s *FileSystemStorage) Remove(ctx context.Context, address string) (bool, error) {
 	path := s.addressToPath(address)
 	err := os.Remove(path)
 	if err != nil {

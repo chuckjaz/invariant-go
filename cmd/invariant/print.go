@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -46,7 +47,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	dClient = discovery.NewClient(discoveryURL, nil)
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(kind, 1)
+		id, err := dClient.Find(context.Background(), kind, 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not find %s service: %v\n", kind, err)
 			os.Exit(1)
@@ -70,7 +71,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 			os.Exit(1)
 		}
 	} else {
-		resolved, err := discovery.ResolveName(dClient, targetAddr)
+		resolved, err := discovery.ResolveName(context.Background(), dClient, targetAddr)
 		if err == nil && resolved != "" {
 			targetAddr = resolved
 		}

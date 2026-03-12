@@ -2,6 +2,7 @@
 package slots
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -30,7 +31,7 @@ func (m *MemorySlots) ID() string {
 }
 
 // Get returns the address for the given slot ID.
-func (m *MemorySlots) Get(id string) (string, error) {
+func (m *MemorySlots) Get(ctx context.Context, id string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -44,7 +45,7 @@ func (m *MemorySlots) Get(id string) (string, error) {
 
 // Update attempts to change the address of a slot, ensuring the previous address matches.
 // If the slot policy is "ecc", it will verify the request using the passed ed25519 auth signature.
-func (m *MemorySlots) Update(id string, address string, previousAddress string, auth []byte) error {
+func (m *MemorySlots) Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -79,7 +80,7 @@ func (m *MemorySlots) Update(id string, address string, previousAddress string, 
 }
 
 // Create creates a new slot with the given address and policy.
-func (m *MemorySlots) Create(id string, address string, policy string) error {
+func (m *MemorySlots) Create(ctx context.Context, id string, address string, policy string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -93,7 +94,7 @@ func (m *MemorySlots) Create(id string, address string, policy string) error {
 }
 
 // List returns a channel that yields chunks of all known slot IDs.
-func (m *MemorySlots) List(chunkSize int) <-chan []string {
+func (m *MemorySlots) List(ctx context.Context, chunkSize int) <-chan []string {
 	if chunkSize <= 0 {
 		chunkSize = 10000
 	}
@@ -121,7 +122,7 @@ func (m *MemorySlots) List(chunkSize int) <-chan []string {
 }
 
 // Subscribe returns a channel that yields the IDs of newly created slots.
-func (m *MemorySlots) Subscribe() <-chan string {
+func (m *MemorySlots) Subscribe(ctx context.Context) <-chan string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ch := make(chan string, 100)

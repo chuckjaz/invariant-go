@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -289,7 +290,7 @@ func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKe
 
 	link.Transforms = transforms
 
-	addr, err := store.Store(bytes.NewReader(currentData))
+	addr, err := store.Store(context.Background(), bytes.NewReader(currentData))
 	if err != nil {
 		return link, err
 	}

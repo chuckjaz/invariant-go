@@ -3,6 +3,7 @@ package slots
 
 import (
 	"bufio"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -170,7 +171,7 @@ func (s *FileSystemSlots) Close() error {
 }
 
 // Get returns the address for the given slot ID.
-func (s *FileSystemSlots) Get(id string) (string, error) {
+func (s *FileSystemSlots) Get(ctx context.Context, id string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -183,7 +184,7 @@ func (s *FileSystemSlots) Get(id string) (string, error) {
 }
 
 // Create creates a new slot with the given address and policy.
-func (s *FileSystemSlots) Create(id string, address string, policy string) error {
+func (s *FileSystemSlots) Create(ctx context.Context, id string, address string, policy string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -216,7 +217,7 @@ func (s *FileSystemSlots) Create(id string, address string, policy string) error
 }
 
 // List returns a channel that yields chunks of all known slot IDs.
-func (s *FileSystemSlots) List(chunkSize int) <-chan []string {
+func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []string {
 	if chunkSize <= 0 {
 		chunkSize = 10000
 	}
@@ -244,7 +245,7 @@ func (s *FileSystemSlots) List(chunkSize int) <-chan []string {
 }
 
 // Subscribe returns a channel that yields the IDs of newly created slots.
-func (s *FileSystemSlots) Subscribe() <-chan string {
+func (s *FileSystemSlots) Subscribe(ctx context.Context) <-chan string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := make(chan string, 100)
@@ -265,7 +266,7 @@ func (s *FileSystemSlots) notifySubscribers(id string) {
 
 // Update attempts to change the address of a slot, ensuring the previous address matches.
 // If the slot policy is "ecc", it will verify the request using the passed ed25519 auth signature.
-func (s *FileSystemSlots) Update(id string, address string, previousAddress string, auth []byte) error {
+func (s *FileSystemSlots) Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

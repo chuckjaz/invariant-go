@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"invariant/internal/discovery"
@@ -125,16 +126,16 @@ type mockDiscovery struct {
 	services map[string]discovery.ServiceDescription
 }
 
-func (m *mockDiscovery) Find(protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
 	return nil, nil // Not needed for this test
 }
 
-func (m *mockDiscovery) Get(id string) (discovery.ServiceDescription, bool) {
+func (m *mockDiscovery) Get(ctx context.Context, id string) (discovery.ServiceDescription, bool) {
 	desc, ok := m.services[id]
 	return desc, ok
 }
 
-func (m *mockDiscovery) Register(reg discovery.ServiceRegistration) error {
+func (m *mockDiscovery) Register(ctx context.Context, reg discovery.ServiceRegistration) error {
 	return nil
 }
 
@@ -144,7 +145,7 @@ func TestStorageServer_Fetch(t *testing.T) {
 	sourceContent := []byte("remote data block")
 	sourceHash := sha256.Sum256(sourceContent)
 	sourceAddr := hex.EncodeToString(sourceHash[:])
-	sourceStorage.StoreAt(sourceAddr, bytes.NewReader(sourceContent))
+	sourceStorage.StoreAt(context.Background(), sourceAddr, bytes.NewReader(sourceContent))
 
 	sourceServer := NewStorageServer(sourceStorage)
 	sourceTS := httptest.NewServer(sourceServer)
@@ -187,7 +188,7 @@ func TestStorageServer_Fetch(t *testing.T) {
 	}
 
 	// 3. Verify destination has the block
-	data, ok := destStorage.Get(sourceAddr)
+	data, ok := destStorage.Get(context.Background(), sourceAddr)
 	if !ok {
 		t.Fatalf("destination storage did not save the fetched block")
 	}

@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"context"
 	"encoding/json"
 	"invariant/internal/discovery"
 	"net/http"
@@ -49,7 +50,7 @@ func (s *FinderServer) handleFind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	responses, err := s.finder.Find(address)
+	responses, err := s.finder.Find(r.Context(), address)
 	if err != nil {
 		// Differentiate between bad address formats and internal errors
 		if err.Error() == "invalid block address format: encoding/hex: invalid byte: U+007A 'z'" {
@@ -78,7 +79,7 @@ func (s *FinderServer) handleNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if err := s.finder.Notify(storageID, reqBody.Addresses); err != nil {
+	if err := s.finder.Notify(r.Context(), storageID, reqBody.Addresses); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -94,7 +95,7 @@ func (s *FinderServer) handlePeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Add them to our routing table
-	if err := s.finder.Peer(newFinderID); err != nil {
+	if err := s.finder.Peer(r.Context(), newFinderID); err != nil {
 		http.Error(w, "Bad Request: invalid finder ID", http.StatusBadRequest)
 		return
 	}
@@ -109,7 +110,7 @@ func (s *FinderServer) handlePeer(w http.ResponseWriter, r *http.Request) {
 
 func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 	// Look up the new finder in discovery
-	desc, ok := s.discovery.Get(newFinderID)
+	desc, ok := s.discovery.Get(context.Background(), newFinderID)
 	if !ok {
 		return // Discovery doesn't know about them, can't push
 	}
@@ -154,6 +155,6 @@ func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 
 	// Send batches to the new finder
 	for sID, addrs := range pushMap {
-		remoteClient.Notify(sID, addrs)
+		remoteClient.Notify(context.Background(), sID, addrs)
 	}
 }

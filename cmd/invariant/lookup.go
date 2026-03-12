@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -40,7 +41,7 @@ func runLookup(globalCfg *config.InvariantConfig, args []string) {
 
 	dClient := discovery.NewClient(discoveryURL, nil)
 
-	resolved, err := discovery.ResolveName(dClient, name)
+	resolved, err := discovery.ResolveName(context.Background(), dClient, name)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to resolve name %q: %v\n", name, err)
 		os.Exit(1)

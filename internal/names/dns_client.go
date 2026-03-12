@@ -34,8 +34,8 @@ func NewDNSClient(resolver Resolver) *DNSClient {
 
 // Get retrieves the NameEntry for a given name using DNS TXT records.
 // It looks for a TXT record with the prefix "invariant:"
-func (c *DNSClient) Get(name string) (NameEntry, error) {
-	txts, err := c.resolver.LookupTXT(context.Background(), name)
+func (c *DNSClient) Get(ctx context.Context, name string) (NameEntry, error) {
+	txts, err := c.resolver.LookupTXT(ctx, name)
 	if err != nil {
 		// Differentiate between generic lookup errors and not found if possible.
 		// For simplicity, we'll try to map common error cases or just return ErrNotFound
@@ -76,11 +76,11 @@ func (c *DNSClient) Get(name string) (NameEntry, error) {
 }
 
 // Put is not supported by the DNS client
-func (c *DNSClient) Put(name string, value string, tokens []string) error {
+func (c *DNSClient) Put(ctx context.Context, name string, value string, tokens []string) error {
 	return ErrNotSupported
 }
 
 // Delete is not supported by the DNS client
-func (c *DNSClient) Delete(name string, expectedValue string) error {
+func (c *DNSClient) Delete(ctx context.Context, name string, expectedValue string) error {
 	return ErrNotSupported
 }

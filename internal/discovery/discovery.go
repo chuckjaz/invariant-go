@@ -1,5 +1,7 @@
 package discovery
 
+import "context"
+
 // ServiceDescription describes a registered service.
 type ServiceDescription struct {
 	ID        string   `json:"id"`
@@ -16,7 +18,7 @@ type ServiceRegistration struct {
 
 // Discovery dictates the necessary requirements for the discovery service.
 type Discovery interface {
-	Get(id string) (ServiceDescription, bool)
-	Find(protocol string, count int) ([]ServiceDescription, error)
-	Register(reg ServiceRegistration) error
+	Get(ctx context.Context, id string) (ServiceDescription, bool)
+	Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error)
+	Register(ctx context.Context, reg ServiceRegistration) error
 }

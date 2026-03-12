@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -50,7 +51,7 @@ func runName(globalCfg *config.InvariantConfig, args []string) {
 	dClient := discovery.NewClient(globalCfg.Discovery, nil)
 
 	// find names service
-	id, err := dClient.Find("names-v1", 1)
+	id, err := dClient.Find(context.Background(), "names-v1", 1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not query discovery service for names-v1: %v\n", err)
 		os.Exit(1)
@@ -67,7 +68,7 @@ func runName(globalCfg *config.InvariantConfig, args []string) {
 		tokens = strings.Split(tokensStr, ",")
 	}
 
-	err = namesClient.Put(name, hexValue, tokens)
+	err = namesClient.Put(context.Background(), name, hexValue, tokens)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to register name: %v\n", err)
 		os.Exit(1)

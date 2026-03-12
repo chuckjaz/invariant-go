@@ -1,6 +1,7 @@
 package names_test
 
 import (
+	"context"
 	"encoding/json"
 	"invariant/internal/names"
 	"net/http"
@@ -61,7 +62,7 @@ func TestNamesServer_Delete(t *testing.T) {
 	defer ts.Close()
 
 	// Add data directly to store
-	store.Put("my-name", "abc", []string{"test-v1"})
+	store.Put(context.Background(), "my-name", "abc", []string{"test-v1"})
 
 	// 1. DELETE with wrong ETag
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/my-name", nil)

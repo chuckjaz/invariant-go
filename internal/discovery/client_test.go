@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 )
@@ -21,13 +22,13 @@ func TestClient(t *testing.T) {
 		Protocols: []string{"client-protocol"},
 	}
 
-	err := client.Register(reg)
+	err := client.Register(context.Background(), reg)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
 
 	// 2. Get
-	desc, ok := client.Get("client-test-id")
+	desc, ok := client.Get(context.Background(), "client-test-id")
 	if !ok {
 		t.Fatal("Expected Get to return true")
 	}
@@ -36,7 +37,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// 3. Find with matching protocol
-	results, err := client.Find("client-protocol", 1)
+	results, err := client.Find(context.Background(), "client-protocol", 1)
 	if err != nil {
 		t.Fatalf("Find error: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// 4. Find with unknown protocol
-	results, err = client.Find("unknown-protocol", 1)
+	results, err = client.Find(context.Background(), "unknown-protocol", 1)
 	if err != nil {
 		t.Fatalf("Find error: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// 5. Test Non-existent Data
-	_, ok = client.Get("missing-id")
+	_, ok = client.Get(context.Background(), "missing-id")
 	if ok {
 		t.Fatal("Expected Get to return false for non-existent service")
 	}

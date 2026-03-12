@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 
 	"invariant/internal/names"
@@ -8,16 +9,16 @@ import (
 
 // ResolveName takes an idOrName string and uses the discovery client to find "names-v1" services
 // to resolve it if it's not a 64-character ID. It returns the 64-character ID.
-func ResolveName(dClient Discovery, idOrName string) (string, error) {
+func ResolveName(ctx context.Context, dClient Discovery, idOrName string) (string, error) {
 	if len(idOrName) == 64 {
 		return idOrName, nil
 	}
 
-	namesServers, err := dClient.Find("names-v1", 100)
+	namesServers, err := dClient.Find(ctx, "names-v1", 100)
 	if err == nil && len(namesServers) > 0 {
 		for _, ns := range namesServers {
 			nClient := names.NewClient(ns.Address, nil)
-			entry, err := nClient.Get(idOrName)
+			entry, err := nClient.Get(ctx, idOrName)
 			if err == nil {
 				return entry.Value, nil
 			}
@@ -26,7 +27,7 @@ func ResolveName(dClient Discovery, idOrName string) (string, error) {
 
 	// Fallback to DNS
 	dnsClient := names.NewDNSClient(nil)
-	entry, err := dnsClient.Get(idOrName)
+	entry, err := dnsClient.Get(ctx, idOrName)
 	if err == nil {
 		return entry.Value, nil
 	}

@@ -2,6 +2,7 @@ package distribute_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,11 +20,11 @@ type mockDiscovery struct {
 	services []discovery.ServiceDescription
 }
 
-func (m *mockDiscovery) Find(protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
 	return m.services, nil
 }
 
-func (m *mockDiscovery) Get(id string) (discovery.ServiceDescription, bool) {
+func (m *mockDiscovery) Get(ctx context.Context, id string) (discovery.ServiceDescription, bool) {
 	for _, s := range m.services {
 		if s.ID == id {
 			return s, true
@@ -32,7 +33,7 @@ func (m *mockDiscovery) Get(id string) (discovery.ServiceDescription, bool) {
 	return discovery.ServiceDescription{}, false
 }
 
-func (m *mockDiscovery) Register(reg discovery.ServiceRegistration) error {
+func (m *mockDiscovery) Register(ctx context.Context, reg discovery.ServiceRegistration) error {
 	return nil
 }
 
@@ -86,14 +87,14 @@ func TestInMemoryDistribute_Sync(t *testing.T) {
 	d := distribute.NewInMemoryDistribute(disc, 3, 3) // repFactor = 3
 
 	// Need to explicitly register all 4 services to be considered for sync
-	d.Register("0000000000000000000000000000000100000000000000000000000000000000")
-	d.Register("0000000000000000000000000000000200000000000000000000000000000000")
-	d.Register("0000000000000000000000000000000300000000000000000000000000000000")
-	d.Register("0000000000000000000000000000000400000000000000000000000000000000")
+	d.Register(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000")
+	d.Register(context.Background(), "0000000000000000000000000000000200000000000000000000000000000000")
+	d.Register(context.Background(), "0000000000000000000000000000000300000000000000000000000000000000")
+	d.Register(context.Background(), "0000000000000000000000000000000400000000000000000000000000000000")
 
 	// Node 1 has a block
 	blockID := "1111111111111111111111111111111111111111111111111111111111111111"
-	d.Notify("0000000000000000000000000000000100000000000000000000000000000000", []string{blockID})
+	d.Notify(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000", []string{blockID})
 
 	// Run sync
 	d.Sync()
@@ -171,11 +172,11 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 	// Create distribute with maxAttempts = 2
 	d := distribute.NewInMemoryDistribute(disc, 2, 2)
 
-	d.Register(id1)
-	d.Register(id2)
+	d.Register(context.Background(), id1)
+	d.Register(context.Background(), id2)
 
 	blockID := "2222222222222222222222222222222222222222222222222222222222222222"
-	d.Notify(id1, []string{blockID})
+	d.Notify(context.Background(), id1, []string{blockID})
 
 	// First sync attempt will fail on s2 (fetch fails, fallback gets 500)
 	// Attempts = 2 as per the inner loop of sync for each location
@@ -246,11 +247,11 @@ func TestInMemoryDistribute_Sync_OnlyRegistered(t *testing.T) {
 	d := distribute.NewInMemoryDistribute(disc, 2, 3)
 
 	// ONLY register node 1
-	d.Register("0000000000000000000000000000000100000000000000000000000000000000") // node 1 is registered but DOESN'T have the block originally
+	d.Register(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000") // node 1 is registered but DOESN'T have the block originally
 
 	// We cheat here and say an UNREGISTERED node has the block, but d.Has automatically
 	// adds it to d.services. Let's construct scenario where Block is in d.services, but Node 2 is completely out of d.services.
-	d.Notify("0000000000000000000000000000000100000000000000000000000000000000", []string{"1111111111111111111111111111111111111111111111111111111111111111"})
+	d.Notify(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000", []string{"1111111111111111111111111111111111111111111111111111111111111111"})
 
 	d.Sync()
 
@@ -297,19 +298,19 @@ func TestInMemoryDistribute_Sync_Integration(t *testing.T) {
 	dist := distribute.NewInMemoryDistribute(disc, 3, 3)
 
 	// 4. Register all 3 in the distribute service
-	dist.Register(id1)
-	dist.Register(id2)
-	dist.Register(id3)
+	dist.Register(context.Background(), id1)
+	dist.Register(context.Background(), id2)
+	dist.Register(context.Background(), id3)
 
 	// 5. Store a random block into store1
 	blockData := []byte("random block data integration test")
-	addr, err := store1.Store(bytes.NewReader(blockData))
+	addr, err := store1.Store(context.Background(), bytes.NewReader(blockData))
 	if err != nil {
 		t.Fatalf("Failed to store initial block: %v", err)
 	}
 
 	// Tell distribute that node 1 has it
-	dist.Notify(id1, []string{addr})
+	dist.Notify(context.Background(), id1, []string{addr})
 
 	// 6. Run Sync
 	// Since HTTP fetch is not supported completely by the storage server (returns 404),
@@ -320,10 +321,10 @@ func TestInMemoryDistribute_Sync_Integration(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// 7. Verify that store2 and store3 now have the block
-	if !store2.Has(addr) {
+	if !store2.Has(context.Background(), addr) {
 		t.Errorf("store2 did not receive the synchronized block")
 	}
-	if !store3.Has(addr) {
+	if !store3.Has(context.Background(), addr) {
 		t.Errorf("store3 did not receive the synchronized block")
 	}
 }

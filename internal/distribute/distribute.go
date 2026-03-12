@@ -1,6 +1,7 @@
 package distribute
 
 import (
+	"context"
 	"invariant/internal/container"
 	"math/bits"
 )
@@ -8,7 +9,7 @@ import (
 // Distribute defines the core logic for managing the distribution of blobs.
 type Distribute interface {
 	container.Container
-	Register(id string) error
+	Register(ctx context.Context, id string) error
 }
 
 // Distance calculates the Kademlia distance between two 32-byte IDs represented as byte slices.

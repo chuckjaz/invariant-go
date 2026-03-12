@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -48,7 +49,7 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
-		err := discovery.AdvertiseAndRegister(disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "notify-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "notify-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -56,7 +57,7 @@ func main() {
 	}
 
 	if name != "" {
-		err := discovery.RegisterName(disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
+		err := discovery.RegisterName(context.Background(), disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register name %q: %v", name, err)
 		}

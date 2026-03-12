@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -20,7 +21,7 @@ func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay
 	var id string
 	var err error
 	for i := range retries {
-		id, err = discovery.ResolveName(dClient, name)
+		id, err = discovery.ResolveName(context.Background(), dClient, name)
 		if err == nil {
 			return id, nil
 		}
@@ -77,14 +78,14 @@ func main() {
 		// Configure the storage server to use discovery for fetching
 		server.WithDiscovery(dClient)
 
-		err := discovery.AdvertiseAndRegister(dClient, id, advertiseAddr, actualPort, []string{"storage-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
 
 		if name != "" {
-			err := discovery.RegisterName(dClient, name, id, []string{"storage-v1"})
+			err := discovery.RegisterName(context.Background(), dClient, name, id, []string{"storage-v1"})
 			if err != nil {
 				log.Fatalf("Failed to register name %q: %v", name, err)
 			}
@@ -108,7 +109,7 @@ func main() {
 				continue
 			}
 
-			desc, ok := dClient.Get(hid)
+			desc, ok := dClient.Get(context.Background(), hid)
 			if !ok {
 				log.Fatalf("Could not find address for Notify service ID %s", hid)
 				continue
@@ -132,7 +133,7 @@ func main() {
 			log.Fatalf("Warning: Could not resolve distribute name %v", err)
 		}
 
-		desc, ok := dClient.Get(distID)
+		desc, ok := dClient.Get(context.Background(), distID)
 		if !ok {
 			log.Fatalf("Could not find distribute service %s in discovery", distID)
 		}
@@ -148,7 +149,7 @@ func main() {
 	}
 
 	if len(notifyClients) > 0 {
-		server.StartNotification(notifyClients, notifyBatchSize, notifyBatchDuration)
+		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
 	log.Printf("Listening on :%d...", actualPort)

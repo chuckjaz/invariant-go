@@ -7,11 +7,11 @@ import (
 
 // Storage dictates the necessary requirements for standard invariant byte chunk blocks mapping
 type Storage interface {
-	Has(address string) bool
-	Get(address string) (io.ReadCloser, bool)
-	Store(r io.Reader) (string, error)
-	StoreAt(address string, r io.Reader) (bool, error)
-	Size(address string) (int64, bool)
+	Has(ctx context.Context, address string) bool
+	Get(ctx context.Context, address string) (io.ReadCloser, bool)
+	Store(ctx context.Context, r io.Reader) (string, error)
+	StoreAt(ctx context.Context, address string, r io.Reader) (bool, error)
+	Size(ctx context.Context, address string) (int64, bool)
 }
 
 // SyncStorage is an optional interface allowing storage backends to persist metadata/data.
@@ -23,9 +23,9 @@ type SyncStorage interface {
 // ControlledStorage adds capabilities to iterate and subscribe to a Storage
 type ControlledStorage interface {
 	Storage
-	List(chunkSize int) <-chan []string
-	Subscribe() <-chan string
-	Remove(address string) (bool, error)
+	List(ctx context.Context, chunkSize int) <-chan []string
+	Subscribe(ctx context.Context) <-chan string
+	Remove(ctx context.Context, address string) (bool, error)
 }
 
 // StorageFetchRequest represents a request to fetch a block from another service
