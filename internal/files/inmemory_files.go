@@ -15,6 +15,7 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/filetree"
+	"invariant/internal/storage"
 )
 
 // InMemoryFiles represents the files service.
@@ -1166,6 +1167,12 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 	delete(s.dirtyNodes, id)
 
 	if id == 1 && s.opts.Slots != nil {
+		if syncer, ok := s.opts.Storage.(storage.SyncStorage); ok {
+			if err := syncer.Sync(context.Background()); err != nil {
+				log.Printf("Failed to sync storage before slot update: %v", err)
+			}
+		}
+
 		for layerIdx := range node.LayerMembership {
 			l := s.opts.Layers[layerIdx]
 			if l.RootLink.Slot {
