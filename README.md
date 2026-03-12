@@ -67,14 +67,15 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 - `slot`: Allocate a new slot from the slots service.
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
-- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading and name-to-address resolution).
-- `upload`: Upload a local directory to invariant storage as a file tree.
+- `lookup`: Look up a registered name to get its corresponding ID or address.
+- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading, name-to-address resolution, and optimized read/write caching).
+- `upload`: Upload a local directory to invariant storage as a file tree, preserving file creation and modification times.
   - Supports `--compress` and `--encrypt`.
-  - Supports `--key-policy` (e.g. `RandomPerBlock`, `RandomAllKey`, `Deterministic`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
-  - Supports `--slot <hex_id>` to automatically update a mutable slot to point to the new content tree on successful upload.
+  - Supports `--key-policy` (e.g. `Deterministic` (default), `RandomPerBlock`, `RandomAllKey`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
+  - Supports `--slot <hex_id_or_name>` to automatically update a mutable slot (resolved by ID or name) to point to the new content tree on successful upload.
   - Supports `--prev <hex_id>` to supply the parent payload state if the local slot cache (`~/.invariant/slots/`) is empty.
 - `files`: Manage and interact with files backed by AggregateClient storage.
-- `print`: Print a block's contents to standard output.
+- `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe.
 
 ```bash
 # Start services defined in services.yaml
