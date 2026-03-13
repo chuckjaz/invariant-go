@@ -434,7 +434,9 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 			if kind == filetree.FileKind {
 				childNode.Size = uint64(len(data))
 			}
-			link, err := content.Write(bytes.NewReader(data), s.getStorageForNode(childNode), s.opts.WriterOptions)
+			opts := s.opts.WriterOptions
+			opts.Filename = name
+			link, err := content.Write(bytes.NewReader(data), s.getStorageForNode(childNode), opts)
 			if err != nil {
 				return fmt.Errorf("failed to save file: %v", err)
 			}
@@ -611,7 +613,9 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 		})
 	}
 
-	link, err := content.Write(io.MultiReader(parts...), s.getStorageForNode(node), s.opts.WriterOptions)
+	opts := s.opts.WriterOptions
+	opts.Filename = node.Name
+	link, err := content.Write(io.MultiReader(parts...), s.getStorageForNode(node), opts)
 	if err != nil {
 		return err
 	}

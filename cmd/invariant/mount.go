@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -37,6 +38,14 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
 	var cacheSizeMB int
 	fsFlags.IntVar(&cacheSizeMB, "cache", 10, "In-memory caching size in MB for storage backend (0 to disable)")
+	var compress bool
+	var encrypt bool
+	var keyPolicyStr string
+	var keyStr string
+	fsFlags.BoolVar(&compress, "compress", false, "Compress the written content")
+	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the written content")
+	fsFlags.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
+	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options]\n\n")
@@ -103,6 +112,43 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		finalStorage = storage.NewCachingStorage(localStore, storageClient, maxSizeBytes, desiredSizeBytes, true)
 	}
 
+	var writerOpts content.WriterOptions
+	if compress {
+		writerOpts.CompressAlgorithm = "gzip"
+	}
+	if encrypt {
+		writerOpts.EncryptAlgorithm = "aes-256-cbc"
+
+		switch keyPolicyStr {
+		case "RandomPerBlock":
+			writerOpts.KeyPolicy = content.RandomPerBlock
+		case "RandomAllKey":
+			writerOpts.KeyPolicy = content.RandomAllKey
+		case "Deterministic":
+			writerOpts.KeyPolicy = content.Deterministic
+		case "SuppliedAllKey":
+			writerOpts.KeyPolicy = content.SuppliedAllKey
+			if keyStr == "" {
+				log.Fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
+			}
+
+			importHex, err := hex.DecodeString(keyStr)
+			if err != nil {
+				log.Fatalf("Error parsing --key: %v", err)
+			}
+			if len(importHex) != 32 {
+				log.Fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
+			}
+			writerOpts.SuppliedKey = importHex
+		default:
+			log.Fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
+		}
+	}
+	writerOpts.Splitters = []content.Splitter{
+		&content.ZipSplitter{},
+		&content.BuzHashSplitter{},
+	}
+
 	opts := files.Options{
 		Storage:   finalStorage,
 		Discovery: dClient,
@@ -113,6 +159,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		},
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
+		WriterOptions:    writerOpts,
 	}
 
 	rc, err := content.Read(opts.RootLink, finalStorage, slotsClient)
