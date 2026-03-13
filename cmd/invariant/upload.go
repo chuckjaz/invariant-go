@@ -325,6 +325,12 @@ func processFile(filePath, name string, store storage.Storage, opts content.Writ
 		return nil, err
 	}
 
+	opts.Filename = name
+	opts.Splitters = []content.Splitter{
+		&content.ZipSplitter{},
+		&content.BuzHashSplitter{},
+	}
+
 	link, err := content.Write(file, store, opts)
 	if err != nil {
 		return nil, err
