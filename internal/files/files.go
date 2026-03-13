@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"invariant/internal/content"
+	"invariant/internal/discovery"
 	"invariant/internal/filetree"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -55,15 +56,17 @@ type Files interface {
 
 // Layer defines a composed filetree tier with inclusion/exclusion rules.
 type Layer struct {
-	RootLink content.ContentLink
-	Includes []string
-	Excludes []string
+	RootLink           content.ContentLink
+	Includes           []string
+	Excludes           []string
+	StorageDestination string `json:"storageDestination,omitempty"`
 }
 
 // Options configuring the internal Files service.
 type Options struct {
 	Slots            slots.Slots
 	Storage          storage.Storage
+	Discovery        discovery.Discovery
 	RootLink         content.ContentLink
 	Layers           []Layer
 	AutoSyncTimeout  time.Duration

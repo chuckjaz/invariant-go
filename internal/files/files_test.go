@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"invariant/internal/content"
+	"invariant/internal/discovery"
 	"invariant/internal/filetree"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -307,5 +308,105 @@ func TestFilesService_WriteFile_AppendAndOffset(t *testing.T) {
 	expected := "hello WORLD\x00\x00\x00\x00!"
 	if string(data) != expected {
 		t.Errorf("expected %q, got %q", expected, string(data))
+	}
+}
+
+// mockDiscovery is a simple mock discovery service for testing
+type mockDiscovery struct {
+	services map[string]discovery.ServiceDescription
+}
+
+func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
+	return nil, nil // Not needed for this test
+}
+
+func (m *mockDiscovery) Get(ctx context.Context, id string) (discovery.ServiceDescription, bool) {
+	desc, ok := m.services[id]
+	return desc, ok
+}
+
+func (m *mockDiscovery) Register(ctx context.Context, reg discovery.ServiceRegistration) error {
+	return nil
+}
+
+func TestFilesService_StorageDestination(t *testing.T) {
+	// Root storage
+	defaultStore := storage.NewInMemoryStorage()
+
+	destStore := storage.NewInMemoryStorage()
+	destServer := storage.NewStorageServer(destStore)
+	ts := httptest.NewServer(destServer.Handler())
+	defer ts.Close()
+
+	disc := &mockDiscovery{
+		services: map[string]discovery.ServiceDescription{
+			"custom-dest": {ID: "custom-dest", Address: ts.URL},
+		},
+	}
+
+	memSlots := slots.NewMemorySlots("test-slot-id")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), defaultStore, content.WriterOptions{})
+	content.Write(bytes.NewReader(dirData), destStore, content.WriterOptions{}) // Give destStore the root directory block too
+	memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
+
+	rootLink := content.ContentLink{
+		Address: "test-slot",
+		Slot:    true,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:          defaultStore,
+		Discovery:        disc,
+		Slots:            memSlots,
+		RootLink:         rootLink,
+		AutoSyncTimeout:  time.Hour,
+		SlotPollInterval: time.Hour,
+		Layers: []Layer{
+			{
+				RootLink: rootLink,
+			},
+			{
+				RootLink:           rootLink, // Using same root mock for test simplicity
+				Includes:           []string{"/dest-dir", "/dest-dir/*"},
+				StorageDestination: "custom-dest",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+
+	err = filesService.CreateEntry(ctx, 1, "dest-dir", filetree.DirectoryKind, "", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create entry: %v", err)
+	}
+
+	filesService.mu.RLock()
+	dirID := filesService.nodes[1].Children["dest-dir"]
+	filesService.mu.RUnlock()
+
+	err = filesService.CreateEntry(ctx, dirID, "test-dest.txt", filetree.FileKind, "", nil, bytes.NewReader([]byte("destination content")))
+	if err != nil {
+		t.Fatalf("failed to create entry: %v", err)
+	}
+
+	filesService.mu.RLock()
+	fileID := filesService.nodes[dirID].Children["test-dest.txt"]
+	fileNode := filesService.nodes[fileID]
+	filesService.mu.RUnlock()
+
+	// Content should explicitly not exist in defaultStore
+	if defaultStore.Has(ctx, fileNode.Content.Address) {
+		t.Errorf("Expected content to NOT be in defaultStore")
+	}
+
+	// Content should explicitly exist in destStore
+	if !destStore.Has(ctx, fileNode.Content.Address) {
+		t.Errorf("Expected content to be in destStore")
 	}
 }

@@ -104,8 +104,9 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	opts := files.Options{
-		Storage: finalStorage,
-		Slots:   slotsClient,
+		Storage:   finalStorage,
+		Discovery: dClient,
+		Slots:     slotsClient,
 		RootLink: content.ContentLink{
 			Address: rootAddr,
 			Slot:    rootIsSlot,

@@ -32,6 +32,9 @@ type InMemoryFiles struct {
 	layerDependencies map[string]bool
 	lastSlotAddresses map[int]string
 
+	destClientsMu sync.RWMutex
+	destClients   map[string]storage.Storage
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -91,6 +94,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 		dirtyNodes:        make(map[uint64]bool),
 		layerDependencies: make(map[string]bool),
 		lastSlotAddresses: make(map[int]string),
+		destClients:       make(map[string]storage.Storage),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -216,7 +220,7 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 			continue // This layer might not have this directory instantiated remotely yet
 		}
 
-		reader, err := content.Read(contentLink, s.opts.Storage, s.opts.Slots)
+		reader, err := content.Read(contentLink, s.getStorageForLayer(layerIdx), s.opts.Slots)
 		if err != nil {
 			return fmt.Errorf("failed to create reader for directory %d layer %d: %w", id, layerIdx, err)
 		}
@@ -310,18 +314,18 @@ func (s *InMemoryFiles) getFullPath(id uint64) string {
 	}
 
 	if len(node.Parents) == 0 {
-		return node.Name
+		return "/" + node.Name
 	}
 
 	// Assuming a single dominant parent for simple path resolution
 	for parentID := range node.Parents {
 		parentPath := s.getFullPath(parentID)
-		if parentPath == "" {
-			return node.Name
+		if parentPath == "" || parentPath == "/" {
+			return "/" + node.Name
 		}
 		return parentPath + "/" + node.Name
 	}
-	return node.Name
+	return "/" + node.Name
 }
 
 func (s *InMemoryFiles) deleteNodeRecursively(id uint64, parentID uint64) {
@@ -362,8 +366,8 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 
 	layerMembership := make(map[int]bool)
 	childPath := s.getFullPath(parentID)
-	if childPath == "" {
-		childPath = name
+	if childPath == "" || childPath == "/" {
+		childPath = "/" + name
 	} else {
 		childPath = childPath + "/" + name
 	}
@@ -429,7 +433,7 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 			if kind == filetree.FileKind {
 				childNode.Size = uint64(len(data))
 			}
-			link, err := content.Write(bytes.NewReader(data), s.opts.Storage, s.opts.WriterOptions)
+			link, err := content.Write(bytes.NewReader(data), s.getStorageForNode(childNode), s.opts.WriterOptions)
 			if err != nil {
 				return fmt.Errorf("failed to save file: %v", err)
 			}
@@ -474,7 +478,7 @@ func (s *InMemoryFiles) ReadFile(ctx context.Context, nodeID uint64, offset, len
 	}
 	s.mu.RUnlock()
 
-	reader, err := content.Read(link, s.opts.Storage, s.opts.Slots)
+	reader, err := content.Read(link, s.getStorageForNode(node), s.opts.Slots)
 	if err != nil {
 		return nil, err
 	}
@@ -574,7 +578,7 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	var existingReader io.ReadCloser
 	if node.Content.Address != "" {
 		var err error
-		existingReader, err = content.Read(node.Content, s.opts.Storage, s.opts.Slots)
+		existingReader, err = content.Read(node.Content, s.getStorageForNode(node), s.opts.Slots)
 		if err != nil {
 			return fmt.Errorf("failed to read existing content: %w", err)
 		}
@@ -606,7 +610,7 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 		})
 	}
 
-	link, err := content.Write(io.MultiReader(parts...), s.opts.Storage, s.opts.WriterOptions)
+	link, err := content.Write(io.MultiReader(parts...), s.getStorageForNode(node), s.opts.WriterOptions)
 	if err != nil {
 		return err
 	}
@@ -1153,7 +1157,7 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 				opts = applyTransformsToOptions(s.opts.Layers[layerIdx].RootLink.Transforms, opts)
 			}
 
-			link, err := content.Write(bytes.NewReader(data), s.opts.Storage, opts)
+			link, err := content.Write(bytes.NewReader(data), s.getStorageForLayer(layerIdx), opts)
 			if err != nil {
 				return err
 			}
@@ -1287,12 +1291,12 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	defer s.mu.Unlock()
 
 	var newLayers []Layer
-	if len(layers) > 0 {
-		newLayers = append(newLayers, layers...)
-	}
 	newLayers = append(newLayers, Layer{
 		RootLink: s.opts.RootLink,
 	})
+	if len(layers) > 0 {
+		newLayers = append(newLayers, layers...)
+	}
 
 	s.layerDependencies = make(map[string]bool)
 
@@ -1423,7 +1427,7 @@ func (s *InMemoryFiles) resolveLayerRulesLocked(rules []string) []string {
 			continue
 		}
 
-		rc, err := content.Read(link, s.opts.Storage, s.opts.Slots)
+		rc, err := content.Read(link, s.getStorageForNode(currNode), s.opts.Slots)
 		if err != nil {
 			continue
 		}
@@ -1443,4 +1447,58 @@ func (s *InMemoryFiles) resolveLayerRulesLocked(rules []string) []string {
 		}
 	}
 	return resolved
+}
+
+// getStorageForLayer returns the storage client for the given layer.
+func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
+	if layerIdx < 0 || layerIdx >= len(s.opts.Layers) {
+		return s.opts.Storage
+	}
+
+	dest := s.opts.Layers[layerIdx].StorageDestination
+	if dest == "" || s.opts.Discovery == nil {
+		return s.opts.Storage
+	}
+
+	s.destClientsMu.RLock()
+	client, ok := s.destClients[dest]
+	s.destClientsMu.RUnlock()
+	if ok {
+		return client
+	}
+
+	// Not cached, lookup in discovery
+	desc, ok := s.opts.Discovery.Get(s.ctx, dest)
+	if !ok {
+		log.Printf("Warning: storage destination %s not found in discovery for layer %d. Falling back to default storage.", dest, layerIdx)
+		return s.opts.Storage
+	}
+
+	s.destClientsMu.Lock()
+	defer s.destClientsMu.Unlock()
+
+	// Check again in case another goroutine just added it
+	if client, ok := s.destClients[dest]; ok {
+		return client
+	}
+
+	newClient := storage.NewClient(desc.Address, nil)
+	s.destClients[dest] = newClient
+	return newClient
+}
+
+// getStorageForNode returns the storage client for the most specific layer a node belongs to.
+func (s *InMemoryFiles) getStorageForNode(node *Node) storage.Storage {
+	if node == nil {
+		return s.opts.Storage
+	}
+
+	layerIdx := -1
+	for idx, val := range node.LayerMembership {
+		if val && idx > layerIdx {
+			layerIdx = idx
+		}
+	}
+
+	return s.getStorageForLayer(layerIdx)
 }

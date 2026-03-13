@@ -21,6 +21,7 @@ func TestFilesService_LayeredRouting(t *testing.T) {
 	opts := Options{
 		Storage:       store,
 		Slots:         slotsSvc,
+		RootLink:      content.ContentLink{Slot: true},
 		WriterOptions: content.WriterOptions{},
 		Layers: []Layer{
 			{
@@ -82,17 +83,17 @@ func TestFilesService_LayeredRouting(t *testing.T) {
 	internalFs.mu.RLock()
 	defer internalFs.mu.RUnlock()
 
-	verifyLayer := func(name string, expectedLayer0 bool, expectedLayer1 bool) {
+	verifyLayer := func(name string, expectedLayer1 bool, expectedLayer2 bool) {
 		t.Helper()
 		var found bool
 		for _, node := range internalFs.nodes {
 			if node.Name == name {
 				found = true
-				if node.LayerMembership[0] != expectedLayer0 {
-					t.Errorf("Node %q Layer 0 membership mismatch. Expected: %v, Got: %v", name, expectedLayer0, node.LayerMembership[0])
-				}
 				if node.LayerMembership[1] != expectedLayer1 {
 					t.Errorf("Node %q Layer 1 membership mismatch. Expected: %v, Got: %v", name, expectedLayer1, node.LayerMembership[1])
+				}
+				if node.LayerMembership[2] != expectedLayer2 {
+					t.Errorf("Node %q Layer 2 membership mismatch. Expected: %v, Got: %v", name, expectedLayer2, node.LayerMembership[2])
 				}
 			}
 		}
@@ -154,11 +155,11 @@ func TestFilesService_LayerDependencies(t *testing.T) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	if len(fs.opts.Layers) < 2 { // 0 + root layer
+	if len(fs.opts.Layers) < 2 { // root + 1 layer
 		t.Fatalf("Expected at least 2 layers, got %d", len(fs.opts.Layers))
 	}
 
-	layer := fs.opts.Layers[0]
+	layer := fs.opts.Layers[1]
 	if len(layer.Excludes) != 3 {
 		t.Fatalf("Expected 3 excludes, got %v", layer.Excludes)
 	}
