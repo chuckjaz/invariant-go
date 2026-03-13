@@ -35,6 +35,10 @@ func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay
 func main() {
 	var dir string
 	flag.StringVar(&dir, "dir", "", "Base directory for file system storage")
+	var s3Bucket string
+	flag.StringVar(&s3Bucket, "s3-bucket", "", "AWS S3 bucket name for storage")
+	var s3Prefix string
+	flag.StringVar(&s3Prefix, "s3-prefix", "", "AWS S3 prefix for storage keys")
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
@@ -54,7 +58,13 @@ func main() {
 	flag.Parse()
 
 	var s storage.Storage
-	if dir != "" {
+	if s3Bucket != "" {
+		var err error
+		s, err = storage.NewS3Storage(context.Background(), s3Bucket, s3Prefix)
+		if err != nil {
+			log.Fatalf("Failed to initialize S3 storage: %v", err)
+		}
+	} else if dir != "" {
 		s = storage.NewFileSystemStorage(dir)
 	} else {
 		s = storage.NewInMemoryStorage()
@@ -153,7 +163,9 @@ func main() {
 	}
 
 	log.Printf("Listening on :%d...", actualPort)
-	if dir != "" {
+	if s3Bucket != "" {
+		log.Printf("Using S3 storage at bucket %s (prefix: %s)", s3Bucket, s3Prefix)
+	} else if dir != "" {
 		log.Printf("Using File System storage at %s", dir)
 	} else {
 		log.Printf("Using In-Memory storage")
