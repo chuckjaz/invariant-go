@@ -1465,7 +1465,7 @@ func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
 	client, ok := s.destClients[dest]
 	s.destClientsMu.RUnlock()
 	if ok {
-		return client
+		return storage.NewJoinedStorage(client, s.opts.Storage)
 	}
 
 	// Not cached, lookup in discovery
@@ -1480,12 +1480,12 @@ func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
 
 	// Check again in case another goroutine just added it
 	if client, ok := s.destClients[dest]; ok {
-		return client
+		return storage.NewJoinedStorage(client, s.opts.Storage)
 	}
 
 	newClient := storage.NewClient(desc.Address, nil)
 	s.destClients[dest] = newClient
-	return newClient
+	return storage.NewJoinedStorage(newClient, s.opts.Storage)
 }
 
 // getStorageForNode returns the storage client for the most specific layer a node belongs to.
