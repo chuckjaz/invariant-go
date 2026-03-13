@@ -34,3 +34,16 @@ func ResolveName(ctx context.Context, dClient Discovery, idOrName string) (strin
 
 	return "", fmt.Errorf("could not resolve name %s using names servers or DNS", idOrName)
 }
+
+// Resolve uses ResolveName to find the ID and then looks up the service.
+func Resolve(ctx context.Context, dClient Discovery, idOrName string) (ServiceDescription, error) {
+	id, err := ResolveName(ctx, dClient, idOrName)
+	if err != nil {
+		return ServiceDescription{}, err
+	}
+	desc, ok := dClient.Get(ctx, id)
+	if !ok {
+		return ServiceDescription{}, fmt.Errorf("service %s not found", id)
+	}
+	return desc, nil
+}

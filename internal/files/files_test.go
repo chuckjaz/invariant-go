@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,9 +339,11 @@ func TestFilesService_StorageDestination(t *testing.T) {
 	ts := httptest.NewServer(destServer.Handler())
 	defer ts.Close()
 
+	customDestID := strings.Repeat("a", 64)
+
 	disc := &mockDiscovery{
 		services: map[string]discovery.ServiceDescription{
-			"custom-dest": {ID: "custom-dest", Address: ts.URL},
+			customDestID: {ID: customDestID, Address: ts.URL},
 		},
 	}
 
@@ -370,7 +373,7 @@ func TestFilesService_StorageDestination(t *testing.T) {
 			{
 				RootLink:           rootLink, // Using same root mock for test simplicity
 				Includes:           []string{"/dest-dir", "/dest-dir/*"},
-				StorageDestination: "custom-dest",
+				StorageDestination: customDestID,
 			},
 		},
 	})

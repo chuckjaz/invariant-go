@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"invariant/internal/content"
+	"invariant/internal/discovery"
 	"invariant/internal/filetree"
 	"invariant/internal/storage"
 )
@@ -1468,9 +1469,9 @@ func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
 	}
 
 	// Not cached, lookup in discovery
-	desc, ok := s.opts.Discovery.Get(s.ctx, dest)
-	if !ok {
-		log.Printf("Warning: storage destination %s not found in discovery for layer %d. Falling back to default storage.", dest, layerIdx)
+	desc, err := discovery.Resolve(s.ctx, s.opts.Discovery, dest)
+	if err != nil {
+		log.Printf("Warning: storage destination %s not found in discovery for layer %d: %v. Falling back to default storage.", dest, layerIdx, err)
 		return s.opts.Storage
 	}
 
