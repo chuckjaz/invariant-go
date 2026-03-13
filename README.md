@@ -1,6 +1,21 @@
 # The invariant project
 
-A storage system of invariant data that can be used for general purpose programming.
+A content addressing storage system that can be used to store abitrary data. Data can be uploaded to the storage system and retrieved using a content link. The storage system is built on top of a distributed storage system that can be scaled arbitrarily.
+
+The system is made up of multiple micro-services that can be run independently or together and replaced or updated arbitrarily.
+
+### File System
+A directory can be uploaded to the storage system and then mounted locally via FUSE. The directory can then be interacted with as a regular file system. The file system can be mounted on mutliple machines and will automatically sync from one machine to another.
+
+The file system can be layered, which allows for files in a dirctory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
+
+### Automatic backup and recovery
+The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encyrpted copies of the files at rest.
+
+If the local storage device fails, the system can be configured to automatically recover from the cloud storage provider incrementally. The files are then cached locally as they are read from the cloud storage provider.
+
+### Replication
+When storing files locally, either on the same machine, or via a connected storage device, the data can be distributed amoung multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor. If the data is backed up to the cloud, the data will not be lost if the local storage device fails. The data will be read from the cloud storage provider not cached locally.
 
 ## Executing the services
 
@@ -74,7 +89,6 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - Supports `--key-policy` (e.g. `Deterministic` (default), `RandomPerBlock`, `RandomAllKey`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
   - Supports `--slot <hex_id_or_name>` to automatically update a mutable slot (resolved by ID or name) to point to the new content tree on successful upload.
   - Supports `--prev <hex_id>` to supply the parent payload state if the local slot cache (`~/.invariant/slots/`) is empty.
-- `files`: Manage and interact with files backed by AggregateClient storage.
 - `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe.
 
 ```bash
