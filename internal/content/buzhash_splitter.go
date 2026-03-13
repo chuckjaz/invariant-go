@@ -23,7 +23,7 @@ func (s *BuzHashSplitter) Split(r io.Reader, opts WriterOptions, writeChunk func
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
-			for i := 0; i < n; i++ {
+			for i := range n {
 				b := buf[i]
 				h := bh.WriteB(b)
 				currentChunk.WriteByte(b)

@@ -26,6 +26,9 @@ To run the discovery server ([protocol description](docs/Discovery.md)), which d
 ```bash
 # Run with in-memory discovery storage
 go run ./cmd/discovery -port 3003
+
+# Run with upstream delegation to another discovery service
+go run ./cmd/discovery -port 3003 -upstream http://upstream:3003
 ```
 
 ### Names Service
@@ -36,6 +39,9 @@ go run ./cmd/names -port 3005 -discovery http://localhost:3003
 
 # Run with persistent snapshot/journal names storage
 go run ./cmd/names -port 3005 -dir /tmp/names -discovery http://localhost:3003
+
+# Run with upstream delegation to another name service
+go run ./cmd/names -port 3005 -upstream http://upstream:3005 -discovery http://localhost:3003
 ```
 
 ### Storage Service
@@ -43,6 +49,9 @@ The storage service ([protocol description](docs/Storage.md)) is responsible for
 ```bash
 # Run with in-memory storage naitvely
 go run ./cmd/storage -port 3000
+
+# Run with AWS S3 backend
+go run ./cmd/storage -port 3000 -s3-bucket my-bucket -s3-prefix invariant-blocks/
 
 # Run with persistent nested file system blocks and register with discovery & distribute services
 go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify notify-service-id
@@ -57,6 +66,9 @@ go run ./cmd/distribute -port 3001
 
 # Run with a specific replication factor and connect to discovery
 go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
+
+# Run with a backup destination and rate limit (MB/hour)
+go run ./cmd/distribute -port 3001 -destination backup-storage-id -backup-rate 100
 ```
 
 ### Finder Service
@@ -83,8 +95,9 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
 - `lookup`: Look up a registered name to get its corresponding ID or address.
-- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading, name-to-address resolution, and optimized read/write caching).
-- `upload`: Upload a local directory to invariant storage as a file tree, preserving file creation and modification times.
+- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading, name-to-address resolution, optimized read/write caching, and merging remote changes into local nested/dirty directories).
+  - Supports `--compress`, `--encrypt`, `--key-policy`, and `--key` flags for configuring writing of new files to the mount.
+- `upload`: Upload a local directory to invariant storage as a file tree, preserving file creation and modification times, and automatically splitting zip files.
   - Supports `--compress` and `--encrypt`.
   - Supports `--key-policy` (e.g. `Deterministic` (default), `RandomPerBlock`, `RandomAllKey`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
   - Supports `--slot <hex_id_or_name>` to automatically update a mutable slot (resolved by ID or name) to point to the new content tree on successful upload.
