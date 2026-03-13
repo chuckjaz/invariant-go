@@ -1022,6 +1022,7 @@ func (s *InMemoryFiles) pollSlot() {
 
 		newRootLink := l.RootLink
 		newRootLink.Address = address
+		newRootLink.Slot = false
 
 		reader, err := content.Read(newRootLink, s.opts.Storage, s.opts.Slots)
 		if err != nil {
@@ -1054,15 +1055,11 @@ func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[s
 		return
 	}
 
-	if localNode.IsDirty {
-		return
-	}
-
 	for name, childID := range localNode.Children {
 		childNode := s.nodes[childID]
 		// If child belongs to this layer and remote doesn't have it, remove it
 		if childNode.LayerMembership[layerIdx] {
-			if _, exists := remoteEntries[name]; !exists {
+			if remoteEntry, exists := remoteEntries[name]; !exists {
 				if !childNode.IsDirty {
 					delete(childNode.LayerMembership, layerIdx)
 					if len(childNode.LayerMembership) == 0 {
@@ -1071,14 +1068,81 @@ func (s *InMemoryFiles) mergeRemoteIntoLocal(localID uint64, remoteEntries map[s
 					}
 					s.markDirty(localID)
 				}
+			} else if childNode.Kind == filetree.DirectoryKind {
+				if dirEntry, ok := remoteEntry.(*filetree.DirectoryEntry); ok {
+					if childNode.LayerContents[layerIdx].Address != dirEntry.Content.Address {
+						childNode.LayerContents[layerIdx] = dirEntry.Content
+						if childNode.IsLoaded {
+							reader, err := content.Read(dirEntry.Content, s.getStorageForLayer(layerIdx), s.opts.Slots)
+							if err == nil {
+								data, err := io.ReadAll(reader)
+								reader.Close()
+								if err == nil {
+									var d filetree.Directory
+									if json.Unmarshal(data, &d) == nil {
+										childRemoteEntries := make(map[string]filetree.Entry)
+										for _, entry := range d {
+											childRemoteEntries[entry.GetName()] = entry
+										}
+										s.mergeRemoteIntoLocal(childID, childRemoteEntries, layerIdx)
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
 
-	// For pulling down newly added entries dynamically, we'd theoretically construct new Nodes
-	// based off remote properties matching `Layer.Includes` rules here if we wished to deeply implement
-	// reactive layered synchronization from remote peers. For now we only implement polling to avoid
-	// deleting explicitly layered entities.
+	// Add any newly discovered entries from the remote that don't exist locally
+	for name, remoteEntry := range remoteEntries {
+		if _, exists := localNode.Children[name]; !exists {
+			childID := s.getNextID()
+			var entryContent content.ContentLink
+			switch e := remoteEntry.(type) {
+			case *filetree.FileEntry:
+				entryContent = e.Content
+			case *filetree.DirectoryEntry:
+				entryContent = e.Content
+			}
+
+			childNode := &Node{
+				ID:              childID,
+				Name:            name,
+				Kind:            remoteEntry.GetKind(),
+				Parents:         map[uint64]bool{localID: true},
+				LayerMembership: map[int]bool{layerIdx: true},
+				LayerContents:   map[int]content.ContentLink{layerIdx: entryContent},
+			}
+
+			switch e := remoteEntry.(type) {
+			case *filetree.FileEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Content = e.Content
+				childNode.Size = e.Size
+				childNode.Type = e.Type
+			case *filetree.DirectoryEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Content = e.Content
+				childNode.Size = e.Size
+				childNode.Children = make(map[string]uint64)
+			case *filetree.SymbolicLinkEntry:
+				childNode.CreateTime = e.CreateTime
+				childNode.ModifyTime = e.ModifyTime
+				childNode.Mode = e.Mode
+				childNode.Target = e.Target
+			}
+
+			s.nodes[childID] = childNode
+			localNode.Children[name] = childID
+			s.markDirty(localID)
+		}
+	}
 }
 
 func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
