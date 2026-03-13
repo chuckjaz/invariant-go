@@ -28,10 +28,13 @@ const (
 
 // WriterOptions configure how the content writer handles blocks.
 type WriterOptions struct {
-	CompressAlgorithm string    // "inflate", "gzip", or empty for none
-	EncryptAlgorithm  string    // "aes-256-cbc" or empty for none
-	KeyPolicy         KeyPolicy // specifies how to derive encryption keys
-	SuppliedKey       []byte    // The encryption key to use when KeyPolicy is SuppliedAllKey
+	CompressAlgorithm string     // "inflate", "gzip", or empty for none
+	EncryptAlgorithm  string     // "aes-256-cbc" or empty for none
+	KeyPolicy         KeyPolicy  // specifies how to derive encryption keys
+	SuppliedKey       []byte     // The encryption key to use when KeyPolicy is SuppliedAllKey
+	Filename          string     // Optional original filename for splitter detection
+	ContentType       string     // Optional content type for splitter detection
+	Splitters         []Splitter // Configurable stream splitters
 }
 
 const (
@@ -57,65 +60,56 @@ func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink,
 		sharedKey = opts.SuppliedKey
 	}
 
-	bh := NewBuzHash(64)
-	mask := uint32((1 << 20) - 1) // 1MB avg target
+	head := make([]byte, 1024)
+	n, err := io.ReadFull(r, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return ContentLink{}, err
+	}
+	head = head[:n]
 
-	var blocks []BlockListItem
-	var currentChunk bytes.Buffer
-	overallHasher := sha256.New()
-	buf := make([]byte, 32*1024) // 32KB read buffer
-
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			overallHasher.Write(buf[:n])
-			for i := range n {
-				b := buf[i]
-				h := bh.WriteB(b)
-				currentChunk.WriteByte(b)
-				size := currentChunk.Len()
-
-				if (h&mask == 0 && size >= targetBlockSize/2) || size == maxBlockSize {
-					link, wErr := writeBlock(currentChunk.Bytes(), store, opts, sharedKey)
-					if wErr != nil {
-						return ContentLink{}, wErr
-					}
-					blocks = append(blocks, BlockListItem{
-						Content: link,
-						Size:    uint64(size),
-					})
-					currentChunk.Reset()
-					bh = NewBuzHash(64)
-				}
-			}
-		}
-		if err == io.EOF {
+	var selectedSplitter Splitter = &BuzHashSplitter{}
+	for _, s := range opts.Splitters {
+		if s.Match(head, opts.Filename, opts.ContentType) {
+			selectedSplitter = s
 			break
-		}
-		if err != nil {
-			return ContentLink{}, err
 		}
 	}
 
-	if currentChunk.Len() > 0 || len(blocks) == 0 {
-		size := currentChunk.Len()
-		link, err := writeBlock(currentChunk.Bytes(), store, opts, sharedKey)
+	overallHasher := sha256.New()
+	teeReader := io.TeeReader(io.MultiReader(bytes.NewReader(head), r), overallHasher)
+
+	writeChunk := func(chunk []byte) (ContentLink, error) {
+		return writeBlock(chunk, store, opts, sharedKey)
+	}
+
+	writeStream := func(inner io.Reader, innerOpts WriterOptions) (ContentLink, error) {
+		return Write(inner, store, innerOpts)
+	}
+
+	blocks, err := selectedSplitter.Split(teeReader, opts, writeChunk, writeStream)
+	if err != nil {
+		return ContentLink{}, err
+	}
+
+	if len(blocks) == 0 {
+		link, err := writeBlock([]byte{}, store, opts, sharedKey)
 		if err != nil {
 			return ContentLink{}, err
 		}
-
-		if len(blocks) == 0 {
-			link.Expected = hex.EncodeToString(overallHasher.Sum(nil))
-			if len(link.Transforms) == 0 && link.Expected == link.Address {
-				link.Expected = ""
-			}
-			return link, nil
+		link.Expected = hex.EncodeToString(overallHasher.Sum(nil))
+		if len(link.Transforms) == 0 && link.Expected == link.Address {
+			link.Expected = ""
 		}
+		return link, nil
+	}
 
-		blocks = append(blocks, BlockListItem{
-			Content: link,
-			Size:    uint64(size),
-		})
+	if len(blocks) == 1 {
+		link := blocks[0].Content
+		link.Expected = hex.EncodeToString(overallHasher.Sum(nil))
+		if len(link.Transforms) == 0 && link.Expected == link.Address {
+			link.Expected = ""
+		}
+		return link, nil
 	}
 
 	return writeBlockList(blocks, store, opts, sharedKey, hex.EncodeToString(overallHasher.Sum(nil)))

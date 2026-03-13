@@ -1,5 +1,7 @@
 package content
 
+import "io"
+
 // ContentLink defines the location and retrieval parameters of content or a block.
 type ContentLink struct {
 	Address    string             `json:"address"`
@@ -26,4 +28,10 @@ type BlockListItem struct {
 // BlockList defines a list of blocks that make up a larger file or content.
 type BlockList struct {
 	Blocks []BlockListItem `json:"blocks"`
+}
+
+// Splitter determines how a stream is broken into chunks/BlockListItems.
+type Splitter interface {
+	Match(head []byte, filename, contentType string) bool
+	Split(r io.Reader, opts WriterOptions, writeChunk func([]byte) (ContentLink, error), writeStream func(io.Reader, WriterOptions) (ContentLink, error)) ([]BlockListItem, error)
 }
