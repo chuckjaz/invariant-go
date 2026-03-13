@@ -23,6 +23,8 @@ func main() {
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	var upstreamURL string
+	flag.StringVar(&upstreamURL, "upstream", "", "Upstream name service URL to delegate queries to")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
 	flag.Parse()
@@ -37,6 +39,12 @@ func main() {
 		n = fsnd
 	} else {
 		n = names.NewInMemoryNames()
+	}
+
+	if upstreamURL != "" {
+		parent := names.NewClient(upstreamURL, nil)
+		n = names.NewUpstreamNames(n, parent)
+		log.Printf("Using Upstream name delegation pointing to %s", upstreamURL)
 	}
 
 	server := names.NewNamesServer(n)
