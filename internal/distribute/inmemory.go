@@ -247,21 +247,8 @@ func (d *InMemoryDistribute) Sync() {
 					// Create store client from destSrv URL
 					// And tell dest to fetch from source via its ID so dest looks it up in discovery
 					c := storage.NewClient(destAddr, nil)
-					err := c.Fetch(context.Background(), block, sourceSrvID)
-					if err != nil {
-						// Fallback: try using get and put directly
-						sourceClient := storage.NewClient(sourceAddr, nil)
-						if data, ok := sourceClient.Get(context.Background(), block); ok {
-							storeSuccess, errStore := c.StoreAt(context.Background(), block, data)
-							data.Close()
-							if errStore == nil && storeSuccess {
-								log.Printf("Fallback synced block %s from %s to %s via direct relay", block, sourceAddr, destAddr)
-								success = true
-								break // success
-							}
-						}
-					} else {
-						log.Printf("Synced block %s from %s to %s via fetch", block, sourceAddr, destAddr)
+					err := c.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
+					if err == nil {
 						success = true
 						break // success
 					}
@@ -347,22 +334,8 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 			continue // Rate limit exceeded, we can't upload this block right now
 		}
 
-		err := destClient.Fetch(context.Background(), block, sourceSrvID)
-		if err != nil {
-			// Fallback: try using get and put directly
-			if data, ok := sourceClient.Get(context.Background(), block); ok {
-				storeSuccess, errStore := destClient.StoreAt(context.Background(), block, data)
-				data.Close()
-				if errStore == nil && storeSuccess {
-					log.Printf("Backed up block %s from %s to destination %s via direct relay", block, sourceAddr, destAddr)
-					newlyUploadedBytes += size
-					d.mu.Lock()
-					d.destinationBlocks[block] = struct{}{}
-					d.mu.Unlock()
-				}
-			}
-		} else {
-			log.Printf("Backed up block %s from %s to destination %s via fetch", block, sourceAddr, destAddr)
+		err := destClient.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
+		if err == nil {
 			newlyUploadedBytes += size
 			d.mu.Lock()
 			d.destinationBlocks[block] = struct{}{}

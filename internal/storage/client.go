@@ -136,7 +136,7 @@ func (c *Client) Size(ctx context.Context, address string) (int64, bool) {
 }
 
 // Fetch instructs the remote server to fetch data from another container.
-func (c *Client) Fetch(ctx context.Context, address, container string) error {
+func (c *Client) Fetch(ctx context.Context, address, container string, fallbackAddr string) error {
 	reqBody := StorageFetchRequest{
 		Address:   address,
 		Container: container,
@@ -153,16 +153,36 @@ func (c *Client) Fetch(ctx context.Context, address, container string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
+
+	if err == nil && resp.StatusCode == http.StatusOK {
+		resp.Body.Close()
+		return nil
+	}
+
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if fallbackAddr != "" {
+		sourceClient := NewClient(fallbackAddr, c.httpClient)
+		if data, ok := sourceClient.Get(ctx, address); ok {
+			storeSuccess, errStore := c.StoreAt(ctx, address, data)
+			data.Close()
+			if errStore == nil && storeSuccess {
+				return nil
+			}
+			if errStore != nil {
+				return fmt.Errorf("fallback store failed: %v", errStore)
+			}
+			return fmt.Errorf("fallback store was not successful")
+		}
+	}
+
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 }
 
 // List returns all addresses stored in the remote storage. Not currently supported via HTTP.
