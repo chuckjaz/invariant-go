@@ -22,6 +22,10 @@ func main() {
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	var repFactor int
 	flag.IntVar(&repFactor, "N", 3, "Replication factor for blocks")
+	var destination string
+	flag.StringVar(&destination, "destination", "", "Destination storage service ID to backup blocks to")
+	var backupRate float64
+	flag.Float64Var(&backupRate, "backup-rate", 0, "Rate limit in MB/hour for destination backups (0 for unlimited)")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var name string
@@ -33,7 +37,7 @@ func main() {
 		disc = discovery.NewClient(discoveryURL, nil)
 	}
 
-	d := distribute.NewInMemoryDistribute(disc, repFactor, 3)
+	d := distribute.NewInMemoryDistribute(disc, repFactor, 3, destination, backupRate)
 	if disc != nil {
 		d.StartSync(10 * time.Second)
 	}

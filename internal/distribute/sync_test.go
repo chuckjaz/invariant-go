@@ -84,7 +84,7 @@ func TestInMemoryDistribute_Sync(t *testing.T) {
 		},
 	}
 
-	d := distribute.NewInMemoryDistribute(disc, 3, 3) // repFactor = 3
+	d := distribute.NewInMemoryDistribute(disc, 3, 3, "", 0) // repFactor = 3
 
 	// Need to explicitly register all 4 services to be considered for sync
 	d.Register(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000")
@@ -170,7 +170,7 @@ func TestInMemoryDistribute_Sync_RetryAndDrop(t *testing.T) {
 	}
 
 	// Create distribute with maxAttempts = 2
-	d := distribute.NewInMemoryDistribute(disc, 2, 2)
+	d := distribute.NewInMemoryDistribute(disc, 2, 2, "", 0)
 
 	d.Register(context.Background(), id1)
 	d.Register(context.Background(), id2)
@@ -244,7 +244,7 @@ func TestInMemoryDistribute_Sync_OnlyRegistered(t *testing.T) {
 		},
 	}
 
-	d := distribute.NewInMemoryDistribute(disc, 2, 3)
+	d := distribute.NewInMemoryDistribute(disc, 2, 3, "", 0)
 
 	// ONLY register node 1
 	d.Register(context.Background(), "0000000000000000000000000000000100000000000000000000000000000000") // node 1 is registered but DOESN'T have the block originally
@@ -295,7 +295,7 @@ func TestInMemoryDistribute_Sync_Integration(t *testing.T) {
 		},
 	}
 
-	dist := distribute.NewInMemoryDistribute(disc, 3, 3)
+	dist := distribute.NewInMemoryDistribute(disc, 3, 3, "", 0)
 
 	// 4. Register all 3 in the distribute service
 	dist.Register(context.Background(), id1)

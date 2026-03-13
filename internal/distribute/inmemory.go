@@ -21,20 +21,29 @@ type nodeState struct {
 
 // InMemoryDistribute is an in-memory implementation of the Distribute interface.
 type InMemoryDistribute struct {
-	mu          sync.RWMutex
-	services    map[string]*nodeState // storage service ID -> state
-	discovery   discovery.Discovery
-	repFactor   int
-	maxAttempts int
+	mu                  sync.RWMutex
+	services            map[string]*nodeState // storage service ID -> state
+	discovery           discovery.Discovery
+	repFactor           int
+	maxAttempts         int
+	destination         string
+	backupRateMBPerHour float64
+	destinationBlocks   map[string]struct{}
+	backupWindowStart   time.Time
+	backupBytesUploaded int64
 }
 
 // NewInMemoryDistribute creates a new InMemoryDistribute instance.
-func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts int) *InMemoryDistribute {
+func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts int, destination string, backupRate float64) *InMemoryDistribute {
 	return &InMemoryDistribute{
-		services:    make(map[string]*nodeState),
-		discovery:   disc,
-		repFactor:   repFactor,
-		maxAttempts: maxAttempts,
+		services:            make(map[string]*nodeState),
+		discovery:           disc,
+		repFactor:           repFactor,
+		maxAttempts:         maxAttempts,
+		destination:         destination,
+		backupRateMBPerHour: backupRate,
+		destinationBlocks:   make(map[string]struct{}),
+		backupWindowStart:   time.Now(),
 	}
 }
 
@@ -51,11 +60,18 @@ func (d *InMemoryDistribute) Register(ctx context.Context, id string) error {
 	return nil
 }
 
-// Has notifies the distribute service that the storage service with the given
+// Notify notifies the distribute service that the storage service with the given
 // id has the specified data blocks.
 func (d *InMemoryDistribute) Notify(ctx context.Context, id string, addresses []string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	if d.destination != "" && id == d.destination {
+		for _, addr := range addresses {
+			d.destinationBlocks[addr] = struct{}{}
+		}
+		return nil
+	}
 
 	state, exists := d.services[id]
 	if !exists {
@@ -272,5 +288,91 @@ func (d *InMemoryDistribute) Sync() {
 				}
 			}
 		}
+	}
+
+	if d.destination != "" {
+		d.syncToDestination(blockLocations)
+	}
+}
+
+func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]string) {
+	destAddr, ok := d.getServiceAddress(d.destination, false)
+	if !ok {
+		return // Can't resolve destination
+	}
+
+	destClient := storage.NewClient(destAddr, nil)
+
+	// Reset rate limit window if an hour has passed
+	d.mu.Lock()
+	now := time.Now()
+	if now.Sub(d.backupWindowStart) >= time.Hour {
+		d.backupWindowStart = now
+		d.backupBytesUploaded = 0
+	}
+	bytesUploaded := d.backupBytesUploaded
+	d.mu.Unlock()
+
+	maxBytesPerHour := int64(d.backupRateMBPerHour * 1024 * 1024)
+
+	var newlyUploadedBytes int64
+
+	for block, locations := range blockLocations {
+		if len(locations) == 0 {
+			continue
+		}
+
+		d.mu.RLock()
+		_, destHasBlock := d.destinationBlocks[block]
+		d.mu.RUnlock()
+
+		if destHasBlock {
+			continue
+		}
+
+		// Need to upload this block to destination
+		sourceSrvID := locations[0]
+		sourceAddr, ok := d.getServiceAddress(sourceSrvID, false)
+		if !ok {
+			continue
+		}
+
+		sourceClient := storage.NewClient(sourceAddr, nil)
+		size, ok := sourceClient.Size(context.Background(), block)
+		if !ok {
+			continue
+		}
+
+		if d.backupRateMBPerHour > 0 && bytesUploaded+newlyUploadedBytes+size > maxBytesPerHour {
+			continue // Rate limit exceeded, we can't upload this block right now
+		}
+
+		err := destClient.Fetch(context.Background(), block, sourceSrvID)
+		if err != nil {
+			// Fallback: try using get and put directly
+			if data, ok := sourceClient.Get(context.Background(), block); ok {
+				storeSuccess, errStore := destClient.StoreAt(context.Background(), block, data)
+				data.Close()
+				if errStore == nil && storeSuccess {
+					log.Printf("Backed up block %s from %s to destination %s via direct relay", block, sourceAddr, destAddr)
+					newlyUploadedBytes += size
+					d.mu.Lock()
+					d.destinationBlocks[block] = struct{}{}
+					d.mu.Unlock()
+				}
+			}
+		} else {
+			log.Printf("Backed up block %s from %s to destination %s via fetch", block, sourceAddr, destAddr)
+			newlyUploadedBytes += size
+			d.mu.Lock()
+			d.destinationBlocks[block] = struct{}{}
+			d.mu.Unlock()
+		}
+	}
+
+	if newlyUploadedBytes > 0 {
+		d.mu.Lock()
+		d.backupBytesUploaded += newlyUploadedBytes
+		d.mu.Unlock()
 	}
 }

@@ -13,7 +13,7 @@ import (
 )
 
 func TestDistributeServer(t *testing.T) {
-	d := NewInMemoryDistribute(nil, 3, 3)
+	d := NewInMemoryDistribute(nil, 3, 3, "", 0)
 	server := NewDistributeServer("", d)
 	ts := httptest.NewServer(server)
 	defer ts.Close()
