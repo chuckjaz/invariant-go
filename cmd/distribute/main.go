@@ -37,6 +37,17 @@ func main() {
 		disc = discovery.NewClient(discoveryURL, nil)
 	}
 
+	if destination != "" {
+		if disc == nil {
+			log.Fatalf("Discovery service required to resolve destination %q", destination)
+		}
+		var err error
+		destination, err = discovery.ResolveName(context.Background(), disc, destination)
+		if err != nil {
+			log.Fatalf("Failed to resolve destination name %q: %v", destination, err)
+		}
+	}
+
 	d := distribute.NewInMemoryDistribute(disc, repFactor, 3, destination, backupRate)
 	if disc != nil {
 		d.StartSync(10 * time.Second)
