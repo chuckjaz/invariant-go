@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	invconfig "invariant/internal/config"
 )
 
 // Config represents the configuration in the YAML file.
@@ -38,9 +40,10 @@ func (a *StringArray) UnmarshalYAML(value *yaml.Node) error {
 
 // ServiceConfig represents a single service to start.
 type ServiceConfig struct {
-	Command string            `yaml:"command"`
-	Use     StringArray       `yaml:"use,omitempty"`
-	Args    map[string]string `yaml:"args"`
+	Command     string            `yaml:"command"`
+	Use         StringArray       `yaml:"use,omitempty"`
+	Args        map[string]string `yaml:"args"`
+	Environment map[string]string `yaml:"environment,omitempty"`
 }
 
 // LoadConfig reads and parses a YAML configuration file.
@@ -84,6 +87,24 @@ func LoadConfig(path string) (*Config, error) {
 
 		for k, v := range svc.Args {
 			svc.Args[k] = SubstituteString(v, baseDir)
+		}
+
+		if svc.Environment != nil {
+			keysDir, err := invconfig.KeysDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get keys directory: %w", err)
+			}
+			for k, v := range svc.Environment {
+				if after, ok := strings.CutPrefix(v, "$key:"); ok {
+					fileName := after
+					keyPath := filepath.Join(keysDir, fileName)
+					content, err := os.ReadFile(keyPath)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read key file for environment variable '%s': %w", k, err)
+					}
+					svc.Environment[k] = string(content)
+				}
+			}
 		}
 	}
 

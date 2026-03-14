@@ -74,6 +74,10 @@ func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {
 		cmdPath := filepath.Join(r.baseDir, filepath.Base(sc.Command))
 		cmd := exec.CommandContext(ctx, cmdPath, args...)
 		cmd.Dir = r.baseDir
+		cmd.Env = os.Environ()
+		for k, v := range sc.Environment {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
 		cmd.Stdout = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stdout}
 		cmd.Stderr = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stderr}
 

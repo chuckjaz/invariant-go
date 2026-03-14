@@ -10,6 +10,16 @@ func TestLoadConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "services.yaml")
 
+	t.Setenv("HOME", tempDir)
+
+	keysDir := filepath.Join(tempDir, ".invariant", "keys")
+	if err := os.MkdirAll(keysDir, 0700); err != nil {
+		t.Fatalf("failed to create mock keys dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(keysDir, "mysecret"), []byte("super-secret-value"), 0600); err != nil {
+		t.Fatalf("failed to write mock key file: %v", err)
+	}
+
 	yamlContent := `
 common:
   base:
@@ -24,6 +34,9 @@ services:
     args:
       env: "prod"
       log: "info"
+    environment:
+      NORMAL_ENV: "just-a-string"
+      SECRET_KEY: "$key:mysecret"
   - command: test-multi
     use: [base, extra]
     args:
@@ -58,6 +71,14 @@ services:
 
 	if svc.Args["log"] != "info" {
 		t.Errorf("expected log 'info' (overridden), got '%s'", svc.Args["log"])
+	}
+
+	if svc.Environment["NORMAL_ENV"] != "just-a-string" {
+		t.Errorf("expected NORMAL_ENV 'just-a-string', got '%s'", svc.Environment["NORMAL_ENV"])
+	}
+
+	if svc.Environment["SECRET_KEY"] != "super-secret-value" {
+		t.Errorf("expected SECRET_KEY 'super-secret-value', got '%s'", svc.Environment["SECRET_KEY"])
 	}
 
 	multiSvc := cfg.Services[1]
