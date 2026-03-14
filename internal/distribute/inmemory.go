@@ -14,9 +14,10 @@ import (
 )
 
 type nodeState struct {
-	blocks   map[string]struct{}
-	desc     *discovery.ServiceDescription
-	failures int
+	blocks        map[string]struct{}
+	desc          *discovery.ServiceDescription
+	failures      int
+	isDestination bool
 }
 
 // InMemoryDistribute is an in-memory implementation of the Distribute interface.
@@ -33,9 +34,8 @@ type InMemoryDistribute struct {
 	backupBytesUploaded int64
 }
 
-// NewInMemoryDistribute creates a new InMemoryDistribute instance.
 func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts int, destination string, backupRate float64) *InMemoryDistribute {
-	return &InMemoryDistribute{
+	d := &InMemoryDistribute{
 		services:            make(map[string]*nodeState),
 		discovery:           disc,
 		repFactor:           repFactor,
@@ -45,6 +45,13 @@ func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts 
 		destinationBlocks:   make(map[string]struct{}),
 		backupWindowStart:   time.Now(),
 	}
+	if destination != "" {
+		d.services[destination] = &nodeState{
+			blocks:        make(map[string]struct{}),
+			isDestination: true,
+		}
+	}
+	return d
 }
 
 // Register registers a storage service with the distribute service.
@@ -163,6 +170,9 @@ func (d *InMemoryDistribute) Sync() {
 	blockLocations := make(map[string][]string)
 	d.mu.RLock()
 	for srvID, state := range d.services {
+		if state.isDestination {
+			continue
+		}
 		for block := range state.blocks {
 			blockLocations[block] = append(blockLocations[block], srvID)
 		}
@@ -187,7 +197,10 @@ func (d *InMemoryDistribute) Sync() {
 		}
 		var nodes []nodeDist
 		d.mu.RLock()
-		for srvID := range d.services {
+		for srvID, state := range d.services {
+			if state.isDestination {
+				continue
+			}
 			srvBytes, err := hex.DecodeString(srvID)
 			if err != nil || len(srvBytes) != 32 {
 				continue // Invalid service ID
