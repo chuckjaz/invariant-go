@@ -5,7 +5,7 @@ A content addressing storage system that can be used to store abitrary data. Dat
 The system is made up of multiple micro-services that can be run independently or together and replaced or updated arbitrarily.
 
 ### File System
-A directory can be uploaded to the storage system and then mounted locally via FUSE. The directory can then be interacted with as a regular file system. The file system can be mounted on mutliple machines and will automatically sync from one machine to another.
+A directory can be uploaded to the storage system and then mounted locally via FUSE or exported natively as an NFS server. The directory can then be interacted with as a regular file system. The file system can be mounted on mutliple machines and will automatically sync from one machine to another.
 
 The file system can be layered, which allows for files in a dirctory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
 
@@ -67,7 +67,8 @@ go run ./cmd/distribute -port 3001
 # Run with a specific replication factor and connect to discovery
 go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
 
-# Run with a backup destination and rate limit (MB/hour)
+# Run with a backup destination (resolved automatically via discovery) and rate limit (MB/hour)
+# The destination is excluded from standard replication
 go run ./cmd/distribute -port 3001 -destination backup-storage-id -backup-rate 100
 ```
 
@@ -95,6 +96,9 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
 - `lookup`: Look up a registered name to get its corresponding ID or address.
+- `nfs`: Start the invariant file system as a completely native NFS Server.
+  - Listen on a specific port (e.g., `--listen :2049`).
+  - Supports `--compress`, `--encrypt`, `--key-policy`, and `--key` flags for configuring writing of new files to the mount.
 - `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading, name-to-address resolution, optimized read/write caching, and merging remote changes into local nested/dirty directories).
   - Supports `--compress`, `--encrypt`, `--key-policy`, and `--key` flags for configuring writing of new files to the mount.
 - `upload`: Upload a local directory to invariant storage as a file tree, preserving file creation and modification times, and automatically splitting zip files.
@@ -145,6 +149,8 @@ services:
         dir: "*/storage-2"
         notify: "distribute-1"
 ```
+
+The `services.yaml` configuration also supports an `environment` map. Keys will overwrite container-local or service environment variables. When a value is prefixed with `$key:`, it safely substitutes the content of the secure key file (`~/.invariant/keys/<filename>`) preventing the secret from appearing inside the config format itself.
 
 ### Docker Compose
 For a more robust and industrial-strength deployment, you can use Docker and Docker Compose. This is the recommended alternative for running these services in production-like environments or cross-platform setups. 
