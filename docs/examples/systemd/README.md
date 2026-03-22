@@ -54,6 +54,17 @@ Before starting the services via `systemd`:
    sudo systemctl enable --now invariant-finder.service
    ```
 
+## Client Mount Configuration
+
+If you want to mount a specific Invariant slot as a virtual file system securely in the background, you can use the `invariant-mount.service` template.
+1. Open `docs/examples/systemd/invariant-mount.service` and configure your specific `SLOT_NAME` and `MOUNT_POINT`.
+2. Install it identically to the other services:
+   ```bash
+   sudo cp docs/examples/systemd/invariant-mount.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now invariant-mount.service
+   ```
+
 ## Logs and Monitoring
 
 You can inspect the logs of any running service using `journalctl`. For example, to view the live logs for the `storage` service:

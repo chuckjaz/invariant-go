@@ -1,0 +1,26 @@
+[Unit]
+Description=Invariant File System Mount
+After=network.target invariant-discovery.service
+Wants=invariant-discovery.service
+
+[Service]
+Type=simple
+# Mounts typically need to run as root to allow access for other users by default,
+# but can run as a regular user if 'user_allow_other' is configured in /etc/fuse.conf
+User=root
+Group=root
+
+# Configuration variables. Update these with your specific values.
+Environment="DISCOVERY_URL=http://localhost:3003"
+Environment="SLOT_NAME=my-slot-name"
+Environment="MOUNT_POINT=/mnt/invariant"
+
+ExecStartPre=/usr/bin/mkdir -p ${MOUNT_POINT}
+ExecStart=/usr/local/bin/invariant mount -slot ${SLOT_NAME} -mount ${MOUNT_POINT} -discovery ${DISCOVERY_URL}
+ExecStop=/usr/bin/fusermount -u ${MOUNT_POINT}
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
