@@ -1,0 +1,16 @@
+[Unit]
+Description=Invariant Slots Service
+After=network.target invariant-discovery.service
+Wants=invariant-discovery.service
+
+[Service]
+Type=simple
+User=invariant
+Group=invariant
+Environment="DISCOVERY_URL=http://localhost:3003"
+ExecStart=/usr/local/bin/slots -port 3004 -discovery ${DISCOVERY_URL}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

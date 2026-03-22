@@ -1,0 +1,14 @@
+[Unit]
+Description=Invariant Discovery Service
+After=network.target
+
+[Service]
+Type=simple
+User=invariant
+Group=invariant
+ExecStart=/usr/local/bin/discovery -port 3003
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
