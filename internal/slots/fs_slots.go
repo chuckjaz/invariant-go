@@ -2,42 +2,27 @@
 package slots
 
 import (
-	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
+
+	"invariant/internal/journal"
 )
 
 var _ Slots = (*FileSystemSlots)(nil)
 
 // FileSystemSlots provides a file system-backed implementation of the Slots interface.
 type FileSystemSlots struct {
-	id               string
-	mu               sync.RWMutex
-	store            map[string]SlotRecord
-	baseDir          string
-	journalFile      *os.File
-	journalName      string
-	snapshotInterval time.Duration
-	stopCh           chan struct{}
-	subscribers      []chan string
-}
-
-type journalEntry struct {
-	Op      string `json:"op"` // "POST" (create) or "PUT" (update)
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Policy  string `json:"policy,omitempty"`
+	id          string
+	subMu       sync.RWMutex
+	subscribers []chan string
+	store       *journal.Store[string, SlotRecord]
 }
 
 // NewFileSystemSlots creates a new FileSystemSlots instance.
@@ -57,55 +42,15 @@ func NewFileSystemSlots(baseDir string, snapshotInterval time.Duration) (*FileSy
 		os.WriteFile(idPath, []byte(id), 0644)
 	}
 
-	fs := &FileSystemSlots{
-		id:               id,
-		store:            make(map[string]SlotRecord),
-		baseDir:          baseDir,
-		snapshotInterval: snapshotInterval,
-		stopCh:           make(chan struct{}),
-	}
-
-	// 1. Load snapshot
-	snapshotPath := filepath.Join(baseDir, "snapshot.json")
-	if data, err := os.ReadFile(snapshotPath); err == nil {
-		if err := json.Unmarshal(data, &fs.store); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to read snapshot: %w", err)
-	}
-
-	// 2. Load journals
-	entries, err := os.ReadDir(baseDir)
+	store, err := journal.NewStore[string, SlotRecord](baseDir, snapshotInterval)
 	if err != nil {
 		return nil, err
 	}
 
-	var journals []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "journal-") && strings.HasSuffix(entry.Name(), ".jsonl") {
-			journals = append(journals, entry.Name())
-		}
-	}
-	sort.Strings(journals)
-
-	for _, journal := range journals {
-		if err := fs.applyJournal(filepath.Join(baseDir, journal)); err != nil {
-			return nil, fmt.Errorf("failed to apply journal %s: %w", journal, err)
-		}
-	}
-
-	// 3. Open new journal
-	if err := fs.openNewJournal(); err != nil {
-		return nil, err
-	}
-
-	// 4. Start background snapshot goroutine
-	if snapshotInterval > 0 {
-		go fs.snapshotLoop()
-	}
-
-	return fs, nil
+	return &FileSystemSlots{
+		id:    id,
+		store: store,
+	}, nil
 }
 
 // ID returns the service ID.
@@ -113,107 +58,35 @@ func (s *FileSystemSlots) ID() string {
 	return s.id
 }
 
-func (s *FileSystemSlots) applyJournal(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry journalEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue // Skip malformed lines
-		}
-		switch entry.Op {
-		case "POST", "PUT":
-			policy := entry.Policy
-			if entry.Op == "PUT" {
-				if existing, ok := s.store[entry.ID]; ok {
-					policy = existing.Policy
-				}
-			}
-			s.store[entry.ID] = SlotRecord{Address: entry.Address, Policy: policy}
-		}
-	}
-	return scanner.Err()
-}
-
-func (s *FileSystemSlots) openNewJournal() error {
-	name := fmt.Sprintf("journal-%d.jsonl", time.Now().UnixNano())
-	path := filepath.Join(s.baseDir, name)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-
-	if s.journalFile != nil {
-		s.journalFile.Close()
-	}
-
-	s.journalFile = file
-	s.journalName = name
-	return nil
-}
-
 // Close closes the file system slots, stopping the snapshot loop and closing the journal file.
 func (s *FileSystemSlots) Close() error {
-	close(s.stopCh)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.journalFile != nil {
-		err := s.journalFile.Close()
-		s.journalFile = nil
-		return err
-	}
-	return nil
+	return s.store.Close()
 }
 
 // Get returns the address for the given slot ID.
 func (s *FileSystemSlots) Get(ctx context.Context, id string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	record, ok := s.store[id]
+	record, ok := s.store.Get(id)
 	if !ok {
 		return "", ErrSlotNotFound
 	}
-
 	return record.Address, nil
 }
 
 // Create creates a new slot with the given address and policy.
 func (s *FileSystemSlots) Create(ctx context.Context, id string, address string, policy string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	record := SlotRecord{Address: address, Policy: policy}
 
-	if _, exists := s.store[id]; exists {
-		return ErrSlotExists
-	}
+	err := s.store.Put(id, record, func(store map[string]SlotRecord) error {
+		if _, exists := store[id]; exists {
+			return ErrSlotExists
+		}
+		return nil
+	})
 
-	entry := journalEntry{
-		Op:      "POST",
-		ID:      id,
-		Address: address,
-		Policy:  policy,
+	if err == nil {
+		s.notifySubscribers(id)
 	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	if _, err := s.journalFile.Write(data); err != nil {
-		return err
-	}
-	if err := s.journalFile.Sync(); err != nil {
-		return err
-	}
-
-	s.store[id] = SlotRecord{Address: address, Policy: policy}
-	s.notifySubscribers(id)
-	return nil
+	return err
 }
 
 // List returns a channel that yields chunks of all known slot IDs.
@@ -225,20 +98,19 @@ func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []stri
 
 	go func() {
 		defer close(ch)
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-
-		var chunk []string
-		for id := range s.store {
-			chunk = append(chunk, id)
-			if len(chunk) >= chunkSize {
-				ch <- chunk
-				chunk = nil
+		s.store.Read(func(store map[string]SlotRecord) {
+			var chunk []string
+			for id := range store {
+				chunk = append(chunk, id)
+				if len(chunk) >= chunkSize {
+					ch <- chunk
+					chunk = nil
+				}
 			}
-		}
-		if len(chunk) > 0 {
-			ch <- chunk
-		}
+			if len(chunk) > 0 {
+				ch <- chunk
+			}
+		})
 	}()
 
 	return ch
@@ -246,15 +118,16 @@ func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []stri
 
 // Subscribe returns a channel that yields the IDs of newly created slots.
 func (s *FileSystemSlots) Subscribe(ctx context.Context) <-chan string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
 	ch := make(chan string, 100)
 	s.subscribers = append(s.subscribers, ch)
 	return ch
 }
 
 func (s *FileSystemSlots) notifySubscribers(id string) {
-	// Note: We expect the caller to hold s.mu.Lock(). Wait for them, or we deadlock.
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
 	for _, ch := range s.subscribers {
 		select {
 		case ch <- id:
@@ -267,124 +140,44 @@ func (s *FileSystemSlots) notifySubscribers(id string) {
 // Update attempts to change the address of a slot, ensuring the previous address matches.
 // If the slot policy is "ecc", it will verify the request using the passed ed25519 auth signature.
 func (s *FileSystemSlots) Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.store[id]
+	// We instantiate the new record conditionally within the Put but it must evaluate synchronously wait...
+	// We can't pass record down if policy depends on checkFn?
+	// Ah, the Put receives the value `v`. We need `policy` which comes from existing record.
+	// We can read it first with Get:
+	record, ok := s.store.Get(id)
 	if !ok {
 		return ErrSlotNotFound
 	}
 
-	if record.Policy == "ecc" {
-		pubKey, err := hex.DecodeString(id)
-		if err != nil || len(pubKey) != ed25519.PublicKeySize {
-			return ErrUnauthorized
+	newRecord := SlotRecord{Address: address, Policy: record.Policy}
+
+	return s.store.Put(id, newRecord, func(store map[string]SlotRecord) error {
+		// Verify again under the store lock to avoid races
+		existing, ok := store[id]
+		if !ok {
+			return ErrSlotNotFound
 		}
 
-		reqData, _ := json.Marshal(SlotUpdate{
-			Address:         address,
-			PreviousAddress: previousAddress,
-		})
+		if existing.Policy == "ecc" {
+			pubKey, err := hex.DecodeString(id)
+			if err != nil || len(pubKey) != ed25519.PublicKeySize {
+				return ErrUnauthorized
+			}
 
-		if !ed25519.Verify(pubKey, reqData, auth) {
-			return ErrUnauthorized
-		}
-	}
+			reqData, _ := json.Marshal(SlotUpdate{
+				Address:         address,
+				PreviousAddress: previousAddress,
+			})
 
-	if record.Address != previousAddress {
-		return ErrConflict
-	}
-
-	entry := journalEntry{
-		Op:      "PUT",
-		ID:      id,
-		Address: address,
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	if _, err := s.journalFile.Write(data); err != nil {
-		return err
-	}
-	if err := s.journalFile.Sync(); err != nil {
-		return err
-	}
-
-	s.store[id] = SlotRecord{Address: address, Policy: record.Policy}
-	return nil
-}
-
-func (s *FileSystemSlots) snapshotLoop() {
-	ticker := time.NewTicker(s.snapshotInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.doSnapshot()
-		}
-	}
-}
-
-func (s *FileSystemSlots) doSnapshot() {
-	s.mu.Lock()
-	// Copy the map to safely marshal it outside the lock
-	storeCopy := make(map[string]SlotRecord, len(s.store))
-	maps.Copy(storeCopy, s.store)
-
-	// Create new journal while holding the lock
-	if err := s.openNewJournal(); err != nil {
-		s.mu.Unlock()
-		return
-	}
-	newJournal := s.journalName
-	s.mu.Unlock()
-
-	// 1. Write the copied store to a temporary snapshot file
-	tmpPath := filepath.Join(s.baseDir, "snapshot.tmp")
-	file, err := os.Create(tmpPath)
-	if err != nil {
-		return
-	}
-
-	if err := json.NewEncoder(file).Encode(storeCopy); err != nil {
-		file.Close()
-		os.Remove(tmpPath)
-		return
-	}
-
-	// Fsync before close
-	if err := file.Sync(); err != nil {
-		file.Close()
-		os.Remove(tmpPath)
-		return
-	}
-	if err := file.Close(); err != nil {
-		os.Remove(tmpPath)
-		return
-	}
-
-	// 2. Rename the temporary snapshot to the actual snapshot
-	finalPath := filepath.Join(s.baseDir, "snapshot.json")
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		os.Remove(tmpPath)
-		return
-	}
-
-	// 3. Safely remove old journals
-	entries, err := os.ReadDir(s.baseDir)
-	if err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasPrefix(entry.Name(), "journal-") && strings.HasSuffix(entry.Name(), ".jsonl") {
-				if entry.Name() != newJournal {
-					os.Remove(filepath.Join(s.baseDir, entry.Name()))
-				}
+			if !ed25519.Verify(pubKey, reqData, auth) {
+				return ErrUnauthorized
 			}
 		}
-	}
+
+		if existing.Address != previousAddress {
+			return ErrConflict
+		}
+
+		return nil
+	})
 }
