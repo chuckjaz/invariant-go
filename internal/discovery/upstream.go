@@ -10,13 +10,13 @@ var _ Discovery = (*UpstreamDiscovery)(nil)
 // UpstreamDiscovery delegates queries to a parent discovery service
 // if they are not found in the local cache/registry.
 type UpstreamDiscovery struct {
-	local  *InMemoryDiscovery
+	local  Discovery
 	parent Discovery
 }
 
 // NewUpstreamDiscovery creates a new discovery proxy that falls back
 // to parent for missing services and caches them locally.
-func NewUpstreamDiscovery(local *InMemoryDiscovery, parent Discovery) *UpstreamDiscovery {
+func NewUpstreamDiscovery(local Discovery, parent Discovery) *UpstreamDiscovery {
 	return &UpstreamDiscovery{
 		local:  local,
 		parent: parent,
