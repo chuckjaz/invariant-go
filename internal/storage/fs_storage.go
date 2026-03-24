@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"invariant/internal/identity"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,9 @@ func NewFileSystemStorage(baseDir string) *FileSystemStorage {
 		idBytes := make([]byte, 32)
 		rand.Read(idBytes)
 		id = hex.EncodeToString(idBytes)
-		os.WriteFile(idPath, []byte(id), 0644)
+		if err := os.WriteFile(idPath, []byte(id), 0644); err != nil {
+			log.Printf("Failed to write ID file: %v", err)
+		}
 	}
 
 	return &FileSystemStorage{
