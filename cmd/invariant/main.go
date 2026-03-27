@@ -18,6 +18,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  nfs      Start the invariant file system as an NFS Server\n")
 	fmt.Fprintf(os.Stderr, "  upload   Upload a local directory as a file tree\n")
 	fmt.Fprintf(os.Stderr, "  print    Print a block's contents to standard output\n")
+	fmt.Fprintf(os.Stderr, "  systemd  Manage invariant services using systemd\n")
 	os.Exit(1)
 }
 
@@ -49,6 +50,8 @@ func main() {
 		runUpload(cfg, os.Args[2:])
 	case "print":
 		runPrint(cfg, os.Args[2:])
+	case "systemd":
+		runSystemd(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()

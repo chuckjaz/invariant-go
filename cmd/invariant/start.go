@@ -29,7 +29,7 @@ func runStart(globalCfg *config.InvariantConfig, args []string) {
 	}
 	fs.Parse(args)
 
-	cfg, err := start.LoadConfig(configPath)
+	cfg, err := start.LoadConfig(configPath, "")
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}

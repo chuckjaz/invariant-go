@@ -47,7 +47,7 @@ type ServiceConfig struct {
 }
 
 // LoadConfig reads and parses a YAML configuration file.
-func LoadConfig(path string) (*Config, error) {
+func LoadConfig(path string, keysDirOverride string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file '%s': %w", path, err)
@@ -90,9 +90,15 @@ func LoadConfig(path string) (*Config, error) {
 		}
 
 		if svc.Environment != nil {
-			keysDir, err := invconfig.KeysDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get keys directory: %w", err)
+			var keysDir string
+			var err error
+			if keysDirOverride != "" {
+				keysDir = keysDirOverride
+			} else {
+				keysDir, err = invconfig.KeysDir()
+				if err != nil {
+					return nil, fmt.Errorf("failed to get keys directory: %w", err)
+				}
 			}
 			for k, v := range svc.Environment {
 				if after, ok := strings.CutPrefix(v, "$key:"); ok {

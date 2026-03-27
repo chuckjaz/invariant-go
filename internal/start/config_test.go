@@ -47,7 +47,7 @@ services:
 		t.Fatalf("failed to write temp config file: %v", err)
 	}
 
-	cfg, err := LoadConfig(configPath)
+	cfg, err := LoadConfig(configPath, "")
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
