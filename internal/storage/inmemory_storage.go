@@ -15,7 +15,7 @@ import (
 var _ Storage = (*InMemoryStorage)(nil)
 
 // Assert that InMemoryStorage implements the identity.Provider interface
-var _ identity.Provider = (*InMemoryStorage)(nil)
+var _ identity.Identity = (*InMemoryStorage)(nil)
 
 type InMemoryStorage struct {
 	id          string

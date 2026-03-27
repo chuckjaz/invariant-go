@@ -34,7 +34,7 @@ var _ ControlledStorage = (*S3Storage)(nil)
 var _ Storage = (*S3Storage)(nil)
 
 // Assert that S3Storage implements the identity.Provider interface
-var _ identity.Provider = (*S3Storage)(nil)
+var _ identity.Identity = (*S3Storage)(nil)
 
 // NewS3Storage creates a new S3Storage instance.
 func NewS3Storage(ctx context.Context, bucket string, prefix string) (*S3Storage, error) {

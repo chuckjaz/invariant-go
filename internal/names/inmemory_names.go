@@ -12,7 +12,7 @@ import (
 var _ Names = (*InMemoryNames)(nil)
 
 // Assert that InMemoryNames implements the identity.Provider interface
-var _ identity.Provider = (*InMemoryNames)(nil)
+var _ identity.Identity = (*InMemoryNames)(nil)
 
 type InMemoryNames struct {
 	id    string

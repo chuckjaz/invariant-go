@@ -16,7 +16,7 @@ import (
 var _ Names = (*FileSystemNames)(nil)
 
 // Assert that FileSystemNames implements the identity.Provider interface
-var _ identity.Provider = (*FileSystemNames)(nil)
+var _ identity.Identity = (*FileSystemNames)(nil)
 
 type FileSystemNames struct {
 	id    string

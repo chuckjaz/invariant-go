@@ -82,7 +82,7 @@ func main() {
 
 	var dClient *discovery.Client
 	if discoveryURL != "" {
-		id := s.(identity.Provider).ID()
+		id := s.(identity.Identity).ID()
 		dClient = discovery.NewClient(discoveryURL, nil)
 
 		// Configure the storage server to use discovery for fetching
@@ -149,7 +149,7 @@ func main() {
 		}
 
 		distClient := distribute.NewClient(desc.Address, nil)
-		id := s.(identity.Provider).ID()
+		id := s.(identity.Identity).ID()
 		if err := distClient.Register(id); err != nil {
 			log.Fatalf("Failed to register with distribute service %s: %v", distID, err)
 		}

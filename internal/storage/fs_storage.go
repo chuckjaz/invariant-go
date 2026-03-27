@@ -26,7 +26,7 @@ type FileSystemStorage struct {
 var _ Storage = (*FileSystemStorage)(nil)
 
 // Assert that FileSystemStorage implements the identity.Provider interface
-var _ identity.Provider = (*FileSystemStorage)(nil)
+var _ identity.Identity = (*FileSystemStorage)(nil)
 
 func NewFileSystemStorage(baseDir string) *FileSystemStorage {
 	// Ensure the base directory exists

@@ -21,7 +21,7 @@ type StorageServer struct {
 
 func NewStorageServer(storage Storage) *StorageServer {
 	var id string
-	if idStorage, ok := storage.(identity.Provider); ok {
+	if idStorage, ok := storage.(identity.Identity); ok {
 		id = idStorage.ID()
 	} else {
 		idBytes := make([]byte, 32)

@@ -58,7 +58,7 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
-		id := n.(identity.Provider).ID()
+		id := n.(identity.Identity).ID()
 		err := discovery.AdvertiseAndRegister(context.Background(), discovery.NewClient(discoveryURL, nil), id, advertiseAddr, actualPort, []string{"names-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
