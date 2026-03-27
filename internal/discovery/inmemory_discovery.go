@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"time"
 )
 
 // Assert that InMemoryDiscovery implements the Discovery interface
@@ -12,12 +13,45 @@ var _ Discovery = (*InMemoryDiscovery)(nil)
 type InMemoryDiscovery struct {
 	mu       sync.RWMutex
 	services map[string]ServiceRegistration
+	tracker  *HealthTracker
 }
 
 func NewInMemoryDiscovery() *InMemoryDiscovery {
-	return &InMemoryDiscovery{
+	d := &InMemoryDiscovery{
 		services: make(map[string]ServiceRegistration),
 	}
+	return d
+}
+
+func (d *InMemoryDiscovery) WithHealthTracking(interval, timeout time.Duration) *InMemoryDiscovery {
+	if d.tracker != nil {
+		d.tracker.Close()
+	}
+	d.tracker = NewHealthTracker(interval, timeout, d.listAll, d.remove)
+	return d
+}
+
+func (d *InMemoryDiscovery) Close() error {
+	if d.tracker != nil {
+		d.tracker.Close()
+	}
+	return nil
+}
+
+func (d *InMemoryDiscovery) listAll() []ServiceRegistration {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	var res []ServiceRegistration
+	for _, s := range d.services {
+		res = append(res, s)
+	}
+	return res
+}
+
+func (d *InMemoryDiscovery) remove(id string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.services, id)
 }
 
 func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescription, bool) {
@@ -36,8 +70,6 @@ func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 
 func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	var results []ServiceDescription
 	for _, reg := range d.services {
 		if protocol == "" {
@@ -52,10 +84,17 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int
 				Address:   reg.Address,
 				Protocols: reg.Protocols,
 			})
-			if len(results) >= count {
-				break
-			}
 		}
+	}
+	d.mu.RUnlock()
+
+	// Sort healthy services first
+	if d.tracker != nil {
+		d.tracker.Sort(results)
+	}
+
+	if count > 0 && len(results) > count {
+		results = results[:count]
 	}
 
 	return results, nil
@@ -65,5 +104,8 @@ func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistratio
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.services[reg.ID] = reg
+	if d.tracker != nil {
+		d.tracker.MarkHealthy(reg.ID)
+	}
 	return nil
 }

@@ -13,7 +13,8 @@ import (
 var _ Discovery = (*FileSystemDiscovery)(nil)
 
 type FileSystemDiscovery struct {
-	store *journal.Store[string, ServiceRegistration]
+	store   *journal.Store[string, ServiceRegistration]
+	tracker *HealthTracker
 }
 
 func NewFileSystemDiscovery(baseDir string, snapshotInterval time.Duration) (*FileSystemDiscovery, error) {
@@ -26,12 +27,40 @@ func NewFileSystemDiscovery(baseDir string, snapshotInterval time.Duration) (*Fi
 		return nil, err
 	}
 
-	return &FileSystemDiscovery{
+	d := &FileSystemDiscovery{
 		store: store,
-	}, nil
+	}
+
+	return d, nil
+}
+
+func (d *FileSystemDiscovery) WithHealthTracking(interval, timeout time.Duration) *FileSystemDiscovery {
+	if d.tracker != nil {
+		d.tracker.Close()
+	}
+
+	listFn := func() []ServiceRegistration {
+		var res []ServiceRegistration
+		d.store.Read(func(m map[string]ServiceRegistration) {
+			for _, r := range m {
+				res = append(res, r)
+			}
+		})
+		return res
+	}
+
+	removeFn := func(id string) {
+		d.store.Delete(id, nil)
+	}
+
+	d.tracker = NewHealthTracker(interval, timeout, listFn, removeFn)
+	return d
 }
 
 func (d *FileSystemDiscovery) Close() error {
+	if d.tracker != nil {
+		d.tracker.Close()
+	}
 	return d.store.Close()
 }
 
@@ -67,12 +96,19 @@ func (d *FileSystemDiscovery) Find(ctx context.Context, protocol string, count i
 					Address:   reg.Address,
 					Protocols: protocolsCopy,
 				})
-				if len(results) >= count {
+				if count > 0 && len(results) >= count {
 					break
 				}
 			}
 		}
 	})
+
+	if d.tracker != nil {
+		d.tracker.Sort(results)
+	}
+	if count > 0 && len(results) > count {
+		results = results[:count]
+	}
 
 	return results, nil
 }
@@ -86,5 +122,9 @@ func (d *FileSystemDiscovery) Register(ctx context.Context, reg ServiceRegistrat
 		Protocols: protocolsCopy,
 	}
 
-	return d.store.Put(reg.ID, regCopy, nil)
+	err := d.store.Put(reg.ID, regCopy, nil)
+	if err == nil && d.tracker != nil {
+		d.tracker.MarkHealthy(reg.ID)
+	}
+	return err
 }

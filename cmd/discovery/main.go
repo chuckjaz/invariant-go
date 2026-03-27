@@ -19,6 +19,10 @@ func main() {
 	flag.StringVar(&upstreamURL, "upstream", "", "Upstream discovery service URL to delegate queries to")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
+	var healthInterval time.Duration
+	flag.DurationVar(&healthInterval, "health-interval", 30*time.Second, "Interval for active health checks")
+	var healthTimeout time.Duration
+	flag.DurationVar(&healthTimeout, "health-timeout", 5*time.Minute, "Time before a continuously unhealthy node is evicted")
 	flag.Parse()
 
 	var localD discovery.Discovery
@@ -27,10 +31,17 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize file system discovery: %v", err)
 		}
+		if healthInterval > 0 {
+			fsd = fsd.WithHealthTracking(healthInterval, healthTimeout)
+		}
 		defer fsd.Close()
 		localD = fsd
 	} else {
-		localD = discovery.NewInMemoryDiscovery()
+		imd := discovery.NewInMemoryDiscovery()
+		if healthInterval > 0 {
+			imd = imd.WithHealthTracking(healthInterval, healthTimeout)
+		}
+		localD = imd
 	}
 
 	var d discovery.Discovery
