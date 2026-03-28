@@ -58,6 +58,14 @@ func LoadConfig(path string, keysDirOverride string) (*Config, error) {
 		return nil, fmt.Errorf("failed to process config file '%s': %w", path, err)
 	}
 
+	var validServices []ServiceConfig
+	for _, svc := range config.Services {
+		if strings.TrimSpace(svc.Command) != "" {
+			validServices = append(validServices, svc)
+		}
+	}
+	config.Services = validServices
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for config file '%s': %w", path, err)
