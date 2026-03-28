@@ -72,11 +72,7 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int
 	d.mu.RLock()
 	var results []ServiceDescription
 	for _, reg := range d.services {
-		if protocol == "" {
-			continue
-		}
-
-		hasProtocol := slices.Contains(reg.Protocols, protocol)
+		hasProtocol := protocol == "" || slices.Contains(reg.Protocols, protocol)
 
 		if hasProtocol {
 			results = append(results, ServiceDescription{

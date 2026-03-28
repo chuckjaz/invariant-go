@@ -62,10 +62,6 @@ func (s *DiscoveryServer) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 	protocol := r.URL.Query().Get("protocol")
-	if protocol == "" {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
 	countStr := r.URL.Query().Get("count")
 	count := 1
 	if countStr != "" {

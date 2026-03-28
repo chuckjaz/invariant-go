@@ -19,6 +19,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  upload   Upload a local directory as a file tree\n")
 	fmt.Fprintf(os.Stderr, "  print    Print a block's contents to standard output\n")
 	fmt.Fprintf(os.Stderr, "  systemd  Manage invariant services using systemd\n")
+	fmt.Fprintf(os.Stderr, "  status   Query the discovery service and verify node health directly\n")
 	os.Exit(1)
 }
 
@@ -52,6 +53,8 @@ func main() {
 		runPrint(cfg, os.Args[2:])
 	case "systemd":
 		runSystemd(cfg, os.Args[2:])
+	case "status":
+		runStatus(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()

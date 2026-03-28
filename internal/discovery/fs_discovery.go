@@ -84,11 +84,7 @@ func (d *FileSystemDiscovery) Find(ctx context.Context, protocol string, count i
 	var results []ServiceDescription
 	d.store.Read(func(store map[string]ServiceRegistration) {
 		for _, reg := range store {
-			if protocol == "" {
-				continue
-			}
-
-			if slices.Contains(reg.Protocols, protocol) {
+			if protocol == "" || slices.Contains(reg.Protocols, protocol) {
 				protocolsCopy := make([]string, len(reg.Protocols))
 				copy(protocolsCopy, reg.Protocols)
 				results = append(results, ServiceDescription{
