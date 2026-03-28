@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"text/tabwriter"
 	"time"
@@ -70,9 +71,10 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	wg.Wait()
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "Registered ID\tTarget Address\tStatus")
+	fmt.Fprintln(w, "Registered ID\tTarget Address\tProtocols\tStatus")
 	for _, r := range results {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", r.desc.ID, r.desc.Address, r.status)
+		protos := strings.Join(r.desc.Protocols, ", ")
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.desc.ID, r.desc.Address, protos, r.status)
 	}
 	w.Flush()
 }
