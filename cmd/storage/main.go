@@ -95,11 +95,14 @@ func main() {
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
 
 		if name != "" {
-			err := discovery.RegisterName(context.Background(), dClient, name, id, []string{"storage-v1"})
-			if err != nil {
-				log.Fatalf("Failed to register name %q: %v", name, err)
-			}
-			log.Printf("Registered name %q for ID %s", name, id)
+			go func() {
+				err := discovery.RegisterName(context.Background(), dClient, name, id, []string{"storage-v1"})
+				if err != nil {
+					log.Printf("Failed to register name %q: %v", name, err)
+				} else {
+					log.Printf("Registered name %q for ID %s", name, id)
+				}
+			}()
 		}
 	} else if name != "" {
 		log.Fatalf("a discovery service with a registered names service is required for the service to be named.")

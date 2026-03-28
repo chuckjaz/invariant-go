@@ -72,11 +72,14 @@ func main() {
 	}
 
 	if name != "" {
-		err := discovery.RegisterName(context.Background(), disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
-		if err != nil {
-			log.Fatalf("Failed to register name %q: %v", name, err)
-		}
-		log.Printf("Registered name %q for ID %s", name, server.ID())
+		go func() {
+			err := discovery.RegisterName(context.Background(), disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
+			if err != nil {
+				log.Printf("Failed to register name %q: %v", name, err)
+			} else {
+				log.Printf("Registered name %q for ID %s", name, server.ID())
+			}
+		}()
 	}
 
 	log.Printf("Distribute service (ID %s) listening on :%d...", server.ID(), actualPort)

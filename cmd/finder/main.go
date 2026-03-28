@@ -55,11 +55,14 @@ func main() {
 	}
 
 	if name != "" {
-		err := discovery.RegisterName(context.Background(), disc, name, id, []string{"finder-v1", "notify-v1"})
-		if err != nil {
-			log.Fatalf("Failed to register name %q: %v", name, err)
-		}
-		log.Printf("Registered name %q for ID %s", name, id)
+		go func() {
+			err := discovery.RegisterName(context.Background(), disc, name, id, []string{"finder-v1", "notify-v1"})
+			if err != nil {
+				log.Printf("Failed to register name %q: %v", name, err)
+			} else {
+				log.Printf("Registered name %q for ID %s", name, id)
+			}
+		}()
 	}
 
 	server := finder.NewFinderServer(f, disc)

@@ -86,11 +86,14 @@ func main() {
 		if disc == nil {
 			log.Fatalf("Cannot register name without a valid discovery service")
 		}
-		err := discovery.RegisterName(context.Background(), disc, name, s.ID(), []string{"slots-v1"})
-		if err != nil {
-			log.Fatalf("Failed to register name %q: %v", name, err)
-		}
-		log.Printf("Registered name %q for ID %s", name, s.ID())
+		go func() {
+			err := discovery.RegisterName(context.Background(), disc, name, s.ID(), []string{"slots-v1"})
+			if err != nil {
+				log.Printf("Failed to register name %q: %v", name, err)
+			} else {
+				log.Printf("Registered name %q for ID %s", name, s.ID())
+			}
+		}()
 	}
 
 	server := slots.NewServer(s)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"invariant/internal/names"
 )
@@ -39,11 +40,30 @@ func RegisterName(ctx context.Context, disc Discovery, name, id string, protocol
 		return fmt.Errorf("a discovery service is required for the service to be named")
 	}
 
-	nameServices, err := disc.Find(ctx, "names-v1", 1)
-	if err != nil || len(nameServices) == 0 {
-		return fmt.Errorf("a discovery service with a registered names service is required for the service to be named")
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		nameServices, err := disc.Find(ctx, "names-v1", 1)
+		if err == nil && len(nameServices) > 0 {
+			nameClient := names.NewClient(nameServices[0].Address, nil)
+			err = nameClient.Put(ctx, name, id, protocols)
+			if err == nil {
+				return nil
+			}
+			lastErr = err
+		} else {
+			if err != nil {
+				lastErr = err
+			} else {
+				lastErr = fmt.Errorf("no names service found")
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
 	}
 
-	nameClient := names.NewClient(nameServices[0].Address, nil)
-	return nameClient.Put(ctx, name, id, protocols)
+	return fmt.Errorf("failed to register name after 5 attempts: %v", lastErr)
 }
