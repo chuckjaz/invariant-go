@@ -13,6 +13,7 @@ import (
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/names"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -46,20 +47,26 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	var dClient discovery.Discovery
 	dClient = discovery.NewClient(discoveryURL, nil)
 
-	findService := func(kind string) string {
-		id, err := dClient.Find(context.Background(), kind, 1)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Could not find %s service: %v\n", kind, err)
-			os.Exit(1)
-		}
-		if len(id) == 0 {
-			fmt.Fprintf(os.Stderr, "Could not find %s service\n", kind)
-			os.Exit(1)
-		}
-		return id[0].Address
+	descs, err := dClient.Find(context.Background(), "", 1000)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not reach discovery service: %v\n", err)
+		os.Exit(1)
 	}
 
-	finderAddr := findService("finder-v1")
+	servicesByProtocol := make(map[string]string)
+	for _, d := range descs {
+		for _, p := range d.Protocols {
+			if _, exists := servicesByProtocol[p]; !exists {
+				servicesByProtocol[p] = d.Address
+			}
+		}
+	}
+
+	finderAddr := servicesByProtocol["finder-v1"]
+	if finderAddr == "" {
+		fmt.Fprintf(os.Stderr, "Could not find finder-v1 service\n")
+		os.Exit(1)
+	}
 	finderClient := finder.NewClient(finderAddr, nil)
 	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 
@@ -71,15 +78,23 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 			os.Exit(1)
 		}
 	} else {
-		resolved, err := discovery.ResolveName(context.Background(), dClient, targetAddr)
-		if err == nil && resolved != "" {
-			targetAddr = resolved
+		// Bypass sequential `discovery.ResolveName` by directly leveraging pre-fetched names-v1 endpoints
+		namesAddr := servicesByProtocol["names-v1"]
+		if namesAddr != "" {
+			nameClient := names.NewClient(namesAddr, nil)
+			entry, err := nameClient.Get(context.Background(), targetAddr)
+			if err == nil && entry.Value != "" {
+				targetAddr = entry.Value
+			}
 		}
 		link.Address = targetAddr
 	}
 
-	slotsAddr := findService("slots-v1")
-	slotsClient := slots.NewClient(slotsAddr, nil)
+	slotsAddr := servicesByProtocol["slots-v1"]
+	var slotsClient slots.Slots
+	if slotsAddr != "" {
+		slotsClient = slots.NewClient(slotsAddr, nil)
+	}
 
 	reader, err := content.Read(link, storageClient, slotsClient)
 	if err != nil {
