@@ -211,7 +211,7 @@ func (c *AggregateClient) getServersForBlock(address string) []string {
 	return nil
 }
 
-// readOperation maps over LRU, then live servers, then finder.
+// readOperation maps over LRU, then finder, then live servers (as fallback).
 // We don't remove servers on false here, because the transport onError does it on connection issues.
 func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	doOp func(client Storage) (any, bool)) (any, bool) {
@@ -232,26 +232,7 @@ func (c *AggregateClient) readOperation(ctx context.Context, address string,
 		}
 	}
 
-	// 2. Try all live services
-	c.liveMu.RLock()
-	liveIDsCopy := append([]string(nil), c.liveIDs...)
-	c.liveMu.RUnlock()
-
-	for _, id := range liveIDsCopy {
-		c.liveMu.RLock()
-		client, ok := c.liveServers[id]
-		c.liveMu.RUnlock()
-
-		if ok {
-			val, okOp := doOp(client)
-			if okOp {
-				c.markBlockUsed(address, []string{id})
-				return val, true
-			}
-		}
-	}
-
-	// 3. Try Finder
+	// 2. Try Finder (naturally cuts out 404 cache misses across invariant print directory scans)
 	if c.finder != nil {
 		responses, err := c.finder.Find(ctx, address)
 		if err == nil {
@@ -276,6 +257,25 @@ func (c *AggregateClient) readOperation(ctx context.Context, address string,
 			if success {
 				c.markBlockUsed(address, successfulIDs)
 				return finalVal, true
+			}
+		}
+	}
+
+	// 3. Try all live services as a fallback
+	c.liveMu.RLock()
+	liveIDsCopy := append([]string(nil), c.liveIDs...)
+	c.liveMu.RUnlock()
+
+	for _, id := range liveIDsCopy {
+		c.liveMu.RLock()
+		client, ok := c.liveServers[id]
+		c.liveMu.RUnlock()
+
+		if ok {
+			val, okOp := doOp(client)
+			if okOp {
+				c.markBlockUsed(address, []string{id})
+				return val, true
 			}
 		}
 	}
