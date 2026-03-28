@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"invariant/internal/identity"
 )
 
 type NamesServer struct {
@@ -19,6 +21,7 @@ func NewNamesServer(names Names) *NamesServer {
 func (s *NamesServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("GET /{name}", s.handleGet)
 	mux.HandleFunc("PUT /{name}", s.handlePut)
 	mux.HandleFunc("DELETE /{name}", s.handleDelete)
@@ -28,6 +31,15 @@ func (s *NamesServer) Handler() http.Handler {
 
 func (s *NamesServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Handler().ServeHTTP(w, r)
+}
+
+func (s *NamesServer) handleGetID(w http.ResponseWriter, r *http.Request) {
+	if identityProvider, ok := s.names.(identity.Identity); ok {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(identityProvider.ID()))
+		return
+	}
+	http.Error(w, "Not Implemented", http.StatusNotImplemented)
 }
 
 func (s *NamesServer) handleGet(w http.ResponseWriter, r *http.Request) {
