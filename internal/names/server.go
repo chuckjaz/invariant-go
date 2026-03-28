@@ -22,6 +22,7 @@ func (s *NamesServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /id", s.handleGetID)
+	mux.HandleFunc("GET /lookup/{id}", s.handleLookup)
 	mux.HandleFunc("GET /{name}", s.handleGet)
 	mux.HandleFunc("PUT /{name}", s.handlePut)
 	mux.HandleFunc("DELETE /{name}", s.handleDelete)
@@ -108,4 +109,24 @@ func (s *NamesServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("ETag", expectedValue)
 	w.WriteHeader(http.StatusOK) // Or 204 No Content
+}
+
+func (s *NamesServer) handleLookup(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	names, err := s.names.Lookup(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(names); err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 }

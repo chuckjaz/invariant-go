@@ -54,3 +54,34 @@ func (u *UpstreamNames) Put(ctx context.Context, name string, value string, toke
 func (u *UpstreamNames) Delete(ctx context.Context, name string, expectedValue string) error {
 	return u.local.Delete(ctx, name, expectedValue)
 }
+
+// Lookup checks both local and parent registries for the given ID.
+func (u *UpstreamNames) Lookup(ctx context.Context, id string) ([]string, error) {
+	localResults, err := u.local.Lookup(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if u.parent == nil {
+		return localResults, nil
+	}
+
+	parentResults, err := u.parent.Lookup(ctx, id)
+	if err != nil {
+		return localResults, err
+	}
+
+	seen := make(map[string]bool)
+	for _, name := range localResults {
+		seen[name] = true
+	}
+
+	combined := localResults
+	for _, name := range parentResults {
+		if !seen[name] {
+			combined = append(combined, name)
+		}
+	}
+
+	return combined, nil
+}

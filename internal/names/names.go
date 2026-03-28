@@ -21,4 +21,5 @@ type Names interface {
 	Get(ctx context.Context, name string) (NameEntry, error)
 	Put(ctx context.Context, name string, value string, tokens []string) error
 	Delete(ctx context.Context, name string, expectedValue string) error
+	Lookup(ctx context.Context, id string) ([]string, error)
 }

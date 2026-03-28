@@ -83,3 +83,19 @@ func (s *InMemoryNames) Delete(ctx context.Context, name string, expectedValue s
 	delete(s.store, name)
 	return nil
 }
+
+func (s *InMemoryNames) Lookup(ctx context.Context, id string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var results []string
+	for k, v := range s.store {
+		if v.Value == id {
+			results = append(results, k)
+		}
+	}
+	if results == nil {
+		results = []string{} // return empty list instead of null natively
+	}
+	return results, nil
+}

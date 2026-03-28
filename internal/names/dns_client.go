@@ -84,3 +84,8 @@ func (c *DNSClient) Put(ctx context.Context, name string, value string, tokens [
 func (c *DNSClient) Delete(ctx context.Context, name string, expectedValue string) error {
 	return ErrNotSupported
 }
+
+// Lookup is not supported by the DNS client
+func (c *DNSClient) Lookup(ctx context.Context, id string) ([]string, error) {
+	return nil, ErrNotSupported
+}

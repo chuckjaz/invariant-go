@@ -44,6 +44,19 @@ func (m *mockParentNames) Delete(ctx context.Context, name string, expectedValue
 	return nil
 }
 
+func (m *mockParentNames) Lookup(ctx context.Context, id string) ([]string, error) {
+	var results []string
+	for k, v := range m.names {
+		if v.Value == id {
+			results = append(results, k)
+		}
+	}
+	if results == nil {
+		results = []string{}
+	}
+	return results, nil
+}
+
 func TestUpstreamNames_Get(t *testing.T) {
 	ctx := context.Background()
 	local := NewInMemoryNames()

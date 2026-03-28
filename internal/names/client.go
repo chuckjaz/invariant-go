@@ -117,5 +117,30 @@ func (c *Client) Delete(ctx context.Context, name string, expectedValue string) 
 	return nil
 }
 
+// Lookup queries the service for aliases registered against an ID.
+func (c *Client) Lookup(ctx context.Context, id string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/lookup/%s", c.baseURL, id), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var names []string
+	if err := json.NewDecoder(resp.Body).Decode(&names); err != nil {
+		return nil, err
+	}
+
+	return names, nil
+}
+
 // Assert that Client implements the Names interface
 var _ Names = (*Client)(nil)

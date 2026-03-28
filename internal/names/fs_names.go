@@ -93,3 +93,18 @@ func (s *FileSystemNames) Delete(ctx context.Context, name string, expectedValue
 		return nil
 	})
 }
+
+func (s *FileSystemNames) Lookup(ctx context.Context, id string) ([]string, error) {
+	var results []string
+	s.store.Read(func(store map[string]NameEntry) {
+		for k, v := range store {
+			if v.Value == id {
+				results = append(results, k)
+			}
+		}
+	})
+	if results == nil {
+		results = []string{}
+	}
+	return results, nil
+}
