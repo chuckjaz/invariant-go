@@ -173,6 +173,7 @@ type blockListReader struct {
 	current          io.ReadCloser
 	idx              int
 	intraBlockOffset int64
+	currentPos       int64
 }
 
 func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
@@ -199,27 +200,41 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 			r.current = nil
 		}
 		r.intraBlockOffset = 0
+		r.currentPos = offset
 		return offset, nil
 	}
 
-	// If we jump to a different block, close current.
-	if r.idx != targetIdx || r.current == nil {
-		if r.current != nil {
-			r.current.Close()
-			r.current = nil
-		}
-		r.idx = targetIdx
+	// The currently open block corresponds to r.idx - 1 (since r.idx is incremented after opening)
+	isSameBlock := (r.current != nil && targetIdx == r.idx-1)
+
+	// Optimize FUSE seek patterns natively bridging absolute stream position.
+	// If the seek offset is exactly our current position, skip operation implicitly.
+	if offset == r.currentPos {
+		return offset, nil
 	}
 
-	r.intraBlockOffset = offset - currentOffset
+	// If we are merely skipping forward within the CURRENT active block stream
+	if isSameBlock && offset > r.currentPos {
+		diff := offset - r.currentPos
+		_, err := io.CopyN(io.Discard, r.current, diff)
+		if err != nil {
+			r.current.Close()
+			r.current = nil
+			r.idx = targetIdx
+		} else {
+			r.currentPos = offset
+			return offset, nil
+		}
+	}
 
-	// If we stayed in the same block, but moved backward or forward?
-	// To be safe, if we are in the same block, we should probably reopen it to seek properly
-	// unless we implement a more complex skip. Let's just always reopen to keep it simple.
+	// For jumping bounds, backwards seeks, or discarded connections
 	if r.current != nil {
 		r.current.Close()
 		r.current = nil
 	}
+	r.idx = targetIdx
+	r.intraBlockOffset = offset - currentOffset
+	r.currentPos = offset
 
 	return offset, nil
 }
@@ -249,6 +264,7 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 
 		n, err := r.current.Read(p)
 		if n > 0 {
+			r.currentPos += int64(n)
 			return n, nil // Return data even if err == io.EOF handling on next call
 		}
 		if err == io.EOF {
