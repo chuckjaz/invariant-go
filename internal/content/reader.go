@@ -138,10 +138,10 @@ func applyTransform(rc io.ReadCloser, t ContentTransform, store storage.Storage,
 			return nil, fmt.Errorf("failed to parse block list: %w", err)
 		}
 		return &blockListReader{
-			blocks:         bl.Blocks,
-			store:          store,
-			slotService:    slotService,
-			activeBlockIdx: -1,
+			blocks:      bl.Blocks,
+			store:       store,
+			slotService: slotService,
+			cache:       make(map[int][]byte),
 		}, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind)
@@ -168,12 +168,12 @@ func (w *wrappedReadCloser) Close() error {
 }
 
 type blockListReader struct {
-	blocks          []BlockListItem
-	store           storage.Storage
-	slotService     slots.Slots
-	activeBlockIdx  int
-	activeBlockData []byte
-	currentPos      int64
+	blocks      []BlockListItem
+	store       storage.Storage
+	slotService slots.Slots
+	cache       map[int][]byte
+	cacheKeys   []int // LRU queue tracking oldest used chunks
+	currentPos  int64
 }
 
 func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
@@ -188,13 +188,17 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (r *blockListReader) loadBlock(targetIdx int) error {
-	if r.activeBlockIdx == targetIdx && r.activeBlockData != nil {
+	if _, ok := r.cache[targetIdx]; ok {
+		// Update LRU queue shifting newly hit item perfectly to end
+		for i, k := range r.cacheKeys {
+			if k == targetIdx {
+				r.cacheKeys = append(r.cacheKeys[:i], r.cacheKeys[i+1:]...)
+				break
+			}
+		}
+		r.cacheKeys = append(r.cacheKeys, targetIdx)
 		return nil
 	}
-
-	// Drop previous network bounds freeing memory overhead naturally
-	r.activeBlockData = nil
-	r.activeBlockIdx = -1
 
 	if targetIdx >= len(r.blocks) {
 		return io.EOF
@@ -212,8 +216,15 @@ func (r *blockListReader) loadBlock(targetIdx int) error {
 		return err
 	}
 
-	r.activeBlockData = data
-	r.activeBlockIdx = targetIdx
+	// Maximum 4 blocks internally mapped to explicitly blanket segment jumping overheads
+	if len(r.cacheKeys) >= 4 {
+		oldest := r.cacheKeys[0]
+		r.cacheKeys = r.cacheKeys[1:]
+		delete(r.cache, oldest)
+	}
+
+	r.cache[targetIdx] = data
+	r.cacheKeys = append(r.cacheKeys, targetIdx)
 	return nil
 }
 
@@ -244,14 +255,15 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 
 		// Calculate mapping offset directly within active RAM slice natively
 		intraBlockOffset := r.currentPos - currentOffset
+		activeBlockData := r.cache[targetIdx]
 
 		// Handle corrupted chunk mapping avoiding invalid slice panics seamlessly
-		if intraBlockOffset >= int64(len(r.activeBlockData)) {
+		if intraBlockOffset >= int64(len(activeBlockData)) {
 			r.currentPos = currentOffset + int64(r.blocks[targetIdx].Size)
 			continue
 		}
 
-		n := copy(p, r.activeBlockData[intraBlockOffset:])
+		n := copy(p, activeBlockData[intraBlockOffset:])
 		if n > 0 {
 			r.currentPos += int64(n)
 			return n, nil
@@ -262,8 +274,8 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 }
 
 func (r *blockListReader) Close() error {
-	r.activeBlockData = nil
-	r.activeBlockIdx = -1
+	r.cache = nil
+	r.cacheKeys = nil
 	return nil
 }
 
