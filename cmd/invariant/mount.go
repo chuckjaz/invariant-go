@@ -37,7 +37,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	var slot string
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
 	var cacheSizeMB int
-	fsFlags.IntVar(&cacheSizeMB, "cache", 10, "In-memory caching size in MB for storage backend (0 to disable)")
+	fsFlags.IntVar(&cacheSizeMB, "cache", 128, "In-memory caching size in MB for storage backend (0 to disable)")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
