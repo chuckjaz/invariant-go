@@ -216,8 +216,9 @@ func (r *blockListReader) loadBlock(targetIdx int) error {
 		return err
 	}
 
-	// Maximum 4 blocks internally mapped to explicitly blanket segment jumping overheads
-	if len(r.cacheKeys) >= 4 {
+	// Maximum 64 blocks internally mapped to explicitly blanket segment jumping overheads
+	// (64 blocks * ~2MB = ~128MB RAM max overhead per open file, entirely mitigating 15MB Go binary jumps)
+	if len(r.cacheKeys) >= 64 {
 		oldest := r.cacheKeys[0]
 		r.cacheKeys = r.cacheKeys[1:]
 		delete(r.cache, oldest)
