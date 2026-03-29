@@ -17,6 +17,11 @@ Invariant is a distributed storage system built as a set of microservices. The s
 
 The langauge the project should use is the Go programming language. The project should use the standard Go libraries as much as possible. The project should use the standard Go tools as much as possible. The project should use the standard Go build system as much as possible.
 
+### Naming
+
+Names should follow the Go naming conventions.
+New files should avoid names like "common", "shared", "util", "utils", "helpers", etc. in the filename. Instead, the name should reflect the purpose of the file. 
+
 ### Testing
 
 Each module should have its own tests. The tests should be run using the standard Go test tools. The tests should be run using the standard Go build system as much as possible.
