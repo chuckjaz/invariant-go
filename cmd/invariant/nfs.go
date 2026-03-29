@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -36,6 +37,8 @@ func runNfs(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
 	var cacheSizeMB int
 	fsFlags.IntVar(&cacheSizeMB, "cache", 10, "In-memory caching size in MB for storage backend (0 to disable)")
+	var overflowDir string
+	fsFlags.StringVar(&overflowDir, "overflow-dir", "", "Directory to use for the overflow cache (default: ~/.invariant/overflow)")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
@@ -103,7 +106,21 @@ func runNfs(globalCfg *config.InvariantConfig, args []string) {
 		localStore := storage.NewInMemoryStorage()
 		maxSizeBytes := int64(cacheSizeMB) * 1024 * 1024
 		desiredSizeBytes := maxSizeBytes * 8 / 10
-		finalStorage = storage.NewCachingStorage(localStore, storageClient, maxSizeBytes, desiredSizeBytes, true)
+		cs := storage.NewCachingStorage(localStore, storageClient, maxSizeBytes, desiredSizeBytes, true)
+		finalStorage = cs
+
+		if overflowDir == "" {
+			configDir, err := config.ConfigDir()
+			if err != nil {
+				log.Fatalf("Failed to get config directory for overflow: %v", err)
+			}
+			overflowDir = filepath.Join(configDir, "overflow")
+		}
+		if err := os.MkdirAll(overflowDir, 0700); err != nil {
+			log.Fatalf("Failed to create overflow directory: %v", err)
+		}
+		overflowStore := storage.NewFileSystemStorage(overflowDir)
+		cs.SetOverflow(overflowStore)
 	}
 
 	var writerOpts content.WriterOptions

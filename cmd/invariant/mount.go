@@ -43,6 +43,8 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.IntVar(&diskCacheSizeMB, "disk-cache", 1024, "Disk caching size in MB for storage backend (0 to disable)")
 	var cacheDir string
 	fsFlags.StringVar(&cacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.invariant/cache)")
+	var overflowDir string
+	fsFlags.StringVar(&overflowDir, "overflow-dir", "", "Directory to use for the overflow cache (default: ~/.invariant/overflow)")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
@@ -110,6 +112,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
 	var finalStorage storage.Storage = storageClient
+	var directWrapper *storage.CachingStorage
 
 	if diskCacheSizeMB > 0 {
 		if cacheDir == "" {
@@ -127,14 +130,35 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		l2Store := storage.NewFileSystemStorage(cacheDir)
 		maxSizeBytes := int64(diskCacheSizeMB) * 1024 * 1024
 		desiredSizeBytes := maxSizeBytes * 8 / 10
-		finalStorage = storage.NewCachingStorage(l2Store, finalStorage, maxSizeBytes, desiredSizeBytes, true)
+		cs := storage.NewCachingStorage(l2Store, finalStorage, maxSizeBytes, desiredSizeBytes, true)
+		directWrapper = cs
+		finalStorage = cs
 	}
 
 	if cacheSizeMB > 0 {
 		localStore := storage.NewInMemoryStorage()
 		maxSizeBytes := int64(cacheSizeMB) * 1024 * 1024
 		desiredSizeBytes := maxSizeBytes * 8 / 10
-		finalStorage = storage.NewCachingStorage(localStore, finalStorage, maxSizeBytes, desiredSizeBytes, true)
+		cs := storage.NewCachingStorage(localStore, finalStorage, maxSizeBytes, desiredSizeBytes, true)
+		if directWrapper == nil {
+			directWrapper = cs
+		}
+		finalStorage = cs
+	}
+
+	if directWrapper != nil {
+		if overflowDir == "" {
+			configDir, err := config.ConfigDir()
+			if err != nil {
+				log.Fatalf("Failed to get config directory for overflow: %v", err)
+			}
+			overflowDir = filepath.Join(configDir, "overflow")
+		}
+		if err := os.MkdirAll(overflowDir, 0700); err != nil {
+			log.Fatalf("Failed to create overflow directory: %v", err)
+		}
+		overflowStore := storage.NewFileSystemStorage(overflowDir)
+		directWrapper.SetOverflow(overflowStore)
 	}
 
 	var writerOpts content.WriterOptions

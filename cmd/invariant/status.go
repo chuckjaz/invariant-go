@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -48,11 +49,8 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 
 	var nameClients []names.Names
 	for _, d := range descs {
-		for _, p := range d.Protocols {
-			if p == "names-v1" {
-				nameClients = append(nameClients, names.NewClient(d.Address, nil))
-				break
-			}
+		if slices.Contains(d.Protocols, "names-v1") {
+			nameClients = append(nameClients, names.NewClient(d.Address, nil))
 		}
 	}
 

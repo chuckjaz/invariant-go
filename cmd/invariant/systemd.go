@@ -366,13 +366,13 @@ func buildDependencies(sc start.ServiceConfig) (string, string) {
 	}
 
 	if val, ok := sc.Args["distribute"]; ok {
-		for _, v := range strings.Split(val, ",") {
+		for v := range strings.SplitSeq(val, ",") {
 			w = append(w, fmt.Sprintf("invariant-%s.service", strings.TrimSpace(v)))
 		}
 	}
 
 	if val, ok := sc.Args["notify"]; ok {
-		for _, v := range strings.Split(val, ",") {
+		for v := range strings.SplitSeq(val, ",") {
 			w = append(w, fmt.Sprintf("invariant-%s.service", strings.TrimSpace(v)))
 		}
 	}

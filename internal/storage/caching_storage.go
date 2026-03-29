@@ -17,6 +17,7 @@ var (
 type CachingStorage struct {
 	local       ControlledStorage
 	destination Storage
+	overflow    ControlledStorage
 
 	maxSize       int64
 	desiredSize   int64
@@ -59,6 +60,15 @@ func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, de
 	go cs.evictionLoop()
 
 	return cs
+}
+
+func (s *CachingStorage) SetOverflow(overflow ControlledStorage) {
+	s.mu.Lock()
+	s.overflow = overflow
+	s.mu.Unlock()
+	if overflow != nil {
+		go s.overflowFlushLoop()
+	}
 }
 
 func (s *CachingStorage) init() {
@@ -159,6 +169,12 @@ func (s *CachingStorage) Has(ctx context.Context, address string) bool {
 		s.markUsed(address)
 		return true
 	}
+	s.mu.Lock()
+	overflow := s.overflow
+	s.mu.Unlock()
+	if overflow != nil && overflow.Has(ctx, address) {
+		return true
+	}
 	if s.destination != nil {
 		if s.destination.Has(ctx, address) {
 			s.destHasMu.Lock()
@@ -177,14 +193,19 @@ func (s *CachingStorage) Get(ctx context.Context, address string) (io.ReadCloser
 		return rc, true
 	}
 
-	if s.destination != nil {
-		rc, ok = s.destination.Get(ctx, address)
-		if ok {
-			s.destHasMu.Lock()
-			s.destHas[address] = struct{}{}
-			s.destHasMu.Unlock()
+	s.mu.Lock()
+	overflow := s.overflow
+	s.mu.Unlock()
 
-			destSize, hasSize := s.destination.Size(ctx, address)
+	fetchAndPromote := func(src Storage, saveDestHas bool) (io.ReadCloser, bool) {
+		rcSrc, okSrc := src.Get(ctx, address)
+		if okSrc {
+			if saveDestHas {
+				s.destHasMu.Lock()
+				s.destHas[address] = struct{}{}
+				s.destHasMu.Unlock()
+			}
+			destSize, hasSize := src.Size(ctx, address)
 			if hasSize {
 				s.mu.Lock()
 				hasRoom := destSize <= s.maxSize
@@ -204,12 +225,25 @@ func (s *CachingStorage) Get(ctx context.Context, address string) (io.ReadCloser
 					}()
 
 					return &trackingReadCloser{
-						c:  rc,
+						c:  rcSrc,
 						pw: pw,
 					}, true
 				}
 			}
-			return rc, true
+			return rcSrc, true
+		}
+		return nil, false
+	}
+
+	if overflow != nil {
+		if r, ok := fetchAndPromote(overflow, false); ok {
+			return r, true
+		}
+	}
+
+	if s.destination != nil {
+		if r, ok := fetchAndPromote(s.destination, true); ok {
+			return r, true
 		}
 	}
 	return nil, false
@@ -220,6 +254,15 @@ func (s *CachingStorage) Size(ctx context.Context, address string) (int64, bool)
 	if ok {
 		s.markUsed(address)
 		return size, true
+	}
+	s.mu.Lock()
+	overflow := s.overflow
+	s.mu.Unlock()
+	if overflow != nil {
+		size, ok := overflow.Size(ctx, address)
+		if ok {
+			return size, true
+		}
 	}
 	if s.destination != nil {
 		size, ok := s.destination.Size(ctx, address)
@@ -424,6 +467,7 @@ func (s *CachingStorage) doEvict() {
 
 		// Found a candidate for eviction.
 		// Upload to destination if it doesn't have it.
+		evictedToDest := false
 		if s.destination != nil {
 			s.destHasMu.RLock()
 			_, hasDest := s.destHas[addr]
@@ -436,15 +480,39 @@ func (s *CachingStorage) doEvict() {
 					rc.Close()
 					if err != nil {
 						log.Printf("caching storage: failed to evict block %s to destination: %v", addr, err)
-						// Sleep to avoid thrashing CPU on failure
+					} else {
+						evictedToDest = true
+						s.destHasMu.Lock()
+						s.destHas[addr] = struct{}{}
+						s.destHasMu.Unlock()
+					}
+				}
+			} else {
+				evictedToDest = true
+			}
+		}
+
+		s.mu.Lock()
+		overflow := s.overflow
+		s.mu.Unlock()
+
+		if !evictedToDest && overflow != nil {
+			if !overflow.Has(context.Background(), addr) {
+				rc, ok := s.local.Get(context.Background(), addr)
+				if ok {
+					_, err := overflow.StoreAt(context.Background(), addr, rc)
+					rc.Close()
+					if err != nil {
+						log.Printf("caching storage: failed to evict block %s to overflow: %v", addr, err)
 						time.Sleep(1 * time.Second)
 						break
 					}
-					s.destHasMu.Lock()
-					s.destHas[addr] = struct{}{}
-					s.destHasMu.Unlock()
 				}
 			}
+		} else if !evictedToDest && s.destination != nil {
+			// Failed to evict to destination, and no overflow configured. Sleep.
+			time.Sleep(1 * time.Second)
+			break
 		}
 
 		s.mu.Lock()
@@ -536,4 +604,54 @@ func (s *CachingStorage) Sync(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *CachingStorage) overflowFlushLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			if s.destination == nil {
+				continue
+			}
+
+			s.mu.Lock()
+			overflow := s.overflow
+			s.mu.Unlock()
+
+			if overflow == nil {
+				return
+			}
+
+			for batch := range overflow.List(s.ctx, 100) {
+				for _, addr := range batch {
+					s.destHasMu.RLock()
+					_, hasDest := s.destHas[addr]
+					s.destHasMu.RUnlock()
+
+					if !hasDest && !s.destination.Has(s.ctx, addr) {
+						rc, ok := overflow.Get(s.ctx, addr)
+						if !ok {
+							continue
+						}
+						_, err := s.destination.StoreAt(s.ctx, addr, rc)
+						rc.Close()
+						if err != nil {
+							// If one upload fails, the destination is probably unreachable. Break the batch.
+							break
+						}
+						s.destHasMu.Lock()
+						s.destHas[addr] = struct{}{}
+						s.destHasMu.Unlock()
+					}
+					// Successfully stored in dest (or it already had it). Remove from overflow.
+					overflow.Remove(s.ctx, addr)
+				}
+			}
+		}
+	}
 }

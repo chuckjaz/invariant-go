@@ -185,10 +185,7 @@ type blockListReader struct {
 }
 
 func (r *blockListReader) startPrefetch() {
-	maxPrefetch := 16
-	if len(r.blocks) < maxPrefetch {
-		maxPrefetch = len(r.blocks)
-	}
+	maxPrefetch := min(len(r.blocks), 16)
 	for i := range maxPrefetch {
 		go func(idx int) {
 			_ = r.loadBlock(idx)
