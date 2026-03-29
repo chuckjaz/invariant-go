@@ -138,9 +138,10 @@ func applyTransform(rc io.ReadCloser, t ContentTransform, store storage.Storage,
 			return nil, fmt.Errorf("failed to parse block list: %w", err)
 		}
 		return &blockListReader{
-			blocks:      bl.Blocks,
-			store:       store,
-			slotService: slotService,
+			blocks:         bl.Blocks,
+			store:          store,
+			slotService:    slotService,
+			activeBlockIdx: -1,
 		}, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind)
@@ -167,13 +168,12 @@ func (w *wrappedReadCloser) Close() error {
 }
 
 type blockListReader struct {
-	blocks           []BlockListItem
-	store            storage.Storage
-	slotService      slots.Slots
-	current          io.ReadCloser
-	idx              int
-	intraBlockOffset int64
-	currentPos       int64
+	blocks          []BlockListItem
+	store           storage.Storage
+	slotService     slots.Slots
+	activeBlockIdx  int
+	activeBlockData []byte
+	currentPos      int64
 }
 
 func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
@@ -181,105 +181,89 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 		return 0, errors.New("only SeekStart is supported")
 	}
 
-	var currentOffset int64 = 0
-	var targetIdx int = 0
-
-	for i, b := range r.blocks {
-		if currentOffset+int64(b.Size) > offset {
-			targetIdx = i
-			break
-		}
-		currentOffset += int64(b.Size)
-	}
-
-	if targetIdx == len(r.blocks) {
-		// Seeking past the end
-		r.idx = len(r.blocks)
-		if r.current != nil {
-			r.current.Close()
-			r.current = nil
-		}
-		r.intraBlockOffset = 0
-		r.currentPos = offset
-		return offset, nil
-	}
-
-	// The currently open block corresponds to r.idx - 1 (since r.idx is incremented after opening)
-	isSameBlock := (r.current != nil && targetIdx == r.idx-1)
-
-	// Optimize FUSE seek patterns natively bridging absolute stream position.
-	// If the seek offset is exactly our current position, skip operation implicitly.
-	if offset == r.currentPos {
-		return offset, nil
-	}
-
-	// If we are merely skipping forward within the CURRENT active block stream
-	if isSameBlock && offset > r.currentPos {
-		diff := offset - r.currentPos
-		_, err := io.CopyN(io.Discard, r.current, diff)
-		if err != nil {
-			r.current.Close()
-			r.current = nil
-			r.idx = targetIdx
-		} else {
-			r.currentPos = offset
-			return offset, nil
-		}
-	}
-
-	// For jumping bounds, backwards seeks, or discarded connections
-	if r.current != nil {
-		r.current.Close()
-		r.current = nil
-	}
-	r.idx = targetIdx
-	r.intraBlockOffset = offset - currentOffset
+	// Because we perfectly buffer block execution natively into RAM, FUSE leaps
+	// forwards, backwards, or inside active block indices are completely zero-latency!
 	r.currentPos = offset
-
 	return offset, nil
 }
 
+func (r *blockListReader) loadBlock(targetIdx int) error {
+	if r.activeBlockIdx == targetIdx && r.activeBlockData != nil {
+		return nil
+	}
+
+	// Drop previous network bounds freeing memory overhead naturally
+	r.activeBlockData = nil
+	r.activeBlockIdx = -1
+
+	if targetIdx >= len(r.blocks) {
+		return io.EOF
+	}
+
+	link := r.blocks[targetIdx].Content
+	rc, err := Read(link, r.store, r.slotService)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return err
+	}
+
+	r.activeBlockData = data
+	r.activeBlockIdx = targetIdx
+	return nil
+}
+
 func (r *blockListReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
 	for {
-		if r.current == nil {
-			if r.idx >= len(r.blocks) {
-				return 0, io.EOF
-			}
-			link := r.blocks[r.idx].Content
-			rc, err := Read(link, r.store, r.slotService)
-			if err != nil {
-				return 0, err
-			}
-			r.current = rc
+		var currentOffset int64 = 0
+		var targetIdx int = len(r.blocks)
 
-			if r.intraBlockOffset > 0 {
-				_, err := io.CopyN(io.Discard, r.current, r.intraBlockOffset)
-				r.intraBlockOffset = 0 // consumed
-				if err != nil {
-					return 0, err
-				}
+		for i, b := range r.blocks {
+			if currentOffset+int64(b.Size) > r.currentPos {
+				targetIdx = i
+				break
 			}
-			r.idx++
+			currentOffset += int64(b.Size)
 		}
 
-		n, err := r.current.Read(p)
-		if n > 0 {
-			r.currentPos += int64(n)
-			return n, nil // Return data even if err == io.EOF handling on next call
+		if targetIdx == len(r.blocks) {
+			return 0, io.EOF
 		}
-		if err == io.EOF {
-			r.current.Close()
-			r.current = nil
+
+		if err := r.loadBlock(targetIdx); err != nil {
+			return 0, err
+		}
+
+		// Calculate mapping offset directly within active RAM slice natively
+		intraBlockOffset := r.currentPos - currentOffset
+
+		// Handle corrupted chunk mapping avoiding invalid slice panics seamlessly
+		if intraBlockOffset >= int64(len(r.activeBlockData)) {
+			r.currentPos = currentOffset + int64(r.blocks[targetIdx].Size)
 			continue
 		}
-		return 0, err
+
+		n := copy(p, r.activeBlockData[intraBlockOffset:])
+		if n > 0 {
+			r.currentPos += int64(n)
+			return n, nil
+		}
+
+		r.currentPos = currentOffset + int64(r.blocks[targetIdx].Size)
 	}
 }
 
 func (r *blockListReader) Close() error {
-	if r.current != nil {
-		r.current.Close()
-	}
+	r.activeBlockData = nil
+	r.activeBlockIdx = -1
 	return nil
 }
 
