@@ -306,10 +306,12 @@ func (r *hashCheckerReader) Read(p []byte) (int, error) {
 		r.hasher.Write(p[:n])
 	}
 	if err == io.EOF {
-		sum := hex.EncodeToString(r.hasher.Sum(nil))
-		if sum != r.expected {
-			r.err = fmt.Errorf("%w: expected %s, got %s", ErrHashMismatch, r.expected, sum)
-			return n, r.err
+		if r.expected != "" {
+			sum := hex.EncodeToString(r.hasher.Sum(nil))
+			if sum != r.expected {
+				r.err = fmt.Errorf("%w: expected %s, got %s", ErrHashMismatch, r.expected, sum)
+				return n, r.err
+			}
 		}
 	}
 	return n, err
