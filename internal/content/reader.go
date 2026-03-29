@@ -219,6 +219,10 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 
 func (r *blockListReader) loadBlock(targetIdx int) error {
 	r.mu.Lock()
+	if r.cache == nil {
+		r.mu.Unlock()
+		return io.ErrClosedPipe
+	}
 	if _, ok := r.cache[targetIdx]; ok {
 		r.updateLRU(targetIdx)
 		r.mu.Unlock()
@@ -263,6 +267,10 @@ func (r *blockListReader) loadBlock(targetIdx int) error {
 	}
 
 	r.mu.Lock()
+	if r.cache == nil {
+		r.mu.Unlock()
+		return io.ErrClosedPipe
+	}
 	// Maximum 64 blocks internally mapped to explicitly blanket segment jumping overheads
 	// (64 blocks * ~2MB = ~128MB RAM max overhead per open file, entirely mitigating 15MB Go binary jumps)
 	if len(r.cacheKeys) >= 64 {
