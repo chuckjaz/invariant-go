@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"invariant/internal/content"
@@ -194,7 +195,12 @@ func (d *Directory) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON correctly marshals a Directory into a JSON array of polymorphic Entry items.
 func (d Directory) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]Entry(d))
+	sortedEntries := make([]Entry, len(d))
+	copy(sortedEntries, d)
+	sort.Slice(sortedEntries, func(i, j int) bool {
+		return sortedEntries[i].GetName() < sortedEntries[j].GetName()
+	})
+	return json.Marshal(sortedEntries)
 }
 
 // Validate traverses the directory and validates all entries.
