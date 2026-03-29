@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -38,6 +39,10 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
 	var cacheSizeMB int
 	fsFlags.IntVar(&cacheSizeMB, "cache", 128, "In-memory caching size in MB for storage backend (0 to disable)")
+	var diskCacheSizeMB int
+	fsFlags.IntVar(&diskCacheSizeMB, "disk-cache", 1024, "Disk caching size in MB for storage backend (0 to disable)")
+	var cacheDir string
+	fsFlags.StringVar(&cacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.invariant/cache)")
 	var compress bool
 	var encrypt bool
 	var keyPolicyStr string
@@ -105,11 +110,31 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
 	var finalStorage storage.Storage = storageClient
+
+	if diskCacheSizeMB > 0 {
+		if cacheDir == "" {
+			configDir, err := config.ConfigDir()
+			if err != nil {
+				log.Fatalf("Failed to get config directory for cache: %v", err)
+			}
+			cacheDir = filepath.Join(configDir, "cache")
+		}
+
+		if err := os.MkdirAll(cacheDir, 0700); err != nil {
+			log.Fatalf("Failed to create cache directory: %v", err)
+		}
+
+		l2Store := storage.NewFileSystemStorage(cacheDir)
+		maxSizeBytes := int64(diskCacheSizeMB) * 1024 * 1024
+		desiredSizeBytes := maxSizeBytes * 8 / 10
+		finalStorage = storage.NewCachingStorage(l2Store, finalStorage, maxSizeBytes, desiredSizeBytes, true)
+	}
+
 	if cacheSizeMB > 0 {
 		localStore := storage.NewInMemoryStorage()
 		maxSizeBytes := int64(cacheSizeMB) * 1024 * 1024
 		desiredSizeBytes := maxSizeBytes * 8 / 10
-		finalStorage = storage.NewCachingStorage(localStore, storageClient, maxSizeBytes, desiredSizeBytes, true)
+		finalStorage = storage.NewCachingStorage(localStore, finalStorage, maxSizeBytes, desiredSizeBytes, true)
 	}
 
 	var writerOpts content.WriterOptions
