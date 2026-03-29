@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"sync"
 
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -137,12 +138,15 @@ func applyTransform(rc io.ReadCloser, t ContentTransform, store storage.Storage,
 		if err := json.Unmarshal(data, &bl); err != nil {
 			return nil, fmt.Errorf("failed to parse block list: %w", err)
 		}
-		return &blockListReader{
+		br := &blockListReader{
 			blocks:      bl.Blocks,
 			store:       store,
 			slotService: slotService,
 			cache:       make(map[int][]byte),
-		}, nil
+			inFlight:    make(map[int]chan struct{}),
+		}
+		br.startPrefetch()
+		return br, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedKind, t.Kind)
 	}
@@ -171,9 +175,35 @@ type blockListReader struct {
 	blocks      []BlockListItem
 	store       storage.Storage
 	slotService slots.Slots
-	cache       map[int][]byte
-	cacheKeys   []int // LRU queue tracking oldest used chunks
-	currentPos  int64
+
+	mu        sync.Mutex
+	cache     map[int][]byte
+	inFlight  map[int]chan struct{}
+	cacheKeys []int // LRU queue tracking oldest used chunks
+
+	currentPos int64
+}
+
+func (r *blockListReader) startPrefetch() {
+	maxPrefetch := 16
+	if len(r.blocks) < maxPrefetch {
+		maxPrefetch = len(r.blocks)
+	}
+	for i := range maxPrefetch {
+		go func(idx int) {
+			_ = r.loadBlock(idx)
+		}(i)
+	}
+}
+
+func (r *blockListReader) updateLRU(targetIdx int) {
+	for i, k := range r.cacheKeys {
+		if k == targetIdx {
+			r.cacheKeys = append(r.cacheKeys[:i], r.cacheKeys[i+1:]...)
+			return
+		}
+	}
+	r.cacheKeys = append(r.cacheKeys, targetIdx)
 }
 
 func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
@@ -188,17 +218,33 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (r *blockListReader) loadBlock(targetIdx int) error {
+	r.mu.Lock()
 	if _, ok := r.cache[targetIdx]; ok {
-		// Update LRU queue shifting newly hit item perfectly to end
-		for i, k := range r.cacheKeys {
-			if k == targetIdx {
-				r.cacheKeys = append(r.cacheKeys[:i], r.cacheKeys[i+1:]...)
-				break
-			}
-		}
-		r.cacheKeys = append(r.cacheKeys, targetIdx)
+		r.updateLRU(targetIdx)
+		r.mu.Unlock()
 		return nil
 	}
+
+	if ch, active := r.inFlight[targetIdx]; active {
+		r.mu.Unlock()
+		<-ch // Wait safely for the existing background prefetch resolution natively
+		r.mu.Lock()
+		r.updateLRU(targetIdx)
+		r.mu.Unlock()
+		return nil
+	}
+
+	// Lock the current fetch mapping
+	ch := make(chan struct{})
+	r.inFlight[targetIdx] = ch
+	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		delete(r.inFlight, targetIdx)
+		close(ch)
+		r.mu.Unlock()
+	}()
 
 	if targetIdx >= len(r.blocks) {
 		return io.EOF
@@ -216,6 +262,7 @@ func (r *blockListReader) loadBlock(targetIdx int) error {
 		return err
 	}
 
+	r.mu.Lock()
 	// Maximum 64 blocks internally mapped to explicitly blanket segment jumping overheads
 	// (64 blocks * ~2MB = ~128MB RAM max overhead per open file, entirely mitigating 15MB Go binary jumps)
 	if len(r.cacheKeys) >= 64 {
@@ -225,7 +272,9 @@ func (r *blockListReader) loadBlock(targetIdx int) error {
 	}
 
 	r.cache[targetIdx] = data
-	r.cacheKeys = append(r.cacheKeys, targetIdx)
+	r.updateLRU(targetIdx)
+	r.mu.Unlock()
+
 	return nil
 }
 
@@ -256,7 +305,10 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 
 		// Calculate mapping offset directly within active RAM slice natively
 		intraBlockOffset := r.currentPos - currentOffset
+
+		r.mu.Lock()
 		activeBlockData := r.cache[targetIdx]
+		r.mu.Unlock()
 
 		// Handle corrupted chunk mapping avoiding invalid slice panics seamlessly
 		if intraBlockOffset >= int64(len(activeBlockData)) {
@@ -275,8 +327,11 @@ func (r *blockListReader) Read(p []byte) (int, error) {
 }
 
 func (r *blockListReader) Close() error {
+	r.mu.Lock()
 	r.cache = nil
 	r.cacheKeys = nil
+	r.inFlight = nil
+	r.mu.Unlock()
 	return nil
 }
 
