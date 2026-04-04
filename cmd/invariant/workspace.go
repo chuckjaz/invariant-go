@@ -75,13 +75,9 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 	// We handle this directly for now or parse it as slot / tree.
 	targetLink := content.ContentLink{}
 
-	// simple heuristic: if it's 64 chars, we assume it's an address, create a slot.
+	// simple heuristic: if it's 64 chars, we assume it's a raw block address, so NO slot.
 	if len(contentArg) == 64 {
-		// Just treat it as address for now, unless we explicitly parse "slot:true" formats.
-		// A full implementation would `slotsClient.CreateSlot(contentArg)`. We will just wrap it into a slot manually.
-		// Since we don't have enough context on how the CLI normally decides "this is an address, make a slot",
-		// We'll just define it as a slot.
-		targetLink = content.ContentLink{Address: contentArg, Slot: true}
+		targetLink = content.ContentLink{Address: contentArg, Slot: false}
 	} else if len(contentArg) > 0 {
 		// might be a namespace name
 		resolved, err := discovery.ResolveName(context.Background(), dClient, contentArg)
