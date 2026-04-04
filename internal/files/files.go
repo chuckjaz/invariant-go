@@ -114,6 +114,7 @@ func (l Layer) MarshalJSON() ([]byte, error) {
 type Options struct {
 	Slots            slots.Slots
 	Storage          storage.Storage
+	LocalStorage     storage.Storage
 	Discovery        discovery.Discovery
 	RootLink         content.ContentLink
 	Layers           []Layer

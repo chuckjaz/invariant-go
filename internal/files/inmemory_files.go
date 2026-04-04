@@ -1542,6 +1542,13 @@ func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
 		return s.opts.Storage
 	}
 
+	if dest == "local" {
+		if s.opts.LocalStorage != nil {
+			return s.opts.LocalStorage
+		}
+		return s.opts.Storage
+	}
+
 	s.destClientsMu.RLock()
 	client, ok := s.destClients[dest]
 	s.destClientsMu.RUnlock()

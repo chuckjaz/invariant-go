@@ -236,9 +236,12 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	// SetupFileSystem ignores layers parameter since SetupFileSystem is hardcoded to not use layers
 	// Wait, we need to pass Layers to it!
 
+	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
+
 	// We copy the SetupFileSystem logic but insert layers
 	filesOpts := files.Options{
-		Storage:          storageClient,
+		Storage:          finalStorage,
+		LocalStorage:     localStore,
 		Slots:            slotsClient,
 		Discovery:        dClient,
 		RootLink:         wsInfo.Content,
