@@ -43,6 +43,8 @@ func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 		runWorkspaceMount(globalCfg, args[1:])
 	case "unmount":
 		runWorkspaceUnmount(globalCfg, args[1:])
+	case "pull":
+		runWorkspacePull(globalCfg, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown workspace command: %s\n", args[0])
 		os.Exit(1)
