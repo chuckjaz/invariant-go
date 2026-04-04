@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"invariant/internal/content"
@@ -17,92 +18,6 @@ import (
 // WorkspaceInfo represents the contents of the .invariant-workspace JSON file.
 type WorkspaceInfo struct {
 	Content content.ContentLink `json:"content"`
-}
-
-// LayerConfig represents a layer parsed from a .invariant-layer file.
-// It handles "temporary" as a special string value for rootLink,
-// or a full content.ContentLink object.
-type LayerConfig struct {
-	RootLink           *content.ContentLink `json:"-"`
-	IsTemporary        bool                 `json:"-"`
-	Includes           []string             `json:"include,omitempty"` // lowercase to match typical JSON conventions
-	Excludes           []string             `json:"exclude,omitempty"`
-	StorageDestination string               `json:"storageDestination,omitempty"`
-}
-
-// rawLayerConfig is used to unmarshal the varied rootLink type.
-type rawLayerConfig struct {
-	RootLink           json.RawMessage `json:"rootLink"`
-	Includes           []string        `json:"include,omitempty"`
-	Excludes           []string        `json:"exclude,omitempty"`
-	StorageDestination string          `json:"storageDestination,omitempty"`
-}
-
-func (l *LayerConfig) UnmarshalJSON(data []byte) error {
-	var raw rawLayerConfig
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	l.Includes = raw.Includes
-	l.Excludes = raw.Excludes
-	l.StorageDestination = raw.StorageDestination
-
-	var str string
-	if err := json.Unmarshal(raw.RootLink, &str); err == nil {
-		if str == "temporary" {
-			l.IsTemporary = true
-		} else {
-			return fmt.Errorf("unknown string rootLink value: %s", str)
-		}
-	} else {
-		var link content.ContentLink
-		if err := json.Unmarshal(raw.RootLink, &link); err != nil {
-			return fmt.Errorf("failed to parse rootLink as ContentLink: %v", err)
-		}
-		l.RootLink = &link
-	}
-	return nil
-}
-
-func (l *LayerConfig) MarshalJSON() ([]byte, error) {
-	raw := rawLayerConfig{
-		Includes:           l.Includes,
-		Excludes:           l.Excludes,
-		StorageDestination: l.StorageDestination,
-	}
-	if l.IsTemporary {
-		raw.RootLink = json.RawMessage(`"temporary"`)
-	} else if l.RootLink != nil {
-		b, err := json.Marshal(l.RootLink)
-		if err != nil {
-			return nil, err
-		}
-		raw.RootLink = b
-	} else {
-		raw.RootLink = json.RawMessage(`null`)
-	}
-	return json.Marshal(raw)
-}
-
-// ToFilesLayer converts this conceptual workspace layer to an actual generic files.Layer
-func (l *LayerConfig) ToFilesLayer(slotsClient slots.Slots) (files.Layer, error) {
-	fl := files.Layer{
-		Includes:           l.Includes,
-		Excludes:           l.Excludes,
-		StorageDestination: l.StorageDestination,
-	}
-	if l.IsTemporary {
-		// temporary means an empty slot?
-		// Wait, we probably need a new local slot or just leave it empty.
-		// "A rootLink of temporary creates a temporary slot that will last only as long as the mount"
-		// Is we just leave address empty and Slot = true, but give it no slot?
-		// files.Layer in files doesn't do "temporary" out of the box... wait. InInMemoryFiles creates
-		// layers out of them. If we just don't set an address, InInMemoryFiles doesn't load it and just uses it.
-		fl.RootLink = content.ContentLink{Slot: true} // Empty address creates a temporary fresh state
-	} else if l.RootLink != nil {
-		fl.RootLink = *l.RootLink
-	}
-	return fl, nil
 }
 
 func CreateWorkspace(
@@ -127,7 +42,7 @@ func CreateWorkspace(
 	}
 	defer fs.Close()
 
-	var layers []LayerConfig
+	var layers []files.Layer
 
 	// a. check if .invariant-share exists
 	shareInfo, err := fs.Lookup(ctx, 1, ".invariant-share")
@@ -135,7 +50,7 @@ func CreateWorkspace(
 		r, err := fs.ReadFile(ctx, shareInfo.Node, 0, 0)
 		if err == nil {
 			defer r.Close()
-			var shareLayers []LayerConfig
+			var shareLayers []files.Layer
 			if err := json.NewDecoder(r).Decode(&shareLayers); err == nil {
 				layers = append(layers, shareLayers...)
 			}
@@ -150,7 +65,7 @@ func CreateWorkspace(
 			r, err := fs.ReadFile(ctx, info.Node, 0, 0)
 			if err == nil {
 				defer r.Close()
-				var addLayers []LayerConfig
+				var addLayers []files.Layer
 				if err := json.NewDecoder(r).Decode(&addLayers); err == nil {
 					layers = append(layers, addLayers...)
 				}
@@ -164,8 +79,8 @@ func CreateWorkspace(
 			if err == nil {
 				// resolved should be an address to a `.invariant-layer` equivalent or a file tree?
 				// Just treat it as a slot/tree.
-				layers = append(layers, LayerConfig{
-					RootLink: &content.ContentLink{Address: resolved, Slot: true}, // assuming slot
+				layers = append(layers, files.Layer{
+					RootLink: content.ContentLink{Address: resolved, Slot: true}, // assuming slot
 				})
 			}
 		}
@@ -194,15 +109,15 @@ func CreateWorkspace(
 		}
 	}
 
-	layers = append(layers, LayerConfig{
-		RootLink: &baseContentLink,
+	layers = append(layers, files.Layer{
+		RootLink: baseContentLink,
 		Excludes: sourceExcludes,
 	})
 
 	// d. create a temporary layer for all other files if any are ignored
 	if len(sourceExcludes) > 0 {
-		layers = append(layers, LayerConfig{
-			IsTemporary:        true,
+		layers = append(layers, files.Layer{
+			RootLink:           content.ContentLink{Slot: true},
 			StorageDestination: "local",
 		})
 	}
@@ -260,27 +175,23 @@ func ResolveLayers(ctx context.Context, slotsClient slots.Slots, store storage.S
 		return nil, fmt.Errorf("could not find .invariant-layer: %w", err)
 	}
 
-	rc, err := fs.ReadFile(ctx, info.Node, 0, 0)
+	lrc, err := fs.ReadFile(ctx, info.Node, 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("could not read .invariant-layer: %w", err)
+		return nil, fmt.Errorf("failed to create reader for .invariant-layer: %w", err)
 	}
-	defer rc.Close()
+	defer lrc.Close()
 
-	var pLayers []LayerConfig
-	if err := json.NewDecoder(rc).Decode(&pLayers); err != nil {
-		return nil, fmt.Errorf("invalid .invariant-layer json: %w", err)
-	}
-
-	var out []files.Layer
-	for _, pl := range pLayers {
-		layer, err := pl.ToFilesLayer(slotsClient)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, layer)
+	data, err := io.ReadAll(lrc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read .invariant-layer: %w", err)
 	}
 
-	return out, nil
+	var layers []files.Layer
+	if err := json.Unmarshal(data, &layers); err != nil {
+		return nil, fmt.Errorf("failed to parse .invariant-layer: %w", err)
+	}
+
+	return layers, nil
 }
 
 func parseIgnoreLines(r interface{ Read([]byte) (int, error) }) []string {

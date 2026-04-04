@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -60,6 +61,53 @@ type Layer struct {
 	Includes           []string
 	Excludes           []string
 	StorageDestination string `json:"storageDestination,omitempty"`
+}
+
+type rawLayer struct {
+	RootLink           json.RawMessage `json:"rootLink"`
+	Includes           []string        `json:"includes,omitempty"`
+	Excludes           []string        `json:"excludes,omitempty"`
+	StorageDestination string          `json:"storageDestination,omitempty"`
+}
+
+func (l *Layer) UnmarshalJSON(data []byte) error {
+	var raw rawLayer
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	l.Includes = raw.Includes
+	l.Excludes = raw.Excludes
+	l.StorageDestination = raw.StorageDestination
+
+	if len(raw.RootLink) > 0 {
+		var s string
+		if err := json.Unmarshal(raw.RootLink, &s); err == nil && s == "temporary" {
+			l.RootLink = content.ContentLink{Slot: true}
+		} else {
+			if err := json.Unmarshal(raw.RootLink, &l.RootLink); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (l Layer) MarshalJSON() ([]byte, error) {
+	raw := rawLayer{
+		Includes:           l.Includes,
+		Excludes:           l.Excludes,
+		StorageDestination: l.StorageDestination,
+	}
+	if l.RootLink.Address == "" && l.RootLink.Slot {
+		raw.RootLink = json.RawMessage(`"temporary"`)
+	} else {
+		b, err := json.Marshal(l.RootLink)
+		if err != nil {
+			return nil, err
+		}
+		raw.RootLink = b
+	}
+	return json.Marshal(raw)
 }
 
 // Options configuring the internal Files service.
