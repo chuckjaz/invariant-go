@@ -119,7 +119,6 @@ func CreateWorkspace(
 		layers = append(layers, files.Layer{
 			RootLink:           content.ContentLink{Slot: true},
 			StorageDestination: "local",
-			Includes:           sourceExcludes,
 		})
 	}
 

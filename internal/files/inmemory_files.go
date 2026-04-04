@@ -373,6 +373,7 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		childPath = childPath + "/" + name
 	}
 
+	alreadyIncluded := false
 	for i, layer := range s.opts.Layers {
 		isDir := kind == filetree.DirectoryKind
 
@@ -387,8 +388,15 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 			}
 		}
 
+		if alreadyIncluded {
+			included = false
+		}
+
 		if included {
 			layerMembership[i] = true
+			if i > 0 {
+				alreadyIncluded = true
+			}
 
 			// Implicitly include parent directories
 			currParent := parentNode

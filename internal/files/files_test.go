@@ -369,6 +369,7 @@ func TestFilesService_StorageDestination(t *testing.T) {
 		Layers: []Layer{
 			{
 				RootLink: rootLink,
+				Excludes: []string{"/dest-dir", "/dest-dir/*"},
 			},
 			{
 				RootLink:           rootLink, // Using same root mock for test simplicity
