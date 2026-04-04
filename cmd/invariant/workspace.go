@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -51,6 +52,7 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 	createFlags := flag.NewFlagSet("workspace create", flag.ExitOnError)
 	layersFlag := createFlags.String("layers", "", "Comma-separated list of additional layers")
 	createOnly := createFlags.Bool("create-only", false, "Create the workspace but do not mount it")
+	protectedFlag := createFlags.Bool("protected", false, "Generate an Ed25519 256-bit elliptic curve key pair for the backing slot")
 
 	createFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant workspace create <directory> <content> [-layers layer1,layer2] [-create-only]\n")
@@ -85,12 +87,33 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		if err == nil {
 			targetLink = content.ContentLink{Address: contentArg, Slot: true}
 		} else {
-			// Generate a new slot for the static block
-			b := make([]byte, 32)
-			rand.Read(b)
-			slotID := hex.EncodeToString(b)
+			var slotID string
+			var policy string
 
-			if err := slotsClient.Create(context.Background(), slotID, contentArg, ""); err != nil {
+			if *protectedFlag {
+				fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
+				pub, priv, err := ed25519.GenerateKey(nil)
+				if err != nil {
+					log.Fatalf("Failed to generate key pair: %v", err)
+				}
+				slotID = hex.EncodeToString(pub)
+				policy = "ecc"
+
+				keysDir, err := config.KeysDir()
+				if err == nil {
+					keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+					if err := os.WriteFile(keyPath, priv, 0600); err == nil {
+						fmt.Printf("Private key securely saved to: %s\n", keyPath)
+					}
+				}
+			} else {
+				// Generate a new standard slot for the static block
+				b := make([]byte, 32)
+				rand.Read(b)
+				slotID = hex.EncodeToString(b)
+			}
+
+			if err := slotsClient.Create(context.Background(), slotID, contentArg, policy); err != nil {
 				log.Fatalf("failed to create workspace tracking slot: %v", err)
 			}
 			log.Printf("Created slot %s to track workspace changes\n", slotID)
