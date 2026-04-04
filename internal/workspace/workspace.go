@@ -215,11 +215,9 @@ func CreateWorkspace(
 
 	// Write this into a blank new file tree and get the content link
 	workspaceOpts := files.Options{
-		Storage: store,
-		Slots:   slotsClient,
-		Layers: []files.Layer{
-			{RootLink: content.ContentLink{Slot: true}},
-		},
+		Storage:  store,
+		Slots:    slotsClient,
+		RootLink: content.ContentLink{Slot: true},
 		WriterOptions: content.WriterOptions{
 			CompressAlgorithm: "gzip",
 		},
