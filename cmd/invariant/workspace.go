@@ -74,7 +74,15 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		layersList = strings.Split(*layersFlag, ",")
 	}
 
-	dClient, _, storageClient, slotsClient := initClients(globalCfg)
+	dClient, _, aggClient, slotsClient := initClients(globalCfg)
+
+	// In order to prevent asynchronous Kademlia index syncs from racing our immediate local daemon forks,
+	// we force the creation process securely through identical caching layers, bridging isolated memory.
+	commonFlags := CommonMountFlags{
+		CacheSizeMB:     128,
+		DiskCacheSizeMB: 1024,
+	}
+	cachingStorage, _ := SetupCacheStorage(&commonFlags, aggClient)
 
 	// Resolve the initial content object. It could be an address or a slot string.
 	// We handle this directly for now or parse it as slot / tree.
@@ -143,7 +151,7 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 
 	wsLink, err := workspace.CreateWorkspace(
 		context.Background(),
-		storageClient,
+		cachingStorage,
 		slotsClient,
 		dClient,
 		targetLink,
@@ -216,10 +224,15 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		newArgs = append(newArgs, "workspace", "mount", "-foreground")
 		newArgs = append(newArgs, args...)
 
+		logPath := "/tmp/invariant-debug.log"
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			log.Fatalf("Failed to open mount log buffer map natively for path %s: %v", logPath, err)
+		}
 		cmd := exec.Command(exe, newArgs...)
 		cmd.Stdin = nil
-		cmd.Stdout = nil
-		cmd.Stderr = nil
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
 
 		if err := cmd.Start(); err != nil {
 			log.Fatalf("Failed to start background mount: %v", err)
