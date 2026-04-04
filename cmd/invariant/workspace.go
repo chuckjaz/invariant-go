@@ -207,9 +207,26 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if !*foreground {
-		// A full implementation would fork itself here using os.StartProcess
-		// For now we just run in foreground since no daemonizing boilerplate is provided in mount.go
-		log.Printf("Note: backgrounding not implemented, running in foreground")
+		exe, err := os.Executable()
+		if err != nil {
+			log.Fatalf("Failed to get executable: %v", err)
+		}
+
+		var newArgs []string
+		newArgs = append(newArgs, "workspace", "mount", "-foreground")
+		newArgs = append(newArgs, args...)
+
+		cmd := exec.Command(exe, newArgs...)
+		cmd.Stdin = nil
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+
+		if err := cmd.Start(); err != nil {
+			log.Fatalf("Failed to start background mount: %v", err)
+		}
+
+		fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
+		return
 	}
 
 	// Read .invariant-workspace
