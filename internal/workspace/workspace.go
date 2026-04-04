@@ -119,6 +119,7 @@ func CreateWorkspace(
 		layers = append(layers, files.Layer{
 			RootLink:           content.ContentLink{Slot: true},
 			StorageDestination: "local",
+			Includes:           sourceExcludes,
 		})
 	}
 
@@ -147,13 +148,11 @@ func CreateWorkspace(
 		return content.ContentLink{}, fmt.Errorf("failed to write .invariant-layer to temp file tree: %w", err)
 	}
 
-	// Sync to get the actual directory content link
-	err = wkFs.Sync(ctx, 1, true)
-	if err != nil {
-		return content.ContentLink{}, fmt.Errorf("failed to sync temp file tree: %w", err)
+	wsLink, err := wkFs.GetContent(ctx, 1)
+	if err == nil {
+		wsLink.Slot = true
 	}
-
-	return wkFs.GetContent(ctx, 1)
+	return wsLink, err
 }
 
 // ResolveLayers parses a given .invariant-layer file into files.Layer objects.
