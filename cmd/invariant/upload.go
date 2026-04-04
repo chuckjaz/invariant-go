@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"invariant/internal/config"
 	"invariant/internal/content"
@@ -50,10 +52,12 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.StringVar(&prevFlag, "prev", "", "Optional 32-byte hex previous Slot address (required if not locally cached)")
 	var compress bool
 	var encrypt bool
+	var disableCache bool
 	var keyPolicyStr string
 	var keyStr string
 	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
 	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
+	fsFlags.BoolVar(&disableCache, "no-cache", false, "Disable mtime caching")
 	fsFlags.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
@@ -193,10 +197,42 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
-	rootEntry, err := processDirectory(absPath, absPath, storageClient, rules, opts)
+	cacheDir := "/tmp"
+	if cacheP, err := config.CacheDir(); err == nil {
+		cacheDir = filepath.Join(cacheP, "upload")
+	} else if globalDir, err := config.ConfigDir(); err == nil {
+		cacheDir = filepath.Join(globalDir, "cache", "upload")
+	}
+	os.MkdirAll(cacheDir, 0755)
+	cachePath := filepath.Join(cacheDir, "cache.json")
+
+	up := &uploader{
+		cache:        make(map[string]UploadCacheEntry),
+		cachePath:    cachePath,
+		disableCache: disableCache,
+	}
+
+	if !disableCache {
+		data, err := os.ReadFile(cachePath)
+		if err == nil {
+			json.Unmarshal(data, &up.cache)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go up.progressLoop(ctx)
+
+	rootEntry, err := up.processDirectory(ctx, absPath, absPath, storageClient, rules, opts)
+	cancel()
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
 		os.Exit(1)
+	}
+
+	if !disableCache {
+		data, _ := json.Marshal(up.cache)
+		os.WriteFile(cachePath, data, 0644)
 	}
 
 	out, err := json.MarshalIndent(rootEntry.Content, "", "  ")
@@ -233,13 +269,11 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("%s\n", out)
 }
 
-func processDirectory(rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
+func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err
 	}
-
-	var dir filetree.Directory
 
 	info, err := os.Stat(currentPath)
 	if err != nil {
@@ -247,47 +281,97 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 	}
 	ctime, mtime := getEntryTimes(info)
 
-	for _, d := range entries {
-		relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
-
-		if rules.Matches(relPath, d.IsDir()) {
-			continue
+	var cacheKey string
+	if !u.disableCache {
+		cacheKey = currentPath
+		u.cacheMu.RLock()
+		ce, ok := u.cache[cacheKey]
+		u.cacheMu.RUnlock()
+		if ok && ce.MTime == *mtime {
+			cl := content.ContentLink{}
+			json.Unmarshal([]byte(ce.ContentLink), &cl)
+			if store.Has(ctx, cl.Address) {
+				atomic.AddUint64(&u.DirsSkipped, 1)
+				modeStr := ce.Mode
+				return &filetree.DirectoryEntry{
+					BaseEntry: filetree.BaseEntry{
+						Kind:       filetree.DirectoryKind,
+						Name:       filepath.Base(currentPath),
+						Mode:       &modeStr,
+						CreateTime: ctime,
+						ModifyTime: mtime,
+					},
+					Content: cl,
+					Size:    ce.Size,
+				}, nil
+			}
 		}
+	}
 
-		if d.IsDir() {
-			subDirEntry, err := processDirectory(rootPath, filepath.Join(currentPath, d.Name()), store, rules, opts)
-			if err != nil {
-				return nil, err
+	var wg sync.WaitGroup
+	var dirErrs = make([]error, len(entries))
+	var dirEntries = make([]filetree.Entry, len(entries))
+
+	for i, d := range entries {
+		wg.Add(1)
+		go func(idx int, d os.DirEntry) {
+			defer wg.Done()
+			relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
+
+			if rules.Matches(relPath, d.IsDir()) {
+				return
 			}
-			if subDirEntry != nil {
-				dir = append(dir, subDirEntry)
+
+			if d.IsDir() {
+				subDirEntry, err := u.processDirectory(ctx, rootPath, filepath.Join(currentPath, d.Name()), store, rules, opts)
+				dirErrs[idx] = err
+				if subDirEntry != nil {
+					dirEntries[idx] = subDirEntry
+				}
+			} else if d.Type()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(filepath.Join(currentPath, d.Name()))
+				if err != nil {
+					dirErrs[idx] = err
+					return
+				}
+				info, err := d.Info()
+				if err != nil {
+					dirErrs[idx] = err
+					return
+				}
+				symCtime, symMtime := getEntryTimes(info)
+				symlinkEntry := &filetree.SymbolicLinkEntry{
+					BaseEntry: filetree.BaseEntry{
+						Kind:       filetree.SymbolicLinkKind,
+						Name:       d.Name(),
+						CreateTime: symCtime,
+						ModifyTime: symMtime,
+					},
+					Target: target,
+				}
+				dirEntries[idx] = symlinkEntry
+			} else if d.Type().IsRegular() {
+				fileEntry, err := u.processFile(ctx, filepath.Join(currentPath, d.Name()), d.Name(), store, opts)
+				dirErrs[idx] = err
+				if fileEntry != nil {
+					dirEntries[idx] = fileEntry
+				}
 			}
-		} else if d.Type()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(filepath.Join(currentPath, d.Name()))
-			if err != nil {
-				return nil, err
-			}
-			info, err := d.Info()
-			if err != nil {
-				return nil, err
-			}
-			symCtime, symMtime := getEntryTimes(info)
-			symlinkEntry := &filetree.SymbolicLinkEntry{
-				BaseEntry: filetree.BaseEntry{
-					Kind:       filetree.SymbolicLinkKind,
-					Name:       d.Name(),
-					CreateTime: symCtime,
-					ModifyTime: symMtime,
-				},
-				Target: target,
-			}
-			dir = append(dir, symlinkEntry)
-		} else if d.Type().IsRegular() {
-			fileEntry, err := processFile(filepath.Join(currentPath, d.Name()), d.Name(), store, opts)
-			if err != nil {
-				return nil, err
-			}
-			dir = append(dir, fileEntry)
+		}(i, d)
+	}
+
+	wg.Wait()
+
+	for _, err := range dirErrs {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var dir filetree.Directory
+	for _, entry := range dirEntries {
+		if entry != nil {
+			dir = append(dir, entry)
 		}
 	}
 
@@ -296,34 +380,99 @@ func processDirectory(rootPath, currentPath string, store storage.Storage, rules
 		return nil, err
 	}
 
-	link, err := content.Write(strings.NewReader(string(data)), store, opts)
+	memStore := storage.NewInMemoryStorage()
+	memLink, err := content.Write(strings.NewReader(string(data)), memStore, opts)
 	if err != nil {
 		return nil, err
+	}
+
+	if !store.Has(ctx, memLink.Address) {
+		atomic.AddInt64(&u.UploadsInFlight, 1)
+		defer atomic.AddInt64(&u.UploadsInFlight, -1)
+
+		for batch := range memStore.List(ctx, 100) {
+			for _, addr := range batch {
+				if !store.Has(ctx, addr) {
+					rc, ok := memStore.Get(ctx, addr)
+					if ok {
+						store.StoreAt(ctx, addr, rc)
+						sz, _ := memStore.Size(ctx, addr)
+						atomic.AddUint64(&u.BytesUploaded, uint64(sz))
+						rc.Close()
+					}
+				}
+			}
+		}
+	}
+
+	atomic.AddUint64(&u.DirsChecked, 1)
+
+	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
+	if !u.disableCache {
+		clBytes, _ := json.Marshal(memLink)
+		u.cacheMu.Lock()
+		u.cache[cacheKey] = UploadCacheEntry{
+			MTime:       *mtime,
+			ContentLink: string(clBytes),
+			Size:        uint64(len(data)),
+			Mode:        modeStr,
+		}
+		u.cacheMu.Unlock()
 	}
 
 	return &filetree.DirectoryEntry{
 		BaseEntry: filetree.BaseEntry{
 			Kind:       filetree.DirectoryKind,
 			Name:       filepath.Base(currentPath),
+			Mode:       &modeStr,
 			CreateTime: ctime,
 			ModifyTime: mtime,
 		},
-		Content: link,
+		Content: memLink,
 		Size:    uint64(len(data)),
 	}, nil
 }
 
-func processFile(filePath, name string, store storage.Storage, opts content.WriterOptions) (*filetree.FileEntry, error) {
+func (u *uploader) processFile(ctx context.Context, filePath, name string, store storage.Storage, opts content.WriterOptions) (*filetree.FileEntry, error) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	ctime, mtime := getEntryTimes(fileInfo)
+
+	var cacheKey string
+	if !u.disableCache {
+		cacheKey = filePath
+		u.cacheMu.RLock()
+		ce, ok := u.cache[cacheKey]
+		u.cacheMu.RUnlock()
+		if ok && ce.MTime == *mtime {
+			cl := content.ContentLink{}
+			json.Unmarshal([]byte(ce.ContentLink), &cl)
+			if store.Has(ctx, cl.Address) {
+				atomic.AddUint64(&u.FilesSkipped, 1)
+				modeStr := ce.Mode
+				return &filetree.FileEntry{
+					BaseEntry: filetree.BaseEntry{
+						Kind:       filetree.FileKind,
+						Name:       name,
+						Mode:       &modeStr,
+						CreateTime: ctime,
+						ModifyTime: mtime,
+					},
+					Content: cl,
+					Size:    ce.Size,
+				}, nil
+			}
+		}
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
 
 	opts.Filename = name
 	opts.Splitters = []content.Splitter{
@@ -331,13 +480,45 @@ func processFile(filePath, name string, store storage.Storage, opts content.Writ
 		&content.BuzHashSplitter{},
 	}
 
-	link, err := content.Write(file, store, opts)
+	memStore := storage.NewInMemoryStorage()
+	memLink, err := content.Write(file, memStore, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
-	ctime, mtime := getEntryTimes(info)
+	if !store.Has(ctx, memLink.Address) {
+		atomic.AddInt64(&u.UploadsInFlight, 1)
+		defer atomic.AddInt64(&u.UploadsInFlight, -1)
+
+		for batch := range memStore.List(ctx, 100) {
+			for _, addr := range batch {
+				if !store.Has(ctx, addr) {
+					rc, ok := memStore.Get(ctx, addr)
+					if ok {
+						store.StoreAt(ctx, addr, rc)
+						sz, _ := memStore.Size(ctx, addr)
+						atomic.AddUint64(&u.BytesUploaded, uint64(sz))
+						rc.Close()
+					}
+				}
+			}
+		}
+	}
+
+	atomic.AddUint64(&u.FilesChecked, 1)
+
+	modeStr := fmt.Sprintf("%04o", fileInfo.Mode().Perm())
+	if !u.disableCache {
+		clBytes, _ := json.Marshal(memLink)
+		u.cacheMu.Lock()
+		u.cache[cacheKey] = UploadCacheEntry{
+			MTime:       *mtime,
+			ContentLink: string(clBytes),
+			Size:        uint64(fileInfo.Size()),
+			Mode:        modeStr,
+		}
+		u.cacheMu.Unlock()
+	}
 
 	return &filetree.FileEntry{
 		BaseEntry: filetree.BaseEntry{
@@ -347,7 +528,7 @@ func processFile(filePath, name string, store storage.Storage, opts content.Writ
 			CreateTime: ctime,
 			ModifyTime: mtime,
 		},
-		Content: link,
-		Size:    uint64(info.Size()),
+		Content: memLink,
+		Size:    uint64(fileInfo.Size()),
 	}, nil
 }
