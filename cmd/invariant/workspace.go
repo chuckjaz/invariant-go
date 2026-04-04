@@ -264,7 +264,18 @@ func runWorkspaceUnmount(globalCfg *config.InvariantConfig, args []string) {
 	log.Printf("Unmounted %s", directory)
 }
 
+var (
+	sharedDClient       discovery.Discovery
+	sharedFinderClient  finder.Finder
+	sharedStorageClient storage.Storage
+	sharedSlotsClient   slots.Slots
+)
+
 func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder.Finder, storage.Storage, slots.Slots) {
+	if sharedDClient != nil {
+		return sharedDClient, sharedFinderClient, sharedStorageClient, sharedSlotsClient
+	}
+
 	discoveryURL := globalCfg.Discovery
 	dClient := discovery.NewClient(discoveryURL, nil)
 
@@ -285,6 +296,11 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 
 	slotsAddr := findService("slots-v1")
 	slotsClient := slots.NewClient(slotsAddr, nil)
+
+	sharedDClient = dClient
+	sharedFinderClient = finderClient
+	sharedStorageClient = storageClient
+	sharedSlotsClient = slotsClient
 
 	return dClient, finderClient, storageClient, slotsClient
 }
