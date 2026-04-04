@@ -217,6 +217,9 @@ func CreateWorkspace(
 	workspaceOpts := files.Options{
 		Storage: store,
 		Slots:   slotsClient,
+		Layers: []files.Layer{
+			{RootLink: content.ContentLink{Slot: true}},
+		},
 		WriterOptions: content.WriterOptions{
 			CompressAlgorithm: "gzip",
 		},
