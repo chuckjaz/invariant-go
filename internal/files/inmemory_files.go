@@ -153,7 +153,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 	// We extract it locally then zero the internal ones down allowing pure reload.
 	initialLayers := opts.Layers
 	// For standard configs without layers, they just want 0 rules, which means nil.
-	if len(initialLayers) == 1 && initialLayers[0].RootLink.Address == opts.RootLink.Address && len(initialLayers[0].Includes) == 0 && len(initialLayers[0].Excludes) == 0 {
+	if len(initialLayers) == 1 && initialLayers[0].RootLink.Address == opts.RootLink.Address && len(initialLayers[0].Includes) == 0 && len(initialLayers[0].Excludes) == 0 && initialLayers[0].StorageDestination == "" {
 		initialLayers = nil
 	}
 
@@ -634,6 +634,11 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	}
 
 	node.Content = link
+	if node.LayerContents != nil {
+		for i := range node.LayerContents {
+			node.LayerContents[i] = link
+		}
+	}
 	node.Size = uint64(max(int64(node.Size), startOffset+cr.n))
 	s.markDirty(nodeID)
 
@@ -1373,11 +1378,16 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	defer s.mu.Unlock()
 
 	var newLayers []Layer
-	newLayers = append(newLayers, Layer{
-		RootLink: s.opts.RootLink,
-	})
+	if s.opts.RootLink.Address != "" || s.opts.RootLink.Slot {
+		newLayers = append(newLayers, Layer{
+			RootLink: s.opts.RootLink,
+		})
+	}
 	if len(layers) > 0 {
 		newLayers = append(newLayers, layers...)
+	}
+	if len(newLayers) == 0 {
+		newLayers = append(newLayers, Layer{})
 	}
 
 	s.layerDependencies = make(map[string]bool)

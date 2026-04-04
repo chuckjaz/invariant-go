@@ -35,6 +35,8 @@ var _ = (fs.NodeReadlinker)((*Node)(nil))
 var _ = (fs.NodeUnlinker)((*Node)(nil))
 var _ = (fs.NodeRmdirer)((*Node)(nil))
 var _ = (fs.NodeRenamer)((*Node)(nil))
+var _ = (fs.NodeFsyncer)((*Node)(nil))
+var _ = (fs.NodeAllocater)((*Node)(nil))
 
 func NewNode(filesrv files.Files, nodeID uint64) *Node {
 	return &Node{
@@ -207,6 +209,9 @@ var _ = (fs.FileReader)((*fileHandle)(nil))
 var _ = (fs.FileWriter)((*fileHandle)(nil))
 var _ = (fs.FileFlusher)((*fileHandle)(nil))
 var _ = (fs.FileReleaser)((*fileHandle)(nil))
+var _ = (fs.FileFsyncer)((*fileHandle)(nil))
+var _ = (fs.FileAllocater)((*fileHandle)(nil))
+var _ = (fs.FileSetattrer)((*fileHandle)(nil))
 
 func (fh *fileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	fh.mu.Lock()
@@ -311,6 +316,29 @@ func (fh *fileHandle) Release(ctx context.Context) syscall.Errno {
 	if fh.reader != nil {
 		fh.reader.Close()
 		fh.reader = nil
+	}
+	return 0
+}
+
+func (fh *fileHandle) Fsync(ctx context.Context, flags uint32) syscall.Errno {
+	return fh.Flush(ctx)
+}
+
+func (fh *fileHandle) Allocate(ctx context.Context, off uint64, size uint64, mode uint32) syscall.Errno {
+	// Pretend allocation succeeded to satisfy editors using fallocate(2) to preemptively reserve space.
+	// Since we stream dynamically based on backend storage, actual sparse file allocation on the temporary handle
+	// isn't strictly necessary mechanically unless doing huge local buffering, but it prevents ENOTSUP crashing.
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
+	if fh.f != nil {
+		// optionally do fh.f.Truncate(int64(off + size))? Ignore for now to limit disk spikes.
+	}
+	return 0
+}
+
+func (fh *fileHandle) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	if fh.node != nil {
+		return fh.node.Setattr(ctx, fh, in, out)
 	}
 	return 0
 }
@@ -451,5 +479,19 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 		return syscall.EIO
 	}
 
+	return 0
+}
+
+func (n *Node) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
+	if fh, ok := f.(*fileHandle); ok {
+		return fh.Fsync(ctx, flags)
+	}
+	return 0
+}
+
+func (n *Node) Allocate(ctx context.Context, f fs.FileHandle, off uint64, size uint64, mode uint32) syscall.Errno {
+	if fh, ok := f.(*fileHandle); ok {
+		return fh.Allocate(ctx, off, size, mode)
+	}
 	return 0
 }

@@ -555,11 +555,20 @@ func (s *CachingStorage) Sync(ctx context.Context) error {
 		return nil
 	}
 
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1)
+
+	// Since we might be flushing many blocks, a bounded semaphore is appropriate
+	sem := make(chan struct{}, 32)
+	ctxDone := ctx.Done()
+
 	for batch := range s.local.List(ctx, 100) {
 		for _, addr := range batch {
 			select {
-			case <-ctx.Done():
+			case <-ctxDone:
 				return ctx.Err()
+			case err := <-errCh:
+				return err
 			default:
 			}
 
@@ -571,30 +580,56 @@ func (s *CachingStorage) Sync(ctx context.Context) error {
 				continue
 			}
 
-			if s.destination.Has(ctx, addr) {
-				s.destHasMu.Lock()
-				s.destHas[addr] = struct{}{}
-				s.destHasMu.Unlock()
-				continue
-			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(a string) {
+				defer wg.Done()
+				defer func() { <-sem }()
 
-			rc, ok := s.local.Get(ctx, addr)
-			if !ok {
-				continue
-			}
+				// Recheck context inside goroutine
+				select {
+				case <-ctxDone:
+					return
+				default:
+				}
 
-			storeOk, err := s.destination.StoreAt(ctx, addr, rc)
-			rc.Close()
+				if s.destination.Has(ctx, a) {
+					s.destHasMu.Lock()
+					s.destHas[a] = struct{}{}
+					s.destHasMu.Unlock()
+					return
+				}
 
-			if err != nil {
-				return err
-			}
-			if storeOk {
-				s.destHasMu.Lock()
-				s.destHas[addr] = struct{}{}
-				s.destHasMu.Unlock()
-			}
+				rc, ok := s.local.Get(ctx, a)
+				if !ok {
+					return
+				}
+
+				storeOk, err := s.destination.StoreAt(ctx, a, rc)
+				rc.Close()
+
+				if err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
+				}
+				if storeOk {
+					s.destHasMu.Lock()
+					s.destHas[a] = struct{}{}
+					s.destHasMu.Unlock()
+				}
+			}(addr)
 		}
+	}
+
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		return err
+	default:
 	}
 
 	if syncDest, ok := s.destination.(SyncStorage); ok {

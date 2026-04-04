@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -243,6 +245,16 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
 		return
 	}
+	cacheDir, _ := config.CacheDir()
+	pidsDir := filepath.Join(cacheDir, "pids")
+	os.MkdirAll(pidsDir, 0700)
+	pidHash := sha256.Sum256([]byte(absDir))
+	pidPath := filepath.Join(pidsDir, fmt.Sprintf("%x.pid", pidHash))
+
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
+		log.Printf("Warning: failed to write pid file: %v", err)
+	}
+	defer os.Remove(pidPath)
 
 	// Read .invariant-workspace
 	wsPath := filepath.Join(absDir, ".invariant-workspace")
@@ -276,7 +288,6 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		LocalStorage:     localStore,
 		Slots:            slotsClient,
 		Discovery:        dClient,
-		RootLink:         wsInfo.Content,
 		Layers:           layers,
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
@@ -306,6 +317,14 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	if err != nil {
 		log.Fatalf("Mount fail: %v\n", err)
 	}
+
+	defer func() {
+		log.Println("Syncing workspace before shutdown...")
+		if err := filesrv.Sync(context.Background(), 1, true); err != nil {
+			log.Printf("Warning: failed to sync workspace cleanly: %v\n", err)
+		}
+		filesrv.Close()
+	}()
 
 	log.Printf("Mounted workspace on %s\n", absDir)
 	log.Printf("Unmount by calling 'invariant workspace unmount %s'", absDir)
@@ -340,6 +359,30 @@ func runWorkspaceUnmount(globalCfg *config.InvariantConfig, args []string) {
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("Failed to unmount: %v", err)
 	}
+
+	absDir, err := filepath.Abs(directory)
+	if err == nil {
+		cacheDir, _ := config.CacheDir()
+		pidHash := sha256.Sum256([]byte(absDir))
+		pidPath := filepath.Join(cacheDir, "pids", fmt.Sprintf("%x.pid", pidHash))
+		pidData, pidErr := os.ReadFile(pidPath)
+		if pidErr == nil {
+			if pid, err := strconv.Atoi(string(pidData)); err == nil && pid > 0 {
+				process, findErr := os.FindProcess(pid)
+				if findErr == nil {
+					log.Printf("Waiting for workspace background tasks to synchronize cleanly (PID: %d)...", pid)
+					for {
+						if sigErr := process.Signal(syscall.Signal(0)); sigErr != nil {
+							break
+						}
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
+			}
+			os.Remove(pidPath)
+		}
+	}
+
 	log.Printf("Unmounted %s", directory)
 }
 
