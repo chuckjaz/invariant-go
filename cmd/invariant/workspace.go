@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -75,9 +77,25 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 	// We handle this directly for now or parse it as slot / tree.
 	targetLink := content.ContentLink{}
 
-	// simple heuristic: if it's 64 chars, we assume it's a raw block address, so NO slot.
+	// simple heuristic: if it's 64 chars, we assume it's a raw block address.
 	if len(contentArg) == 64 {
-		targetLink = content.ContentLink{Address: contentArg, Slot: false}
+		// Try to GET it to see if it's an existing slot, otherwise we assume it's a block
+		// and we MUST create a mutable slot for workspaces to be persistent.
+		_, err := slotsClient.Get(context.Background(), contentArg)
+		if err == nil {
+			targetLink = content.ContentLink{Address: contentArg, Slot: true}
+		} else {
+			// Generate a new slot for the static block
+			b := make([]byte, 32)
+			rand.Read(b)
+			slotID := hex.EncodeToString(b)
+
+			if err := slotsClient.Create(context.Background(), slotID, contentArg, ""); err != nil {
+				log.Fatalf("failed to create workspace tracking slot: %v", err)
+			}
+			log.Printf("Created slot %s to track workspace changes\n", slotID)
+			targetLink = content.ContentLink{Address: slotID, Slot: true}
+		}
 	} else if len(contentArg) > 0 {
 		// might be a namespace name
 		resolved, err := discovery.ResolveName(context.Background(), dClient, contentArg)
