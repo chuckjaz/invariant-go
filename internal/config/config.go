@@ -28,6 +28,22 @@ func ConfigDir() (string, error) {
 	return dirPath, nil
 }
 
+// CacheDir returns the path to the ~/.cache/invariant directory.
+// It creates the directory if it does not exist.
+func CacheDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dirPath := filepath.Join(homeDir, ".cache", "invariant")
+
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return "", err
+	}
+
+	return dirPath, nil
+}
+
 // KeysDir returns the path to the ~/.invariant/keys directory.
 // It ensures that the directory is created with private permissions (0700).
 func KeysDir() (string, error) {

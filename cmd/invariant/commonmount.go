@@ -41,8 +41,8 @@ func (f *CommonMountFlags) Register(fsFlags *flag.FlagSet) {
 	fsFlags.StringVar(&f.Slot, "slot", "", "Whether the root address refers to a slot")
 	fsFlags.IntVar(&f.CacheSizeMB, "cache", 128, "In-memory caching size in MB for storage backend (0 to disable)")
 	fsFlags.IntVar(&f.DiskCacheSizeMB, "disk-cache", 1024, "Disk caching size in MB for storage backend (0 to disable)")
-	fsFlags.StringVar(&f.CacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.invariant/cache)")
-	fsFlags.StringVar(&f.OverflowDir, "overflow-dir", "", "Directory to use for the overflow cache (default: ~/.invariant/overflow)")
+	fsFlags.StringVar(&f.CacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.cache/invariant)")
+	fsFlags.StringVar(&f.OverflowDir, "overflow-dir", "", "Directory to use for the overflow cache (default: ~/.cache/invariant/overflow)")
 	fsFlags.BoolVar(&f.Compress, "compress", false, "Compress the written content")
 	fsFlags.BoolVar(&f.Encrypt, "encrypt", false, "Encrypt the written content")
 	fsFlags.StringVar(&f.KeyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
@@ -56,11 +56,11 @@ func SetupCacheStorage(f *CommonMountFlags, baseStorage storage.Storage) (storag
 
 	if f.DiskCacheSizeMB > 0 {
 		if f.CacheDir == "" {
-			configDir, err := config.ConfigDir()
+			cacheDir, err := config.CacheDir()
 			if err != nil {
-				log.Fatalf("Failed to get config directory for cache: %v", err)
+				log.Fatalf("Failed to get cache directory: %v", err)
 			}
-			f.CacheDir = filepath.Join(configDir, "cache")
+			f.CacheDir = cacheDir
 		}
 
 		if err := os.MkdirAll(f.CacheDir, 0700); err != nil {
@@ -98,11 +98,11 @@ func SetupCacheStorage(f *CommonMountFlags, baseStorage storage.Storage) (storag
 
 	if directWrapper != nil {
 		if f.OverflowDir == "" {
-			configDir, err := config.ConfigDir()
+			cacheDir, err := config.CacheDir()
 			if err != nil {
-				log.Fatalf("Failed to get config directory for overflow: %v", err)
+				log.Fatalf("Failed to get cache directory for overflow: %v", err)
 			}
-			f.OverflowDir = filepath.Join(configDir, "overflow")
+			f.OverflowDir = filepath.Join(cacheDir, "overflow")
 		}
 		if err := os.MkdirAll(f.OverflowDir, 0700); err != nil {
 			log.Fatalf("Failed to create overflow directory: %v", err)
