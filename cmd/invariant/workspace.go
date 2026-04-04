@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 
@@ -237,10 +238,13 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 	// We copy the SetupFileSystem logic but insert layers
 	filesOpts := files.Options{
-		Storage:   storageClient,
-		Slots:     slotsClient,
-		Discovery: dClient,
-		Layers:    layers,
+		Storage:          storageClient,
+		Slots:            slotsClient,
+		Discovery:        dClient,
+		RootLink:         wsInfo.Content,
+		Layers:           layers,
+		AutoSyncTimeout:  time.Minute,
+		SlotPollInterval: 5 * time.Minute,
 	}
 
 	filesrv, err := files.NewInMemoryFiles(filesOpts)
