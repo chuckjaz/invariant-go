@@ -191,7 +191,12 @@ func (s *InMemoryFiles) isWritable() bool {
 	if s.opts.Slots == nil || len(s.opts.Layers) == 0 {
 		return false
 	}
-	return s.opts.Layers[0].RootLink.Slot
+	for _, l := range s.opts.Layers {
+		if l.RootLink.Slot {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *InMemoryFiles) ensureLoaded(id uint64) error {

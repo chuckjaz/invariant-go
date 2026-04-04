@@ -154,9 +154,6 @@ func CreateWorkspace(
 	}
 
 	wsLink, err := wkFs.GetContent(ctx, 1)
-	if err == nil {
-		wsLink.Slot = true
-	}
 	return wsLink, err
 }
 
