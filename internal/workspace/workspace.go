@@ -218,9 +218,6 @@ func CreateWorkspace(
 		Storage:  store,
 		Slots:    slotsClient,
 		RootLink: content.ContentLink{Slot: true},
-		WriterOptions: content.WriterOptions{
-			CompressAlgorithm: "gzip",
-		},
 	}
 
 	wkFs, err := files.NewInMemoryFiles(workspaceOpts)
