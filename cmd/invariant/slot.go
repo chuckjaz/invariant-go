@@ -105,16 +105,18 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	if *protectedFlag {
 		keysDir, err := config.KeysDir()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to locate keys directory: %v\n", err)
-		} else {
-			keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
-			err = os.WriteFile(keyPath, privKey, 0600)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to save private key to %s: %v\n", keyPath, err)
-			} else {
-				fmt.Printf("Private key securely saved to: %s\n", keyPath)
-			}
+			fmt.Fprintf(os.Stderr, "Fatal error: Failed to locate keys directory: %v\n", err)
+			os.Exit(1)
 		}
+
+		keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+		err = os.WriteFile(keyPath, privKey, 0600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Fatal error: Failed to save private key to %s: %v\n", keyPath, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Private key securely saved to: %s\n", keyPath)
 	}
 
 	if *nameFlag != "" {

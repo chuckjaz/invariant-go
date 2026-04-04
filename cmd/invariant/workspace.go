@@ -100,12 +100,15 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 				policy = "ecc"
 
 				keysDir, err := config.KeysDir()
-				if err == nil {
-					keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
-					if err := os.WriteFile(keyPath, priv, 0600); err == nil {
-						fmt.Printf("Private key securely saved to: %s\n", keyPath)
-					}
+				if err != nil {
+					log.Fatalf("Fatal error: Failed to locate keys directory: %v", err)
 				}
+
+				keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+				if err := os.WriteFile(keyPath, priv, 0600); err != nil {
+					log.Fatalf("Fatal error: Failed to save private key to %s: %v", keyPath, err)
+				}
+				fmt.Printf("Private key securely saved to: %s\n", keyPath)
 			} else {
 				// Generate a new standard slot for the static block
 				b := make([]byte, 32)
