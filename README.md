@@ -106,6 +106,10 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - Supports `--key-policy` (e.g. `Deterministic` (default), `RandomPerBlock`, `RandomAllKey`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
   - Supports `--slot <hex_id_or_name>` to automatically update a mutable slot (resolved by ID or name) to point to the new content tree on successful upload.
   - Supports `--prev <hex_id>` to supply the parent payload state if the local slot cache (`~/.invariant/slots/`) is empty.
+- `workspace`: Handle layered workspaces that separate persistent core network files from transient local-only temporary environments.
+  - `create <directory> <content_link|slot>`: Initializes a local directory referencing `.invariant-layer` metadata routing transient local data away from primary data scopes securely. Supports `--protected`, `--layers`, and `--create-only`.
+  - `mount <directory>`: Parses the `.invariant-workspace` and mounts the virtual composite layered file system locally via FUSE natively inheriting standard disk caching isolated securely to specified definitions.
+  - `unmount <directory>`: Unmounts the current layered workspace.
 - `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe.
 
 ```bash
