@@ -125,7 +125,15 @@ func (s *ZipSplitter) Split(r io.Reader, opts WriterOptions, writeChunk func([]b
 		multiR := io.MultiReader(&remainderBuf, r)
 		tr := &trackingReader{r: multiR}
 
-		link, err := writeStream(tr, opts)
+		var nextOpts = opts
+		nextOpts.Splitters = nil
+		for _, sp := range opts.Splitters {
+			if _, isZip := sp.(*ZipSplitter); !isZip {
+				nextOpts.Splitters = append(nextOpts.Splitters, sp)
+			}
+		}
+
+		link, err := writeStream(tr, nextOpts)
 		if err != nil {
 			return nil, err
 		}
