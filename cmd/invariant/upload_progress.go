@@ -9,10 +9,14 @@ import (
 )
 
 type uploader struct {
+	FilesChecking   int64
 	FilesChecked    uint64
 	FilesSkipped    uint64
+	FilesShared     uint64
+	DirsChecking    int64
 	DirsChecked     uint64
 	DirsSkipped     uint64
+	DirsShared      uint64
 	BytesUploaded   uint64
 	UploadsInFlight int64
 
@@ -20,6 +24,33 @@ type uploader struct {
 	cache        map[string]UploadCacheEntry
 	cachePath    string
 	disableCache bool
+
+	fileQueue *workerQueue
+	dirQueue  *workerQueue
+}
+
+type workerQueue struct {
+	tasks chan func()
+}
+
+func newWorkerQueue(maxWorkers int, bufferSize int) *workerQueue {
+	q := &workerQueue{
+		tasks: make(chan func(), bufferSize),
+	}
+
+	for range maxWorkers {
+		go func() {
+			for t := range q.tasks {
+				t()
+			}
+		}()
+	}
+
+	return q
+}
+
+func (q *workerQueue) Submit(task func()) {
+	q.tasks <- task
 }
 
 type UploadCacheEntry struct {
@@ -64,14 +95,18 @@ func (u *uploader) progressLoop(ctx context.Context) {
 				bps = float64(deltaBytes) / deltaTime
 			}
 
+			fchk := atomic.LoadInt64(&u.FilesChecking)
 			fc := atomic.LoadUint64(&u.FilesChecked)
 			fs := atomic.LoadUint64(&u.FilesSkipped)
+			fsh := atomic.LoadUint64(&u.FilesShared)
+			dchk := atomic.LoadInt64(&u.DirsChecking)
 			dc := atomic.LoadUint64(&u.DirsChecked)
 			ds := atomic.LoadUint64(&u.DirsSkipped)
+			dsh := atomic.LoadUint64(&u.DirsShared)
 			inf := atomic.LoadInt64(&u.UploadsInFlight)
 
-			fmt.Printf("\r\033[KFiles: %d checked, %d skipped | Dirs: %d checked, %d skipped | In Flight: %d | Uploaded: %s | Speed: %s/s",
-				fc, fs, dc, ds, inf, u.formatBytes(bytes), u.formatBytes(uint64(bps)))
+			fmt.Printf("\r\033[KFiles: %d checking, %d done, %d skipped, %d shared | Dirs: %d checking, %d done, %d skipped, %d shared | Uploading: %d | Total: %s | Speed: %s/s",
+				fchk, fc, fs, fsh, dchk, dc, ds, dsh, inf, u.formatBytes(bytes), u.formatBytes(uint64(bps)))
 
 			lastBytes = bytes
 			lastTime = now

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,41 @@ func parseIgnoreFile(path string) (filetree.IgnoreRules, error) {
 		rules = append(rules, line)
 	}
 	return rules, nil
+}
+
+type trackingStorage struct {
+	storage.Storage
+	bytesUploaded *uint64
+}
+
+func (s *trackingStorage) Store(ctx context.Context, r io.Reader) (string, error) {
+	tr := &trackingReader{r: r, size: s.bytesUploaded}
+	return s.Storage.Store(ctx, tr)
+}
+
+func (s *trackingStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	tr := &trackingReader{r: r, size: s.bytesUploaded}
+	return s.Storage.StoreAt(ctx, address, tr)
+}
+
+type trackingReader struct {
+	r    io.Reader
+	size *uint64
+}
+
+func (t *trackingReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if n > 0 {
+		atomic.AddUint64(t.size, uint64(n))
+	}
+	return n, err
+}
+
+func (t *trackingReader) Close() error {
+	if cl, ok := t.r.(io.Closer); ok {
+		return cl.Close()
+	}
+	return nil
 }
 
 func runUpload(globalCfg *config.InvariantConfig, args []string) {
@@ -210,6 +246,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		cache:        make(map[string]UploadCacheEntry),
 		cachePath:    cachePath,
 		disableCache: disableCache,
+		fileQueue:    newWorkerQueue(10000, 100000),
 	}
 
 	if !disableCache {
@@ -281,6 +318,9 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 	}
 	ctime, mtime := getEntryTimes(info)
 
+	atomic.AddInt64(&u.DirsChecking, 1)
+	defer atomic.AddInt64(&u.DirsChecking, -1)
+
 	var cacheKey string
 	if !u.disableCache {
 		cacheKey = currentPath
@@ -314,8 +354,10 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 
 	for i, d := range entries {
 		wg.Add(1)
-		go func(idx int, d os.DirEntry) {
+
+		task := func(idx int, d os.DirEntry) {
 			defer wg.Done()
+
 			relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
 
 			if rules.Matches(relPath, d.IsDir()) {
@@ -357,7 +399,13 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 					dirEntries[idx] = fileEntry
 				}
 			}
-		}(i, d)
+		}
+
+		if d.IsDir() {
+			go task(i, d)
+		} else {
+			u.fileQueue.Submit(func() { task(i, d) })
+		}
 	}
 
 	wg.Wait()
@@ -380,7 +428,7 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 		return nil, err
 	}
 
-	memStore := storage.NewInMemoryStorage()
+	memStore := storage.NewHashingStorage()
 	memLink, err := content.Write(strings.NewReader(string(data)), memStore, opts)
 	if err != nil {
 		return nil, err
@@ -390,19 +438,17 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 		atomic.AddInt64(&u.UploadsInFlight, 1)
 		defer atomic.AddInt64(&u.UploadsInFlight, -1)
 
-		for batch := range memStore.List(ctx, 100) {
-			for _, addr := range batch {
-				if !store.Has(ctx, addr) {
-					rc, ok := memStore.Get(ctx, addr)
-					if ok {
-						store.StoreAt(ctx, addr, rc)
-						sz, _ := memStore.Size(ctx, addr)
-						atomic.AddUint64(&u.BytesUploaded, uint64(sz))
-						rc.Close()
-					}
-				}
-			}
+		trackingStore := &trackingStorage{
+			Storage:       store,
+			bytesUploaded: &u.BytesUploaded,
 		}
+
+		_, err = content.Write(strings.NewReader(string(data)), trackingStore, opts)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		atomic.AddUint64(&u.DirsShared, 1)
 	}
 
 	atomic.AddUint64(&u.DirsChecked, 1)
@@ -438,6 +484,9 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 	if err != nil {
 		return nil, err
 	}
+
+	atomic.AddInt64(&u.FilesChecking, 1)
+	defer atomic.AddInt64(&u.FilesChecking, -1)
 
 	ctime, mtime := getEntryTimes(fileInfo)
 
@@ -480,7 +529,7 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 		&content.BuzHashSplitter{},
 	}
 
-	memStore := storage.NewInMemoryStorage()
+	memStore := storage.NewHashingStorage()
 	memLink, err := content.Write(file, memStore, opts)
 	if err != nil {
 		return nil, err
@@ -490,19 +539,20 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 		atomic.AddInt64(&u.UploadsInFlight, 1)
 		defer atomic.AddInt64(&u.UploadsInFlight, -1)
 
-		for batch := range memStore.List(ctx, 100) {
-			for _, addr := range batch {
-				if !store.Has(ctx, addr) {
-					rc, ok := memStore.Get(ctx, addr)
-					if ok {
-						store.StoreAt(ctx, addr, rc)
-						sz, _ := memStore.Size(ctx, addr)
-						atomic.AddUint64(&u.BytesUploaded, uint64(sz))
-						rc.Close()
-					}
-				}
-			}
+		// Rewind the open file descriptor to push natively without OOM allocations globally
+		file.Seek(0, io.SeekStart)
+
+		trackingStore := &trackingStorage{
+			Storage:       store,
+			bytesUploaded: &u.BytesUploaded,
 		}
+
+		_, err = content.Write(file, trackingStore, opts)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		atomic.AddUint64(&u.FilesShared, 1)
 	}
 
 	atomic.AddUint64(&u.FilesChecked, 1)
