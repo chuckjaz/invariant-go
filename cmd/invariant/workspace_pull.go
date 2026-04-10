@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,12 +41,30 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("invalid directory path: %v", err)
 	}
 
+	wsRoot := absDir
+	for {
+		if _, err := os.Stat(filepath.Join(wsRoot, ".invariant-workspace")); err == nil {
+			break
+		}
+		if _, err := os.Stat(filepath.Join(wsRoot, ".invariant-layers")); err == nil {
+			break
+		}
+		if _, err := os.Stat(filepath.Join(wsRoot, ".invariant-layer")); err == nil {
+			break
+		}
+		parent := filepath.Dir(wsRoot)
+		if parent == wsRoot {
+			log.Fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s or any parent directory", absDir)
+		}
+		wsRoot = parent
+	}
+
 	dClient, _, storageClient, slotsClient := initClients(globalCfg)
 	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
 
 	var layers []files.Layer
 
-	wsPath := filepath.Join(absDir, ".invariant-workspace")
+	wsPath := filepath.Join(wsRoot, ".invariant-workspace")
 	data, err := os.ReadFile(wsPath)
 	if err == nil {
 		var wsInfo workspace.WorkspaceInfo
@@ -57,15 +76,15 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 			log.Fatalf("Failed to resolve layers: %v", err)
 		}
 	} else {
-		layerData, layerErr := os.ReadFile(filepath.Join(absDir, ".invariant-layers"))
+		layerData, layerErr := os.ReadFile(filepath.Join(wsRoot, ".invariant-layers"))
 		if layerErr != nil {
-			layerData, layerErr = os.ReadFile(filepath.Join(absDir, ".invariant-layer"))
+			layerData, layerErr = os.ReadFile(filepath.Join(wsRoot, ".invariant-layer"))
 		}
 		if layerErr != nil {
-			log.Fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s", absDir)
+			log.Fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s", wsRoot)
 		}
 		if err := json.Unmarshal(layerData, &layers); err != nil {
-			log.Fatalf("Failed to parse .invariant-layer from %s: %v", absDir, err)
+			log.Fatalf("Failed to parse .invariant-layer from %s: %v", wsRoot, err)
 		}
 	}
 
@@ -97,6 +116,26 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("Failed to load source layer file tree: %v", err)
 	}
 	defer fs.Close()
+
+	relPath, err := filepath.Rel(wsRoot, absDir)
+	if err != nil {
+		log.Fatalf("Failed to calculate relative path from workspace root: %v", err)
+	}
+
+	startNode := uint64(1)
+	if relPath != "." && relPath != "" {
+		parts := strings.SplitSeq(relPath, string(filepath.Separator))
+		for part := range parts {
+			if part == "" {
+				continue
+			}
+			info, lookupErr := fs.Lookup(context.Background(), startNode, part)
+			if lookupErr != nil {
+				log.Fatalf("Path %s not found in workspace file tree", relPath)
+			}
+			startNode = info.Node
+		}
+	}
 
 	var totalSize uint64
 	var fileNodes []uint64
@@ -137,7 +176,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	walkWg.Add(1)
-	go walk(1)
+	go walk(startNode)
 	walkWg.Wait()
 
 	requiredMB := int(totalSize / (1024 * 1024))
