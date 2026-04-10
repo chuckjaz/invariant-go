@@ -22,7 +22,7 @@ import (
 	"invariant/internal/storage"
 )
 
-func parseIgnoreFile(path string) (filetree.IgnoreRules, error) {
+func parseIgnoreFile(path string) (*filetree.IgnoreMatcher, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -40,7 +40,7 @@ func parseIgnoreFile(path string) (filetree.IgnoreRules, error) {
 		}
 		rules = append(rules, line)
 	}
-	return rules, nil
+	return filetree.CompileIgnore(rules), nil
 }
 
 type trackingStorage struct {
@@ -306,7 +306,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("%s\n", out)
 }
 
-func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath string, store storage.Storage, rules filetree.IgnoreRules, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
+func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath string, store storage.Storage, rules *filetree.IgnoreMatcher, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err

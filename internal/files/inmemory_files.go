@@ -383,12 +383,12 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		isDir := kind == filetree.DirectoryKind
 
 		included := len(layer.Includes) == 0
-		if !included {
-			included = filetree.IgnoreRules(layer.Includes).Matches(childPath, isDir)
+		if !included && layer.includesMatcher != nil {
+			included = layer.includesMatcher.Matches(childPath, isDir)
 		}
 
-		if included && len(layer.Excludes) > 0 {
-			if filetree.IgnoreRules(layer.Excludes).Matches(childPath, isDir) {
+		if included && len(layer.Excludes) > 0 && layer.excludesMatcher != nil {
+			if layer.excludesMatcher.Matches(childPath, isDir) {
 				included = false
 			}
 		}
@@ -1395,6 +1395,8 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	for i := range newLayers {
 		newLayers[i].Includes = s.resolveLayerRulesLocked(newLayers[i].Includes)
 		newLayers[i].Excludes = s.resolveLayerRulesLocked(newLayers[i].Excludes)
+		newLayers[i].includesMatcher = filetree.CompileIgnore(newLayers[i].Includes)
+		newLayers[i].excludesMatcher = filetree.CompileIgnore(newLayers[i].Excludes)
 	}
 
 	s.opts.Layers = newLayers

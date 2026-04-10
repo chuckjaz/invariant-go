@@ -61,6 +61,9 @@ type Layer struct {
 	Includes           []string
 	Excludes           []string
 	StorageDestination string `json:"storageDestination,omitempty"`
+
+	includesMatcher *filetree.IgnoreMatcher
+	excludesMatcher *filetree.IgnoreMatcher
 }
 
 type rawLayer struct {

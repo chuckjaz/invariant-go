@@ -175,3 +175,124 @@ func TestFilesService_LayerDependencies(t *testing.T) {
 		t.Errorf("Expected .myignore to be in layerDependencies")
 	}
 }
+
+func TestFilesService_GitignoreSemantics(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	slotsSvc := slots.NewMemorySlots("test-slots")
+
+	ctx := context.Background()
+
+	opts := Options{
+		Storage:       store,
+		Slots:         slotsSvc,
+		RootLink:      content.ContentLink{Slot: true},
+		WriterOptions: content.WriterOptions{},
+		Layers: []Layer{
+			{
+				Includes: []string{},
+				Excludes: []string{
+					"*.log",
+					"!important.log",
+					"/root.txt",
+					"docs/**/*.md",
+					"tmp/",
+				},
+				RootLink: content.ContentLink{Slot: true},
+			},
+			{
+				Includes: []string{}, // Match anything
+				Excludes: []string{},
+				RootLink: content.ContentLink{Slot: true},
+			},
+		},
+	}
+
+	fs, err := NewInMemoryFiles(opts)
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	createFile := func(path string, isDir bool) {
+		parts := strings.Split(path, "/")
+		parentID := uint64(1)
+		for i, part := range parts {
+			if i == len(parts)-1 && !isDir {
+				err = fs.CreateEntry(ctx, parentID, part, filetree.FileKind, "", nil, strings.NewReader("data"))
+				if err != nil {
+					t.Fatalf("Failed creating file %v: %v", path, err)
+				}
+			} else {
+				// Directory
+				_, err = fs.Lookup(ctx, parentID, part)
+				if err != nil {
+					err = fs.CreateEntry(ctx, parentID, part, filetree.DirectoryKind, "", nil, nil)
+					if err != nil {
+						t.Fatalf("Failed creating dir %v: %v", part, err)
+					}
+				}
+				info, _ := fs.Lookup(ctx, parentID, part)
+				parentID = info.Node
+			}
+		}
+	}
+
+	createFile("testlog.log", false)
+	createFile("important.log", false)
+	createFile("nested/testlog.log", false)
+	createFile("nested/important.log", false)
+	createFile("root.txt", false)
+	createFile("nested/root.txt", false)
+	createFile("docs/docs_readme.md", false)
+	createFile("docs/deep/docs_nested_index.md", false)
+	createFile("docs/deep/docs_nested_code.go", false)
+	createFile("tmp", true)
+	createFile("tmp/tmp_temp.txt", false) // Excluded by tmp/ -> layer 2
+
+	err = fs.Sync(ctx, 1, true)
+	if err != nil {
+		t.Fatalf("Failed to sync root: %v", err)
+	}
+
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	getNodeID := func(path string) uint64 {
+		parts := strings.Split(path, "/")
+		curr := uint64(1)
+		for _, part := range parts {
+			var found bool
+			for _, childID := range fs.nodes[curr].Children {
+				if fs.nodes[childID].Name == part {
+					curr = childID
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Lookup failed for %v at %v", path, part)
+			}
+		}
+		return curr
+	}
+
+	verifyLayer := func(path string, expectedLayer1 bool, expectedLayer2 bool) {
+		t.Helper()
+		id := getNodeID(path)
+		node := fs.nodes[id]
+		if node.LayerMembership[1] != expectedLayer1 {
+			t.Errorf("Node %q expected layer1=%v got %v", path, expectedLayer1, node.LayerMembership[1])
+		}
+		if node.LayerMembership[2] != expectedLayer2 {
+			t.Errorf("Node %q expected layer2=%v got %v", path, expectedLayer2, node.LayerMembership[2])
+		}
+	}
+
+	verifyLayer("testlog.log", false, true)
+	verifyLayer("important.log", true, false)
+	verifyLayer("root.txt", false, true)
+	verifyLayer("nested/root.txt", true, false)
+	verifyLayer("docs/docs_readme.md", false, true)
+	verifyLayer("docs/deep/docs_nested_index.md", false, true)
+	verifyLayer("docs/deep/docs_nested_code.go", true, false)
+	verifyLayer("tmp/tmp_temp.txt", false, true)
+}

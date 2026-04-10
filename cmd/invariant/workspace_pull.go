@@ -168,10 +168,8 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 	}
 	close(jobs)
 
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range concurrency {
+		wg.Go(func() {
 			for nodeID := range jobs {
 				r, err := fs.ReadFile(context.Background(), nodeID, 0, 0)
 				if err != nil {
@@ -185,7 +183,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 				}
 				atomic.AddUint64(&pulledBytes, uint64(n))
 			}
-		}()
+		})
 	}
 
 	done := make(chan struct{})

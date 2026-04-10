@@ -10,91 +10,91 @@ import (
 func TestIgnoreRulesMatches(t *testing.T) {
 	tests := []struct {
 		name     string
-		rules    filetree.IgnoreRules
+		rules    *filetree.IgnoreMatcher
 		path     string
 		isDir    bool
 		expected bool
 	}{
 		{
 			name:     "match exact file",
-			rules:    filetree.IgnoreRules{"test.txt"},
+			rules:    filetree.CompileIgnore([]string{"test.txt"}),
 			path:     "test.txt",
 			isDir:    false,
 			expected: true,
 		},
 		{
 			name:     "match exact file in subdir",
-			rules:    filetree.IgnoreRules{"test.txt"},
+			rules:    filetree.CompileIgnore([]string{"test.txt"}),
 			path:     "subdir/test.txt",
 			isDir:    false,
 			expected: true,
 		},
 		{
 			name:     "match glob prefix",
-			rules:    filetree.IgnoreRules{"*.log"},
+			rules:    filetree.CompileIgnore([]string{"*.log"}),
 			path:     "error.log",
 			isDir:    false,
 			expected: true,
 		},
 		{
 			name:     "match glob prefix in subdir",
-			rules:    filetree.IgnoreRules{"*.log"},
+			rules:    filetree.CompileIgnore([]string{"*.log"}),
 			path:     "var/error.log",
 			isDir:    false,
 			expected: true,
 		},
 		{
 			name:     "match directory trailing slash",
-			rules:    filetree.IgnoreRules{"node_modules/"},
+			rules:    filetree.CompileIgnore([]string{"node_modules/"}),
 			path:     "node_modules",
 			isDir:    true,
 			expected: true,
 		},
 		{
 			name:     "match directory trailing slash but path is file",
-			rules:    filetree.IgnoreRules{"node_modules/"},
+			rules:    filetree.CompileIgnore([]string{"node_modules/"}),
 			path:     "node_modules",
 			isDir:    false,
 			expected: false,
 		},
 		{
 			name:     "implicit .git match with gitignore",
-			rules:    filetree.IgnoreRules{"*.txt"},
+			rules:    filetree.CompileIgnore([]string{"*.txt"}),
 			path:     ".git",
 			isDir:    true,
 			expected: true,
 		},
 		{
 			name:     "no implicit .git match without gitignore",
-			rules:    nil, // No .gitignore file
+			rules:    filetree.CompileIgnore(nil), // No .gitignore file
 			path:     ".git",
 			isDir:    true,
 			expected: false,
 		},
 		{
 			name:     "implicit .invariant match",
-			rules:    filetree.IgnoreRules{},
+			rules:    filetree.CompileIgnore([]string{}),
 			path:     ".invariant",
 			isDir:    true,
 			expected: true,
 		},
 		{
 			name:     "non-matching file",
-			rules:    filetree.IgnoreRules{"*.log"},
+			rules:    filetree.CompileIgnore([]string{"*.log"}),
 			path:     "hello.txt",
 			isDir:    false,
 			expected: false,
 		},
 		{
 			name:     "match relative path",
-			rules:    filetree.IgnoreRules{"build/*.o"},
+			rules:    filetree.CompileIgnore([]string{"build/*.o"}),
 			path:     "build/main.o",
 			isDir:    false,
 			expected: true,
 		},
 		{
 			name:     "match deep relative path",
-			rules:    filetree.IgnoreRules{"build/cache/*.o"},
+			rules:    filetree.CompileIgnore([]string{"build/cache/*.o"}),
 			path:     "build/cache/main.o",
 			isDir:    false,
 			expected: true,
@@ -138,14 +138,9 @@ build/*.o
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := filetree.IgnoreRules{"*.log", "node_modules/", "build/*.o"}
-	if len(rules) != len(expected) {
-		t.Fatalf("expected %d rules, got %d", len(expected), len(rules))
-	}
-
-	for i, r := range expected {
-		if rules[i] != r {
-			t.Errorf("expected rule %q at %d, got %q", r, i, rules[i])
-		}
+	expected := []string{"*.log", "node_modules/", "build/*.o"}
+	expectedMatcher := filetree.CompileIgnore(expected)
+	if rules.Matches("error.log", false) != expectedMatcher.Matches("error.log", false) {
+		t.Errorf("Matcher behavior divergence")
 	}
 }
