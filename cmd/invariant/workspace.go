@@ -282,6 +282,10 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	// SetupFileSystem ignores layers parameter since SetupFileSystem is hardcoded to not use layers
 	// Wait, we need to pass Layers to it!
 
+	layers = append([]files.Layer{{
+		RootLink: wsInfo.Content,
+	}}, layers...)
+
 	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
 
 	// We copy the SetupFileSystem logic but insert layers
@@ -290,6 +294,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		LocalStorage:     localStore,
 		Slots:            slotsClient,
 		Discovery:        dClient,
+		RootLink:         wsInfo.Content,
 		Layers:           layers,
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
