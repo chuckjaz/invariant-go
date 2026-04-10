@@ -12,6 +12,7 @@ import (
 	"invariant/internal/config"
 	"invariant/internal/content"
 	"invariant/internal/discovery"
+	"invariant/internal/filetree"
 	"invariant/internal/finder"
 	"invariant/internal/names"
 	"invariant/internal/slots"
@@ -40,6 +41,15 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 	targetAddr := fsFlags.Arg(0)
+	var subPath string
+
+	if !strings.HasPrefix(strings.TrimSpace(targetAddr), "{") {
+		parts := strings.SplitN(targetAddr, "/", 2)
+		if len(parts) == 2 {
+			targetAddr = parts[0]
+			subPath = parts[1]
+		}
+	}
 
 	if discoveryURL == "" && globalCfg != nil {
 		discoveryURL = globalCfg.Discovery
@@ -100,6 +110,53 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	var slotsClient slots.Slots
 	if slotsAddr != "" {
 		slotsClient = slots.NewClient(slotsAddr, nil)
+	}
+
+	if subPath != "" {
+		segments := strings.Split(subPath, "/")
+		for _, segment := range segments {
+			if segment == "" {
+				continue
+			}
+			reader, err := content.Read(link, storageClient, slotsClient)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Block not found or failed to read: %v\n", err)
+				os.Exit(1)
+			}
+			data, err := io.ReadAll(reader)
+			reader.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading block: %v\n", err)
+				os.Exit(1)
+			}
+
+			var dir filetree.Directory
+			if err := json.Unmarshal(data, &dir); err != nil {
+				fmt.Fprintf(os.Stderr, "Path traversal failed: block is not a valid directory\n")
+				os.Exit(1)
+			}
+
+			var found bool
+			for _, entry := range dir {
+				if entry.GetName() == segment {
+					switch e := entry.(type) {
+					case *filetree.FileEntry:
+						link = e.Content
+					case *filetree.DirectoryEntry:
+						link = e.Content
+					default:
+						fmt.Fprintf(os.Stderr, "Unsupported entry kind in path traversal for %s\n", segment)
+						os.Exit(1)
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				fmt.Fprintf(os.Stderr, "Path segment %q not found in directory\n", segment)
+				os.Exit(1)
+			}
+		}
 	}
 
 	reader, err := content.Read(link, storageClient, slotsClient)
