@@ -34,7 +34,7 @@ import (
 
 func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant workspace <create|mount|unmount> ...\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant workspace <create|mount|pull|unmount> ...\n")
 		os.Exit(1)
 	}
 
