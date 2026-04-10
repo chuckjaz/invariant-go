@@ -246,9 +246,9 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 	}
 
 	if len(layers) > 0 {
-		opts.Layers = append(layers, files.Layer{
+		opts.Layers = append([]files.Layer{{
 			RootLink: opts.RootLink,
-		})
+		}}, layers...)
 	}
 
 	filesrv, err := files.NewInMemoryFiles(opts)
