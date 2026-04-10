@@ -212,3 +212,99 @@ func (d Directory) Validate() error {
 	}
 	return nil
 }
+
+// MarshalJSON customizes the JSON serialization for FileEntry.
+func (e *FileEntry) MarshalJSON() ([]byte, error) {
+	type Alias FileEntry
+	var modTime *uint64
+	if e.ModifyTime != nil && e.CreateTime != nil && *e.ModifyTime == *e.CreateTime {
+		modTime = nil
+	} else {
+		modTime = e.ModifyTime
+	}
+	return json.Marshal(&struct {
+		*Alias
+		ModifyTime *uint64 `json:"modifyTime,omitempty"`
+	}{
+		Alias:      (*Alias)(e),
+		ModifyTime: modTime,
+	})
+}
+
+// UnmarshalJSON customizes the JSON deserialization for FileEntry.
+func (e *FileEntry) UnmarshalJSON(data []byte) error {
+	type Alias FileEntry
+	aux := (*Alias)(e)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if e.ModifyTime == nil && e.CreateTime != nil {
+		t := *e.CreateTime
+		e.ModifyTime = &t
+	}
+	return nil
+}
+
+// MarshalJSON customizes the JSON serialization for DirectoryEntry.
+func (e *DirectoryEntry) MarshalJSON() ([]byte, error) {
+	type Alias DirectoryEntry
+	var modTime *uint64
+	if e.ModifyTime != nil && e.CreateTime != nil && *e.ModifyTime == *e.CreateTime {
+		modTime = nil
+	} else {
+		modTime = e.ModifyTime
+	}
+	return json.Marshal(&struct {
+		*Alias
+		ModifyTime *uint64 `json:"modifyTime,omitempty"`
+	}{
+		Alias:      (*Alias)(e),
+		ModifyTime: modTime,
+	})
+}
+
+// UnmarshalJSON customizes the JSON deserialization for DirectoryEntry.
+func (e *DirectoryEntry) UnmarshalJSON(data []byte) error {
+	type Alias DirectoryEntry
+	aux := (*Alias)(e)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if e.ModifyTime == nil && e.CreateTime != nil {
+		t := *e.CreateTime
+		e.ModifyTime = &t
+	}
+	return nil
+}
+
+// MarshalJSON customizes the JSON serialization for SymbolicLinkEntry.
+func (e *SymbolicLinkEntry) MarshalJSON() ([]byte, error) {
+	type Alias SymbolicLinkEntry
+	var modTime *uint64
+	if e.ModifyTime != nil && e.CreateTime != nil && *e.ModifyTime == *e.CreateTime {
+		modTime = nil
+	} else {
+		modTime = e.ModifyTime
+	}
+	return json.Marshal(&struct {
+		*Alias
+		ModifyTime *uint64 `json:"modifyTime,omitempty"`
+	}{
+		Alias:      (*Alias)(e),
+		ModifyTime: modTime,
+	})
+}
+
+// UnmarshalJSON customizes the JSON deserialization for SymbolicLinkEntry.
+func (e *SymbolicLinkEntry) UnmarshalJSON(data []byte) error {
+	type Alias SymbolicLinkEntry
+	aux := (*Alias)(e)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if e.ModifyTime == nil && e.CreateTime != nil {
+		t := *e.CreateTime
+		e.ModifyTime = &t
+	}
+	return nil
+}
