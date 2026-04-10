@@ -93,58 +93,60 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 	targetLink := content.ContentLink{}
 
 	// simple heuristic: if it's 64 chars, we assume it's a raw block address.
+	var hash string
 	if len(contentArg) == 64 {
-		// Try to GET it to see if it's an existing slot, otherwise we assume it's a block
-		// and we MUST create a mutable slot for workspaces to be persistent.
-		_, err := slotsClient.Get(context.Background(), contentArg)
-		if err == nil {
-			targetLink = content.ContentLink{Address: contentArg, Slot: true}
-		} else {
-			var slotID string
-			var policy string
-
-			if *protectedFlag {
-				fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
-				pub, priv, err := ed25519.GenerateKey(nil)
-				if err != nil {
-					log.Fatalf("Failed to generate key pair: %v", err)
-				}
-				slotID = hex.EncodeToString(pub)
-				policy = "ecc"
-
-				keysDir, err := config.KeysDir()
-				if err != nil {
-					log.Fatalf("Fatal error: Failed to locate keys directory: %v", err)
-				}
-
-				keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
-				if err := os.WriteFile(keyPath, priv, 0600); err != nil {
-					log.Fatalf("Fatal error: Failed to save private key to %s: %v", keyPath, err)
-				}
-				fmt.Printf("Private key securely saved to: %s\n", keyPath)
-			} else {
-				// Generate a new standard slot for the static block
-				b := make([]byte, 32)
-				rand.Read(b)
-				slotID = hex.EncodeToString(b)
-			}
-
-			if err := slotsClient.Create(context.Background(), slotID, contentArg, policy); err != nil {
-				log.Fatalf("failed to create workspace tracking slot: %v", err)
-			}
-			log.Printf("Created slot %s to track workspace changes\n", slotID)
-			targetLink = content.ContentLink{Address: slotID, Slot: true}
-		}
+		hash = contentArg
 	} else if len(contentArg) > 0 {
 		// might be a namespace name
 		resolved, err := discovery.ResolveName(context.Background(), dClient, contentArg)
 		if err == nil && len(resolved) > 0 {
-			targetLink = content.ContentLink{Address: resolved, Slot: true}
+			hash = resolved
 		} else {
 			log.Fatalf("failed to resolve content: %s", contentArg)
 		}
 	} else {
 		log.Fatalf("Invalid content provided: %s", contentArg)
+	}
+
+	// Try to GET it to see if it's an existing slot, otherwise we assume it's a block
+	// and we MUST create a mutable slot for workspaces to be persistent.
+	if _, err := slotsClient.Get(context.Background(), hash); err == nil {
+		targetLink = content.ContentLink{Address: hash, Slot: true}
+	} else {
+		var slotID string
+		var policy string
+
+		if *protectedFlag {
+			fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
+			pub, priv, err := ed25519.GenerateKey(nil)
+			if err != nil {
+				log.Fatalf("Failed to generate key pair: %v", err)
+			}
+			slotID = hex.EncodeToString(pub)
+			policy = "ecc"
+
+			keysDir, err := config.KeysDir()
+			if err != nil {
+				log.Fatalf("Fatal error: Failed to locate keys directory: %v", err)
+			}
+
+			keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
+			if err := os.WriteFile(keyPath, priv, 0600); err != nil {
+				log.Fatalf("Fatal error: Failed to save private key to %s: %v", keyPath, err)
+			}
+			fmt.Printf("Private key securely saved to: %s\n", keyPath)
+		} else {
+			// Generate a new standard slot for the static block
+			b := make([]byte, 32)
+			rand.Read(b)
+			slotID = hex.EncodeToString(b)
+		}
+
+		if err := slotsClient.Create(context.Background(), slotID, hash, policy); err != nil {
+			log.Fatalf("failed to create workspace tracking slot: %v", err)
+		}
+		log.Printf("Created slot %s to track workspace changes\n", slotID)
+		targetLink = content.ContentLink{Address: slotID, Slot: true}
 	}
 
 	// Create Workspace directory
