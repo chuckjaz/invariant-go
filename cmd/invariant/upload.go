@@ -321,33 +321,6 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 	atomic.AddInt64(&u.DirsChecking, 1)
 	defer atomic.AddInt64(&u.DirsChecking, -1)
 
-	var cacheKey string
-	if !u.disableCache {
-		cacheKey = currentPath
-		u.cacheMu.RLock()
-		ce, ok := u.cache[cacheKey]
-		u.cacheMu.RUnlock()
-		if ok && ce.MTime == *mtime {
-			cl := content.ContentLink{}
-			json.Unmarshal([]byte(ce.ContentLink), &cl)
-			if store.Has(ctx, cl.Address) {
-				atomic.AddUint64(&u.DirsSkipped, 1)
-				modeStr := ce.Mode
-				return &filetree.DirectoryEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.DirectoryKind,
-						Name:       filepath.Base(currentPath),
-						Mode:       &modeStr,
-						CreateTime: ctime,
-						ModifyTime: mtime,
-					},
-					Content: cl,
-					Size:    ce.Size,
-				}, nil
-			}
-		}
-	}
-
 	var wg sync.WaitGroup
 	var dirErrs = make([]error, len(entries))
 	var dirEntries = make([]filetree.Entry, len(entries))
@@ -454,17 +427,6 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 	atomic.AddUint64(&u.DirsChecked, 1)
 
 	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
-	if !u.disableCache {
-		clBytes, _ := json.Marshal(memLink)
-		u.cacheMu.Lock()
-		u.cache[cacheKey] = UploadCacheEntry{
-			MTime:       *mtime,
-			ContentLink: string(clBytes),
-			Size:        uint64(len(data)),
-			Mode:        modeStr,
-		}
-		u.cacheMu.Unlock()
-	}
 
 	return &filetree.DirectoryEntry{
 		BaseEntry: filetree.BaseEntry{
