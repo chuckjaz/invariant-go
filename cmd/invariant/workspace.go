@@ -141,10 +141,10 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		if err == nil && len(resolved) > 0 {
 			targetLink = content.ContentLink{Address: resolved, Slot: true}
 		} else {
-			targetLink = content.ContentLink{Address: contentArg}
+			log.Fatalf("failed to resolve content: %s", contentArg)
 		}
 	} else {
-		log.Fatal("Invalid content provided")
+		log.Fatalf("Invalid content provided: %s", contentArg)
 	}
 
 	// Create Workspace directory
