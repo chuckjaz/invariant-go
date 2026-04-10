@@ -21,7 +21,12 @@ import (
 func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags := flag.NewFlagSet("print", flag.ExitOnError)
 	var discoveryURL string
+	var cmFlags CommonMountFlags
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	fsFlags.IntVar(&cmFlags.CacheSizeMB, "cache", 128, "In-memory caching size in MB for storage backend (0 to disable)")
+	fsFlags.IntVar(&cmFlags.DiskCacheSizeMB, "disk-cache", 1024, "Disk caching size in MB for storage backend (0 to disable)")
+	fsFlags.StringVar(&cmFlags.CacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.cache/invariant)")
+	fsFlags.StringVar(&cmFlags.OverflowDir, "overflow-dir", "", "Directory to use for the overflow cache (default: ~/.cache/invariant/overflow)")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant print [options] <id-or-name>\n\n")
@@ -68,7 +73,8 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 	finderClient := finder.NewClient(finderAddr, nil)
-	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	baseStorageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	storageClient, _ := SetupCacheStorage(&cmFlags, baseStorageClient)
 
 	var link content.ContentLink
 	if strings.HasPrefix(strings.TrimSpace(targetAddr), "{") {
