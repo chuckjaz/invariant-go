@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"invariant/internal/httputil"
 	"io"
 	"net/http"
 )
@@ -23,6 +24,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	httpClient = httputil.NewDiagnosticClient(httpClient)
 	return &Client{
 		baseURL:    baseURL,
 		httpClient: httpClient,

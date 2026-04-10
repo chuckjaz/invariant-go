@@ -2,6 +2,7 @@ package identity
 
 import (
 	"fmt"
+	"invariant/internal/httputil"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,6 +21,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 2 * time.Second}
 	}
+	httpClient = httputil.NewDiagnosticClient(httpClient)
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "http://" + baseURL
 	}

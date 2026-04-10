@@ -113,8 +113,8 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if subPath != "" {
-		segments := strings.Split(subPath, "/")
-		for _, segment := range segments {
+		segments := strings.SplitSeq(subPath, "/")
+		for segment := range segments {
 			if segment == "" {
 				continue
 			}
