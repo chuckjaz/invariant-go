@@ -234,7 +234,11 @@ func (e *FileEntry) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON customizes the JSON deserialization for FileEntry.
 func (e *FileEntry) UnmarshalJSON(data []byte) error {
 	type Alias FileEntry
-	aux := (*Alias)(e)
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
@@ -266,7 +270,11 @@ func (e *DirectoryEntry) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON customizes the JSON deserialization for DirectoryEntry.
 func (e *DirectoryEntry) UnmarshalJSON(data []byte) error {
 	type Alias DirectoryEntry
-	aux := (*Alias)(e)
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
@@ -298,7 +306,11 @@ func (e *SymbolicLinkEntry) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON customizes the JSON deserialization for SymbolicLinkEntry.
 func (e *SymbolicLinkEntry) UnmarshalJSON(data []byte) error {
 	type Alias SymbolicLinkEntry
-	aux := (*Alias)(e)
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
