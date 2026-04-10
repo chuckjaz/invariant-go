@@ -84,3 +84,49 @@ func TestZipSplitter(t *testing.T) {
 		t.Errorf("Expected %d blocks total, got %d", expectedChunks+expectedStreams, len(blocks))
 	}
 }
+
+func TestZipSplitterRecursionPrevention(t *testing.T) {
+	// Create a zip bomb situation: a Zip file whose payload EXACTLY matches another zip file.
+	// We'll create 3 levels deep. The innermost payload will be 1 MB + 1 byte so that it triggers writeStream.
+	innermostPayload := make([]byte, 1024*1024+1)
+
+	// Wrap it 3 times. If recursion prevention is missing, it recurses.
+	level1 := createDummyZipEntry("inner.zip", innermostPayload)
+	level2 := createDummyZipEntry("middle.zip", level1)
+	level3 := createDummyZipEntry("bomb.zip", level2)
+
+	s := &ZipSplitter{}
+
+	opts := WriterOptions{
+		Splitters: []Splitter{
+			&ZipSplitter{},
+			&BuzHashSplitter{},
+		},
+	}
+
+	writeChunk := func(chunk []byte) (ContentLink, error) {
+		return ContentLink{Address: "chunk"}, nil
+	}
+
+	writeStream := func(inner io.Reader, innerOpts WriterOptions) (ContentLink, error) {
+		// Just consume the stream
+		io.Copy(io.Discard, inner)
+		// We can ensure that innerOpts does NOT contain ZipSplitter
+		hasZipSplitter := false
+		for _, sp := range innerOpts.Splitters {
+			if _, isZip := sp.(*ZipSplitter); isZip {
+				hasZipSplitter = true
+			}
+		}
+		if hasZipSplitter {
+			t.Errorf("writeStream was called with ZipSplitter still in its Splitters list!")
+		}
+
+		return ContentLink{Address: "stream"}, nil
+	}
+
+	_, err := s.Split(bytes.NewReader(level3), opts, writeChunk, writeStream)
+	if err != nil {
+		t.Fatalf("Splitter failed: %v", err)
+	}
+}
