@@ -37,6 +37,11 @@ import (
 func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: invariant workspace <create|mount|pull|unmount> ...\n")
+		fmt.Fprintf(os.Stderr, "Commands:\n")
+		fmt.Fprintf(os.Stderr, "  create    Create a new workspace\n")
+		fmt.Fprintf(os.Stderr, "  mount     Mount a workspace\n")
+		fmt.Fprintf(os.Stderr, "  unmount   Unmount a workspace\n")
+		fmt.Fprintf(os.Stderr, "  pull      Pull a workspace\n")
 		os.Exit(1)
 	}
 
@@ -325,6 +330,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 	layers = append([]files.Layer{{
 		RootLink: wsInfo.Content,
+		ReadOnly: true,
 	}}, layers...)
 
 	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
