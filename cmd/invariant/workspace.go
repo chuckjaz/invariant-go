@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -253,16 +255,24 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 		w.Close() // Parent no longer needs the write end
 
-		buf := make([]byte, 1)
-		n, err := r.Read(buf)
-		if n == 1 && buf[0] == 'R' {
+		reader := bufio.NewReader(r)
+		success := false
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				break
+			}
+			if line == "INVARIANT_MOUNT_READY\n" {
+				success = true
+				break
+			}
+			fmt.Print(line)
+		}
+
+		if success {
 			fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
 		} else {
-			if err != nil {
-				log.Fatalf("Background mount failed or exited unexpectedly: %v", err)
-			} else {
-				log.Fatalf("Background mount failed to signal readiness")
-			}
+			log.Fatalf("Background mount failed or exited unexpectedly")
 		}
 
 		r.Close()
@@ -273,6 +283,16 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	os.MkdirAll(pidsDir, 0700)
 	pidHash := sha256.Sum256([]byte(absDir))
 	pidPath := filepath.Join(pidsDir, fmt.Sprintf("%x.pid", pidHash))
+
+	var readyPipe *os.File
+	if fdStr := os.Getenv("INVARIANT_READY_FD"); fdStr != "" {
+		if fd, err := strconv.Atoi(fdStr); err == nil {
+			if f := os.NewFile(uintptr(fd), "readyPipe"); f != nil {
+				readyPipe = f
+				log.SetOutput(io.MultiWriter(os.Stderr, readyPipe))
+			}
+		}
+	}
 
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
 		log.Printf("Warning: failed to write pid file: %v", err)
@@ -357,13 +377,10 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	log.Printf("Mounted workspace on %s\n", absDir)
 	log.Printf("Unmount by calling 'invariant workspace unmount %s'", absDir)
 
-	if fdStr := os.Getenv("INVARIANT_READY_FD"); fdStr != "" {
-		if fd, err := strconv.Atoi(fdStr); err == nil {
-			if f := os.NewFile(uintptr(fd), "readyPipe"); f != nil {
-				f.Write([]byte{'R'})
-				f.Close()
-			}
-		}
+	if readyPipe != nil {
+		log.SetOutput(os.Stderr)
+		readyPipe.Write([]byte("INVARIANT_MOUNT_READY\n"))
+		readyPipe.Close()
 	}
 
 	server.Wait()
