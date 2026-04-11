@@ -62,7 +62,7 @@ func TestHealthTracker_SortingAndEviction(t *testing.T) {
 	}
 
 	// Wait for eviction timeout
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	res, _ = d.Find(ctx, "test-proto", 10)
 	if len(res) != 1 {

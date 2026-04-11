@@ -380,6 +380,10 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 
 	alreadyIncluded := false
 	for i, layer := range s.opts.Layers {
+		if layer.ReadOnly {
+			continue
+		}
+
 		isDir := kind == filetree.DirectoryKind
 
 		included := len(layer.Includes) == 0
