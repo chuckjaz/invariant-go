@@ -240,11 +240,32 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 
+		r, w, err := os.Pipe()
+		if err != nil {
+			log.Fatalf("Failed to create readiness pipe: %v", err)
+		}
+		cmd.ExtraFiles = []*os.File{w}
+		cmd.Env = append(os.Environ(), "INVARIANT_READY_FD=3")
+
 		if err := cmd.Start(); err != nil {
 			log.Fatalf("Failed to start background mount: %v", err)
 		}
 
-		fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
+		w.Close() // Parent no longer needs the write end
+
+		buf := make([]byte, 1)
+		n, err := r.Read(buf)
+		if n == 1 && buf[0] == 'R' {
+			fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
+		} else {
+			if err != nil {
+				log.Fatalf("Background mount failed or exited unexpectedly: %v", err)
+			} else {
+				log.Fatalf("Background mount failed to signal readiness")
+			}
+		}
+
+		r.Close()
 		return
 	}
 	cacheDir, _ := config.CacheDir()
@@ -335,6 +356,16 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 	log.Printf("Mounted workspace on %s\n", absDir)
 	log.Printf("Unmount by calling 'invariant workspace unmount %s'", absDir)
+
+	if fdStr := os.Getenv("INVARIANT_READY_FD"); fdStr != "" {
+		if fd, err := strconv.Atoi(fdStr); err == nil {
+			if f := os.NewFile(uintptr(fd), "readyPipe"); f != nil {
+				f.Write([]byte{'R'})
+				f.Close()
+			}
+		}
+	}
+
 	server.Wait()
 }
 
