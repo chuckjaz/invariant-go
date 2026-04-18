@@ -94,6 +94,10 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
 	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
 	fsFlags.BoolVar(&disableCache, "no-cache", false, "Disable mtime caching")
+	var stats bool
+	var dryRun bool
+	fsFlags.BoolVar(&stats, "stats", false, "Emit total bytes to upload, number of blocks uploaded, number of directories created")
+	fsFlags.BoolVar(&dryRun, "dry-run", false, "Compute stats but upload to a storage that reports having all blocks (dry-run)")
 	fsFlags.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
@@ -134,7 +138,12 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, nil)
-	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	var storageClient storage.Storage
+	storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+
+	if dryRun {
+		storageClient = storage.NewDryRunStorage()
+	}
 
 	var previousAddress string
 	var privKeyHex []byte
@@ -303,6 +312,13 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
+	if stats || dryRun {
+		totalBytes := atomic.LoadUint64(&up.TotalBytes)
+		blocksUploaded := atomic.LoadUint64(&up.BlocksUploaded)
+		dirsCreated := atomic.LoadUint64(&up.DirsCreated)
+		fmt.Fprintf(os.Stderr, "Stats: Total bytes to upload: %d, Blocks uploaded: %d, Directories created: %d\n", totalBytes, blocksUploaded, dirsCreated)
+	}
+
 	fmt.Printf("%s\n", out)
 }
 
@@ -333,7 +349,7 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 
 			relPath, _ := filepath.Rel(rootPath, filepath.Join(currentPath, d.Name()))
 
-			if rules.Matches(relPath, d.IsDir()) {
+			if rules != nil && rules.Matches(relPath, d.IsDir()) {
 				return
 			}
 
@@ -411,6 +427,9 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 		atomic.AddInt64(&u.UploadsInFlight, 1)
 		defer atomic.AddInt64(&u.UploadsInFlight, -1)
 
+		atomic.AddUint64(&u.BlocksUploaded, 1)
+		atomic.AddUint64(&u.DirsCreated, 1)
+
 		trackingStore := &trackingStorage{
 			Storage:       store,
 			bytesUploaded: &u.BytesUploaded,
@@ -449,6 +468,8 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 
 	atomic.AddInt64(&u.FilesChecking, 1)
 	defer atomic.AddInt64(&u.FilesChecking, -1)
+
+	atomic.AddUint64(&u.TotalBytes, uint64(fileInfo.Size()))
 
 	ctime, mtime := getEntryTimes(fileInfo)
 
@@ -500,6 +521,8 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 	if !store.Has(ctx, memLink.Address) {
 		atomic.AddInt64(&u.UploadsInFlight, 1)
 		defer atomic.AddInt64(&u.UploadsInFlight, -1)
+
+		atomic.AddUint64(&u.BlocksUploaded, 1)
 
 		// Rewind the open file descriptor to push natively without OOM allocations globally
 		file.Seek(0, io.SeekStart)

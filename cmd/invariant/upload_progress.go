@@ -20,6 +20,10 @@ type uploader struct {
 	BytesUploaded   uint64
 	UploadsInFlight int64
 
+	TotalBytes     uint64
+	BlocksUploaded uint64
+	DirsCreated    uint64
+
 	cacheMu      sync.RWMutex
 	cache        map[string]UploadCacheEntry
 	cachePath    string
