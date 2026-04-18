@@ -313,10 +313,10 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if stats || dryRun {
-		totalBytes := atomic.LoadUint64(&up.TotalBytes)
+		bytesToUpload := atomic.LoadUint64(&up.BytesUploaded)
 		blocksUploaded := atomic.LoadUint64(&up.BlocksUploaded)
 		dirsCreated := atomic.LoadUint64(&up.DirsCreated)
-		fmt.Fprintf(os.Stderr, "Stats: Total bytes to upload: %s, Blocks uploaded: %d, Directories created: %d\n", up.formatBytes(totalBytes), blocksUploaded, dirsCreated)
+		fmt.Fprintf(os.Stderr, "Stats: Total bytes to upload: %s, Blocks uploaded: %d, Directories created: %d\n", up.formatBytes(bytesToUpload), blocksUploaded, dirsCreated)
 	}
 
 	fmt.Printf("%s\n", out)
@@ -468,8 +468,6 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 
 	atomic.AddInt64(&u.FilesChecking, 1)
 	defer atomic.AddInt64(&u.FilesChecking, -1)
-
-	atomic.AddUint64(&u.TotalBytes, uint64(fileInfo.Size()))
 
 	ctime, mtime := getEntryTimes(fileInfo)
 
