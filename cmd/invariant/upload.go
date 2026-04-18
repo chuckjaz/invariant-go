@@ -316,7 +316,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		totalBytes := atomic.LoadUint64(&up.TotalBytes)
 		blocksUploaded := atomic.LoadUint64(&up.BlocksUploaded)
 		dirsCreated := atomic.LoadUint64(&up.DirsCreated)
-		fmt.Fprintf(os.Stderr, "Stats: Total bytes to upload: %d, Blocks uploaded: %d, Directories created: %d\n", totalBytes, blocksUploaded, dirsCreated)
+		fmt.Fprintf(os.Stderr, "Stats: Total bytes to upload: %s, Blocks uploaded: %d, Directories created: %d\n", up.formatBytes(totalBytes), blocksUploaded, dirsCreated)
 	}
 
 	fmt.Printf("%s\n", out)
