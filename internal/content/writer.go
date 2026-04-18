@@ -246,8 +246,15 @@ func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKe
 		}
 
 		iv := make([]byte, 16)
-		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-			return link, err
+		if opts.KeyPolicy == Deterministic || opts.KeyPolicy == SuppliedAllKey {
+			hIV := sha256.New()
+			hIV.Write(key)
+			hIV.Write(data)
+			copy(iv, hIV.Sum(nil)[:16])
+		} else {
+			if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+				return link, err
+			}
 		}
 
 		block, err := aes.NewCipher(key)

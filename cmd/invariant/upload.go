@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -214,9 +215,16 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 		switch keyPolicyStr {
 		case "RandomPerBlock":
-			opts.KeyPolicy = content.RandomPerBlock
+			fmt.Fprintf(os.Stderr, "Error: RandomPerBlock is unsupported for file tree uploads because it incompatible with two-pass hashing.\n")
+			os.Exit(1)
 		case "RandomAllKey":
-			opts.KeyPolicy = content.RandomAllKey
+			opts.KeyPolicy = content.SuppliedAllKey
+			k := make([]byte, 32)
+			if _, err := io.ReadFull(rand.Reader, k); err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating RandomAllKey: %v\n", err)
+				os.Exit(1)
+			}
+			opts.SuppliedKey = k
 		case "Deterministic":
 			opts.KeyPolicy = content.Deterministic
 		case "SuppliedAllKey":
