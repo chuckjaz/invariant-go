@@ -3,10 +3,12 @@ package storage
 import (
 	"context"
 	"io"
+	"sync"
 )
 
 type dryRunStorage struct {
 	hasher Storage
+	seen   sync.Map
 }
 
 // NewDryRunStorage creates a mock Storage instance that short-circuits data persistence
@@ -20,7 +22,8 @@ func (s *dryRunStorage) ID() string {
 }
 
 func (s *dryRunStorage) Has(ctx context.Context, address string) bool {
-	return true
+	_, ok := s.seen.Load(address)
+	return ok
 }
 
 func (s *dryRunStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
@@ -28,10 +31,15 @@ func (s *dryRunStorage) Get(ctx context.Context, address string) (io.ReadCloser,
 }
 
 func (s *dryRunStorage) Store(ctx context.Context, r io.Reader) (string, error) {
-	return s.hasher.Store(ctx, r)
+	addr, err := s.hasher.Store(ctx, r)
+	if err == nil {
+		s.seen.Store(addr, true)
+	}
+	return addr, err
 }
 
 func (s *dryRunStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	s.seen.Store(address, true)
 	return true, nil
 }
 
