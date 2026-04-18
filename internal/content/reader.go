@@ -50,7 +50,7 @@ func Read(link ContentLink, store storage.Storage, slotService slots.Slots) (io.
 
 	var err error
 	for _, t := range link.Transforms {
-		rc, err = applyTransform(rc, t, store, slotService)
+		rc, err = applyTransform(rc, t, link.Expected, store, slotService)
 		if err != nil {
 			rc.Close()
 			return nil, fmt.Errorf("failed to apply transform %s: %w", t.Kind, err)
@@ -68,7 +68,7 @@ func Read(link ContentLink, store storage.Storage, slotService slots.Slots) (io.
 	return rc, nil
 }
 
-func applyTransform(rc io.ReadCloser, t ContentTransform, store storage.Storage, slotService slots.Slots) (io.ReadCloser, error) {
+func applyTransform(rc io.ReadCloser, t ContentTransform, expected string, store storage.Storage, slotService slots.Slots) (io.ReadCloser, error) {
 	switch t.Kind {
 	case "Decompress":
 		switch t.Algorithm {
@@ -87,7 +87,14 @@ func applyTransform(rc io.ReadCloser, t ContentTransform, store storage.Storage,
 		if t.Algorithm != "aes-256-cbc" {
 			return nil, fmt.Errorf("%w: Decipher %s", ErrUnsupportedAlg, t.Algorithm)
 		}
-		key, err := hex.DecodeString(t.Key)
+		keyHex := t.Key
+		if keyHex == "" && expected != "" {
+			keyHex = expected
+		}
+		if keyHex == "" {
+			return nil, errors.New("missing decryption key")
+		}
+		key, err := hex.DecodeString(keyHex)
 		if err != nil {
 			return nil, fmt.Errorf("invalid key hex: %w", err)
 		}

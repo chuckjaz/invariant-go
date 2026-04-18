@@ -280,11 +280,16 @@ func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKe
 		mode.CryptBlocks(ciphertext, paddedData)
 		currentData = ciphertext
 
+		keyHex := hex.EncodeToString(key)
+		if opts.KeyPolicy == Deterministic && link.Expected == keyHex {
+			keyHex = ""
+		}
+
 		// Decryption happens first when reading
 		transforms = append([]ContentTransform{{
 			Kind:      "Decipher",
 			Algorithm: "aes-256-cbc",
-			Key:       hex.EncodeToString(key),
+			Key:       keyHex,
 			IV:        hex.EncodeToString(iv),
 		}}, transforms...)
 	}
