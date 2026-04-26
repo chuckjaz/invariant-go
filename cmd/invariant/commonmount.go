@@ -198,7 +198,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 	}
 	writerOpts.Splitters = []content.Splitter{
 		&content.ZipSplitter{},
-		&content.BuzHashSplitter{},
+		&content.RepMaxSplitter{},
 	}
 
 	opts := files.Options{

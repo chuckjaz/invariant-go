@@ -515,7 +515,7 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 	opts.Filename = name
 	opts.Splitters = []content.Splitter{
 		&content.ZipSplitter{},
-		&content.BuzHashSplitter{},
+		&content.RepMaxSplitter{},
 	}
 
 	memStore := storage.NewHashingStorage()
