@@ -33,3 +33,10 @@ type StorageFetchRequest struct {
 	Address   string `json:"address"`
 	Container string `json:"container"`
 }
+
+// BatchStorage adds capabilities to check and store multiple blocks efficiently
+type BatchStorage interface {
+	Storage
+	BatchHas(ctx context.Context, addresses []string) ([]string, error)
+	BatchStore(ctx context.Context, blocks map[string]io.Reader) error
+}

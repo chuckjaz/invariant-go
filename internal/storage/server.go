@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -113,6 +114,9 @@ func (s *StorageServer) Handler() http.Handler {
 	mux.HandleFunc("GET /id", s.handleGetID)
 
 	mux.HandleFunc("POST /{$}", s.handlePost)
+
+	mux.HandleFunc("POST /batch_has", s.handleBatchHas)
+	mux.HandleFunc("POST /batch_store", s.handleBatchStore)
 
 	mux.HandleFunc("POST /fetch", s.handleFetch)
 	mux.HandleFunc("HEAD /fetch", s.handleFetch)
@@ -261,6 +265,92 @@ func (s *StorageServer) handleHead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("ETag", address)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *StorageServer) handleBatchHas(w http.ResponseWriter, r *http.Request) {
+	var addresses []string
+	if err := json.NewDecoder(r.Body).Decode(&addresses); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if batchStore, ok := s.storage.(BatchStorage); ok {
+		missing, err := batchStore.BatchHas(r.Context(), addresses)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(missing)
+		return
+	}
+
+	var missing []string
+	for _, addr := range addresses {
+		if !s.storage.Has(r.Context(), addr) {
+			missing = append(missing, addr)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(missing)
+}
+
+func (s *StorageServer) handleBatchStore(w http.ResponseWriter, r *http.Request) {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		http.Error(w, "Bad Request: not multipart", http.StatusBadRequest)
+		return
+	}
+
+	blocks := make(map[string]io.Reader)
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			http.Error(w, "Bad Request: error reading multipart", http.StatusBadRequest)
+			return
+		}
+		addr := part.FormName()
+		if addr == "" {
+			continue
+		}
+
+		// In order to not block NextPart, we either need to read the part into memory,
+		// or process it immediately. Since we need to pass a map to BatchStore,
+		// and multipart parts cannot be read out of order, we should probably read into memory here if we want to pass a map of readers.
+		// Alternatively, if the server just calls StoreAt sequentially, we can do it inline.
+
+		// Since BatchStore takes a map, we buffer into memory.
+		// For large files, batch_store should NOT be used. It's meant for many small files.
+		data, err := io.ReadAll(part)
+		if err != nil {
+			http.Error(w, "Bad Request: error reading part", http.StatusBadRequest)
+			return
+		}
+		blocks[addr] = bytes.NewReader(data)
+	}
+
+	if batchStore, ok := s.storage.(BatchStorage); ok {
+		err := batchStore.BatchStore(r.Context(), blocks)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		for addr, rdr := range blocks {
+			success, err := s.storage.StoreAt(r.Context(), addr, rdr)
+			if err != nil || !success {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 }

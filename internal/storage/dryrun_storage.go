@@ -56,3 +56,23 @@ func (s *dryRunStorage) List(ctx context.Context, chunkSize int) <-chan []string
 func (s *dryRunStorage) Remove(ctx context.Context, address string) (bool, error) {
 	return true, nil
 }
+
+func (s *dryRunStorage) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	var missing []string
+	for _, addr := range addresses {
+		if !s.Has(ctx, addr) {
+			missing = append(missing, addr)
+		}
+	}
+	return missing, nil
+}
+
+func (s *dryRunStorage) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	for addr, r := range blocks {
+		_, err := s.StoreAt(ctx, addr, r)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

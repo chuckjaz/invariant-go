@@ -690,3 +690,26 @@ func (s *CachingStorage) overflowFlushLoop() {
 		}
 	}
 }
+
+func (s *CachingStorage) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	var missing []string
+	for _, addr := range addresses {
+		if !s.Has(ctx, addr) {
+			missing = append(missing, addr)
+		}
+	}
+	return missing, nil
+}
+
+func (s *CachingStorage) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	for addr, r := range blocks {
+		success, err := s.StoreAt(ctx, addr, r)
+		if err != nil {
+			return err
+		}
+		if !success {
+			return context.Canceled
+		}
+	}
+	return nil
+}

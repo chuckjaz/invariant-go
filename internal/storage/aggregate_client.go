@@ -46,6 +46,11 @@ func (t *errorTrackingTransport) RoundTrip(req *http.Request) (*http.Response, e
 	return resp, err
 }
 
+type liveServerEntry struct {
+	client        Storage
+	supportsBatch bool
+}
+
 // AggregateClient aggregates a finder, discovery service, and standard storage clients.
 type AggregateClient struct {
 	finder          finder.Finder
@@ -54,8 +59,8 @@ type AggregateClient struct {
 
 	// Live servers cache
 	liveMu      sync.RWMutex
-	liveServers map[string]Storage // Server ID -> Storage client
-	liveIDs     []string           // For round-robin access
+	liveServers map[string]liveServerEntry // Server ID -> Storage client
+	liveIDs     []string                   // For round-robin access
 	liveCounter uint64
 
 	// LRU Cache for block locations
@@ -77,7 +82,7 @@ func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers,
 		finder:          f,
 		discovery:       d,
 		numStoreServers: numStoreServers,
-		liveServers:     make(map[string]Storage),
+		liveServers:     make(map[string]liveServerEntry),
 		maxBlocks:       maxBlocks,
 		lruList:         list.New(),
 		lruMap:          make(map[string]*list.Element),
@@ -123,7 +128,7 @@ func (c *AggregateClient) addLiveServer(serverID string) Storage {
 	c.liveMu.Lock()
 	defer c.liveMu.Unlock()
 	if client, ok := c.liveServers[serverID]; ok {
-		return client
+		return client.client
 	}
 
 	if c.discovery == nil {
@@ -149,7 +154,19 @@ func (c *AggregateClient) addLiveServer(serverID string) Storage {
 
 	// Assuming svc.Address is the base URL
 	client := NewClient(svc.Address, httpClient)
-	c.liveServers[serverID] = client
+
+	supportsBatch := false
+	for _, p := range svc.Protocols {
+		if p == "batch-storage-v1" {
+			supportsBatch = true
+			break
+		}
+	}
+
+	c.liveServers[serverID] = liveServerEntry{
+		client:        client,
+		supportsBatch: supportsBatch,
+	}
 	c.liveIDs = append(c.liveIDs, serverID)
 	return client
 }
@@ -220,11 +237,11 @@ func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	cachedServerIDs := c.getServersForBlock(address)
 	for _, id := range cachedServerIDs {
 		c.liveMu.RLock()
-		client, ok := c.liveServers[id]
+		entry, ok := c.liveServers[id]
 		c.liveMu.RUnlock()
 
 		if ok {
-			val, okOp := doOp(client)
+			val, okOp := doOp(entry.client)
 			if okOp {
 				c.markBlockUsed(address, []string{id})
 				return val, true
@@ -268,11 +285,11 @@ func (c *AggregateClient) readOperation(ctx context.Context, address string,
 
 	for _, id := range liveIDsCopy {
 		c.liveMu.RLock()
-		client, ok := c.liveServers[id]
+		entry, ok := c.liveServers[id]
 		c.liveMu.RUnlock()
 
 		if ok {
-			val, okOp := doOp(client)
+			val, okOp := doOp(entry.client)
 			if okOp {
 				c.markBlockUsed(address, []string{id})
 				return val, true
@@ -367,7 +384,7 @@ func (c *AggregateClient) ensureLiveServers() error {
 }
 
 // writeOperation selects a set of live servers and executes a write operation.
-func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client Storage) (any, error)) (any, error) {
+func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client Storage, supportsBatch bool) (any, error)) (any, error) {
 	err := c.ensureLiveServers()
 	if err != nil {
 		return nil, err
@@ -385,11 +402,11 @@ func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client S
 		id := ids[idx]
 
 		c.liveMu.RLock()
-		client, ok := c.liveServers[id]
+		entry, ok := c.liveServers[id]
 		c.liveMu.RUnlock()
 
 		if ok {
-			res, errOp := doOp(client)
+			res, errOp := doOp(entry.client, entry.supportsBatch)
 			if errOp == nil {
 				c.writtenMu.Lock()
 				c.writtenServers[id] = struct{}{}
@@ -413,7 +430,7 @@ func (c *AggregateClient) Store(ctx context.Context, r io.Reader) (string, error
 	// Typically, we only retry if it fails *before* writing or we copy it.
 	// But `io.Reader` can't be rewound generically.
 	// We'll just try to execute the operation. If it fails, the reader might be consumed.
-	res, err := c.writeOperation(ctx, func(client Storage) (any, error) {
+	res, err := c.writeOperation(ctx, func(client Storage, supportsBatch bool) (any, error) {
 		return client.Store(ctx, r)
 	})
 	if err != nil {
@@ -424,7 +441,7 @@ func (c *AggregateClient) Store(ctx context.Context, r io.Reader) (string, error
 
 // StoreAt saves data at the specified address using round-robined live servers.
 func (c *AggregateClient) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
-	res, err := c.writeOperation(ctx, func(client Storage) (any, error) {
+	res, err := c.writeOperation(ctx, func(client Storage, supportsBatch bool) (any, error) {
 		return client.StoreAt(ctx, address, r)
 	})
 	if err != nil {
@@ -454,11 +471,11 @@ func (c *AggregateClient) Sync(ctx context.Context) error {
 
 	for _, id := range serversToSync {
 		c.liveMu.RLock()
-		client, ok := c.liveServers[id]
+		entry, ok := c.liveServers[id]
 		c.liveMu.RUnlock()
 
 		if ok {
-			if syncClient, isSync := client.(SyncStorage); isSync {
+			if syncClient, isSync := entry.client.(SyncStorage); isSync {
 				if err := syncClient.Sync(ctx); err != nil && firstErr == nil {
 					firstErr = err
 				}
@@ -472,3 +489,67 @@ func (c *AggregateClient) Sync(ctx context.Context) error {
 // Assert that AggregateClient implements the Storage interface
 var _ Storage = (*AggregateClient)(nil)
 var _ SyncStorage = (*AggregateClient)(nil)
+var _ BatchStorage = (*AggregateClient)(nil)
+
+func (c *AggregateClient) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	missing := append([]string(nil), addresses...)
+
+	c.liveMu.RLock()
+	liveIDsCopy := append([]string(nil), c.liveIDs...)
+	c.liveMu.RUnlock()
+
+	for _, id := range liveIDsCopy {
+		if len(missing) == 0 {
+			break
+		}
+
+		c.liveMu.RLock()
+		entry, ok := c.liveServers[id]
+		c.liveMu.RUnlock()
+
+		if !ok {
+			continue
+		}
+
+		if entry.supportsBatch {
+			if batchStore, ok := entry.client.(BatchStorage); ok {
+				newMissing, err := batchStore.BatchHas(ctx, missing)
+				if err == nil {
+					missing = newMissing
+				}
+			}
+		} else {
+			var newMissing []string
+			for _, addr := range missing {
+				if !entry.client.Has(ctx, addr) {
+					newMissing = append(newMissing, addr)
+				}
+			}
+			missing = newMissing
+		}
+	}
+
+	return missing, nil
+}
+
+func (c *AggregateClient) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	_, err := c.writeOperation(ctx, func(client Storage, supportsBatch bool) (any, error) {
+		if supportsBatch {
+			if batchStore, ok := client.(BatchStorage); ok {
+				return true, batchStore.BatchStore(ctx, blocks)
+			}
+		}
+
+		for addr, r := range blocks {
+			success, err := client.StoreAt(ctx, addr, r)
+			if err != nil {
+				return nil, err
+			}
+			if !success {
+				return nil, context.Canceled
+			}
+		}
+		return true, nil
+	})
+	return err
+}

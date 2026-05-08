@@ -155,3 +155,32 @@ func (s *InMemoryStorage) Remove(ctx context.Context, address string) (bool, err
 	delete(s.store, address)
 	return true, nil
 }
+
+func (s *InMemoryStorage) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var missing []string
+	for _, address := range addresses {
+		if _, ok := s.store[address]; !ok {
+			missing = append(missing, address)
+		}
+	}
+	return missing, nil
+}
+
+func (s *InMemoryStorage) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	var errs []error
+	for address, reader := range blocks {
+		success, err := s.StoreAt(ctx, address, reader)
+		if err != nil {
+			errs = append(errs, err)
+		} else if !success {
+			errs = append(errs, context.Canceled) // Or some meaningful error if StoreAt fails
+		}
+	}
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}

@@ -88,7 +88,7 @@ func main() {
 		// Configure the storage server to use discovery for fetching
 		server.WithDiscovery(dClient)
 
-		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1", "batch-storage-v1"})
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -96,7 +96,7 @@ func main() {
 
 		if name != "" {
 			go func() {
-				err := discovery.RegisterName(context.Background(), dClient, name, id, []string{"storage-v1"})
+				err := discovery.RegisterName(context.Background(), dClient, name, id, []string{"storage-v1", "batch-storage-v1"})
 				if err != nil {
 					log.Printf("Failed to register name %q: %v", name, err)
 				} else {

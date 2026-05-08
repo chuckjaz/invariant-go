@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"invariant/internal/httputil"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strconv"
 )
 
@@ -201,5 +203,78 @@ func (c *Client) Subscribe(ctx context.Context) <-chan string {
 	return ch
 }
 
-// Assert that Client implements the Storage interface
-var _ Storage = (*Client)(nil)
+// Assert that Client implements the BatchStorage interface
+var _ BatchStorage = (*Client)(nil)
+
+func (c *Client) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	data, err := json.Marshal(addresses)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/batch_has", c.baseURL), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var missing []string
+	if err := json.NewDecoder(resp.Body).Decode(&missing); err != nil {
+		return nil, err
+	}
+
+	return missing, nil
+}
+
+func (c *Client) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+
+	go func() {
+		var err error
+		for addr, r := range blocks {
+			h := make(textproto.MIMEHeader)
+			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, addr))
+			part, errPart := writer.CreatePart(h)
+			if errPart != nil {
+				err = errPart
+				break
+			}
+			if _, errCopy := io.Copy(part, r); errCopy != nil {
+				err = errCopy
+				break
+			}
+		}
+		if err == nil {
+			err = writer.Close()
+		}
+		pw.CloseWithError(err)
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/batch_store", c.baseURL), pr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	return nil
+}

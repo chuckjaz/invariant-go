@@ -276,7 +276,11 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go up.progressLoop(ctx)
 
-	rootEntry, err := up.processDirectory(ctx, absPath, absPath, storageClient, rules, opts)
+	batchingStore := NewBatchingTrackingStorage(storageClient, &up.BytesUploaded)
+
+	rootEntry, err := up.processDirectory(ctx, absPath, absPath, batchingStore, rules, opts)
+	batchingStore.FlushHas(ctx)
+	batchingStore.FlushStore(ctx)
 	cancel()
 
 	if err != nil {
@@ -330,7 +334,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("%s\n", out)
 }
 
-func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath string, store storage.Storage, rules *filetree.IgnoreMatcher, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
+func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath string, store *BatchingTrackingStorage, rules *filetree.IgnoreMatcher, opts content.WriterOptions) (*filetree.DirectoryEntry, error) {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err
@@ -438,12 +442,7 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 		atomic.AddUint64(&u.BlocksUploaded, 1)
 		atomic.AddUint64(&u.DirsCreated, 1)
 
-		trackingStore := &trackingStorage{
-			Storage:       store,
-			bytesUploaded: &u.BytesUploaded,
-		}
-
-		_, err = content.Write(strings.NewReader(string(data)), trackingStore, opts)
+		_, err = content.Write(strings.NewReader(string(data)), store, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -468,7 +467,7 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 	}, nil
 }
 
-func (u *uploader) processFile(ctx context.Context, filePath, name string, store storage.Storage, opts content.WriterOptions) (*filetree.FileEntry, error) {
+func (u *uploader) processFile(ctx context.Context, filePath, name string, store *BatchingTrackingStorage, opts content.WriterOptions) (*filetree.FileEntry, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return nil, err
@@ -533,12 +532,7 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 		// Rewind the open file descriptor to push natively without OOM allocations globally
 		file.Seek(0, io.SeekStart)
 
-		trackingStore := &trackingStorage{
-			Storage:       store,
-			bytesUploaded: &u.BytesUploaded,
-		}
-
-		_, err = content.Write(file, trackingStore, opts)
+		_, err = content.Write(file, store, opts)
 		if err != nil {
 			return nil, err
 		}

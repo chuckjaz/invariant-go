@@ -65,3 +65,52 @@ func (j *JoinedStorage) Size(ctx context.Context, address string) (int64, bool) 
 	}
 	return 0, false
 }
+
+func (j *JoinedStorage) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	var primaryMissing []string
+	if batchPrimary, ok := j.primary.(BatchStorage); ok {
+		missing, err := batchPrimary.BatchHas(ctx, addresses)
+		if err != nil {
+			return nil, err
+		}
+		primaryMissing = missing
+	} else {
+		for _, addr := range addresses {
+			if !j.primary.Has(ctx, addr) {
+				primaryMissing = append(primaryMissing, addr)
+			}
+		}
+	}
+
+	if j.secondary == nil || len(primaryMissing) == 0 {
+		return primaryMissing, nil
+	}
+
+	var finalMissing []string
+	if batchSecondary, ok := j.secondary.(BatchStorage); ok {
+		return batchSecondary.BatchHas(ctx, primaryMissing)
+	} else {
+		for _, addr := range primaryMissing {
+			if !j.secondary.Has(ctx, addr) {
+				finalMissing = append(finalMissing, addr)
+			}
+		}
+	}
+	return finalMissing, nil
+}
+
+func (j *JoinedStorage) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	if batchPrimary, ok := j.primary.(BatchStorage); ok {
+		return batchPrimary.BatchStore(ctx, blocks)
+	}
+	for addr, r := range blocks {
+		success, err := j.primary.StoreAt(ctx, addr, r)
+		if err != nil {
+			return err
+		}
+		if !success {
+			return context.Canceled
+		}
+	}
+	return nil
+}

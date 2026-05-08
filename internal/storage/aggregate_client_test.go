@@ -29,8 +29,8 @@ func TestAggregateClient_StoreAndRead(t *testing.T) {
 	ts2, _ := setupTestServer()
 	defer ts2.Close()
 
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 2, 10)
 
@@ -72,7 +72,7 @@ func TestAggregateClient_LiveServerFailure(t *testing.T) {
 	d := discovery.NewInMemoryDiscovery()
 	ts1, _ := setupTestServer()
 
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 2, 10)
 
@@ -106,7 +106,7 @@ func TestAggregateClient_LiveServerFailure(t *testing.T) {
 	// We add a new server to discovery.
 	ts2, _ := setupTestServer()
 	defer ts2.Close()
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
 
 	_, err = c.Store(context.Background(), bytes.NewReader([]byte("new stuff")))
 	if err != nil {
@@ -133,7 +133,7 @@ func TestAggregateClient_FinderFallback(t *testing.T) {
 	ts1, store1 := setupTestServer()
 	defer ts1.Close()
 
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node-remote", Address: ts1.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "node-remote", Address: ts1.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
 
 	addr, _ := store1.Store(context.Background(), bytes.NewReader([]byte("remote block")))
 
@@ -196,7 +196,7 @@ func TestAggregateClient_BadTransportHandling(t *testing.T) {
 	defer ts.Close()
 
 	d := discovery.NewInMemoryDiscovery()
-	d.Register(context.Background(), discovery.ServiceRegistration{ID: "bad-node", Address: ts.URL, Protocols: []string{"storage-v1"}})
+	d.Register(context.Background(), discovery.ServiceRegistration{ID: "bad-node", Address: ts.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
 
 	c := NewAggregateClient(nil, d, 1, 10)
 
@@ -228,7 +228,7 @@ func TestAggregateClient_Sync(t *testing.T) {
 	mock := &mockSyncStorage{InMemoryStorage: NewInMemoryStorage()}
 
 	c.liveMu.Lock()
-	c.liveServers["mock1"] = mock
+	c.liveServers["mock1"] = liveServerEntry{client: mock, supportsBatch: false}
 	c.liveIDs = []string{"mock1"}
 	c.liveMu.Unlock()
 

@@ -55,3 +55,17 @@ func (s *hashingStorage) List(ctx context.Context, chunkSize int) <-chan []strin
 func (s *hashingStorage) Remove(ctx context.Context, address string) (bool, error) {
 	return true, nil
 }
+
+func (s *hashingStorage) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
+	return addresses, nil
+}
+
+func (s *hashingStorage) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {
+	for addr, r := range blocks {
+		_, err := s.StoreAt(ctx, addr, r)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
