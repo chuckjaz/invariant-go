@@ -17,7 +17,8 @@ func (s *RepMaxSplitter) Split(r io.Reader, opts WriterOptions, writeChunk func(
 	horizon := 128 * 1024 // 128KB horizon
 	gearTable := &FastContentDefinedChunkerGearTable
 
-	chunker := NewRepMaxContentDefinedChunker(bufio.NewReader(r), gearTable, minChunkSize, horizon)
+	peekSizeBytes := 2*minChunkSize + horizon
+	chunker := NewRepMaxContentDefinedChunker(bufio.NewReaderSize(r, peekSizeBytes), gearTable, minChunkSize, horizon)
 
 	var blocks []BlockListItem
 
