@@ -228,12 +228,14 @@ func (c *Client) BatchHas(ctx context.Context, addresses []string) ([]string, er
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	var missing []string
-	if err := json.NewDecoder(resp.Body).Decode(&missing); err != nil {
+	var respData struct {
+		Missing []string `json:"missing"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
 		return nil, err
 	}
 
-	return missing, nil
+	return respData.Missing, nil
 }
 
 func (c *Client) BatchStore(ctx context.Context, blocks map[string]io.Reader) error {

@@ -280,7 +280,10 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 	rootEntry, err := up.processDirectory(ctx, absPath, absPath, batchingStore, rules, opts)
 	batchingStore.FlushHas(ctx)
-	batchingStore.FlushStore(ctx)
+	if err := batchingStore.FlushStore(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "FlushStore failed: %v\n", err)
+		os.Exit(1)
+	}
 	cancel()
 
 	if err != nil {

@@ -233,6 +233,8 @@ func (c *AggregateClient) getServersForBlock(address string) []string {
 func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	doOp func(client Storage) (any, bool)) (any, bool) {
 
+	_ = c.ensureLiveServers()
+
 	// 1. Check LRU
 	cachedServerIDs := c.getServersForBlock(address)
 	for _, id := range cachedServerIDs {
@@ -493,6 +495,8 @@ var _ BatchStorage = (*AggregateClient)(nil)
 
 func (c *AggregateClient) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
 	missing := append([]string(nil), addresses...)
+
+	_ = c.ensureLiveServers()
 
 	c.liveMu.RLock()
 	liveIDsCopy := append([]string(nil), c.liveIDs...)
