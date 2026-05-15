@@ -105,3 +105,43 @@ interface StorageFetchRequest {
 ## `HEAD /fetch`
 
 Responds with status 200 if `POST /fetch` is supported or 404 otherwise.
+
+## `POST /batch_has`
+
+An optionally supported request to check the existence of multiple blobs in a single request.
+
+### Request
+
+The request body is a JSON array of string addresses.
+
+```ts
+type BatchHasRequest = string[];
+```
+
+### Required response headers
+
+| Header         | Value                     |
+| -------------- | ------------------------- |
+| Content-Type   | application/json          |
+
+### Response
+
+The response is a JSON object with a `missing` field containing an array of string addresses that are missing from the store.
+
+```ts
+interface BatchHasResponse {
+    missing: string[];
+}
+```
+
+## `POST /batch_store`
+
+An optionally supported request to store multiple blobs in a single request.
+
+### Request
+
+The request is a `multipart/form-data` payload. Each part represents a blob to store. The `name` parameter of the `Content-Disposition` header for each part must be the `:address` (content hash) of the blob data contained in that part.
+
+### Required response headers
+
+Responds with status 200 OK on success. No specific headers are required.
