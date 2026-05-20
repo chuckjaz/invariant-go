@@ -1,0 +1,304 @@
+package kv
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"time"
+
+	"invariant/internal/storage"
+)
+
+// ValueThreshold is the size limit for storing values inline in the B-Tree node.
+const ValueThreshold = 1024 // 1K
+
+type BTreeKey struct {
+	Key      string    `json:"k"`
+	Sequence uint64    `json:"s"`
+	Time     time.Time `json:"t"`
+}
+
+// CompareBTreeKey compares two keys.
+// Primary sort is Key ascending.
+// Secondary sort is Sequence descending, so the latest version of a key comes first.
+func CompareBTreeKey(a, b BTreeKey) int {
+	if a.Key < b.Key {
+		return -1
+	}
+	if a.Key > b.Key {
+		return 1
+	}
+	if a.Sequence > b.Sequence {
+		return -1
+	}
+	if a.Sequence < b.Sequence {
+		return 1
+	}
+	return 0
+}
+
+type ValueEntry struct {
+	Inline  []byte `json:"in,omitempty"`
+	Address string `json:"addr,omitempty"`
+}
+
+type BTreeNode struct {
+	IsLeaf      bool         `json:"leaf"`
+	Keys        []BTreeKey   `json:"keys"`
+	Children    []string     `json:"children,omitempty"`
+	Values      []ValueEntry `json:"values,omitempty"`
+	LastJournal string       `json:"lastJournal,omitempty"`
+}
+
+func (n *BTreeNode) Serialize() ([]byte, error) {
+	return json.Marshal(n)
+}
+
+func DeserializeBTreeNode(data []byte) (*BTreeNode, error) {
+	var n BTreeNode
+	if err := json.Unmarshal(data, &n); err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+type BTree struct {
+	store   storage.Storage
+	maxKeys int
+}
+
+func NewBTree(store storage.Storage, maxKeys int) *BTree {
+	if maxKeys < 3 {
+		maxKeys = 3
+	}
+	return &BTree{
+		store:   store,
+		maxKeys: maxKeys,
+	}
+}
+
+func (b *BTree) loadNode(ctx context.Context, address string) (*BTreeNode, error) {
+	rc, ok := b.store.Get(ctx, address)
+	if !ok {
+		return nil, fmt.Errorf("node not found: %s", address)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+	return DeserializeBTreeNode(data)
+}
+
+func (b *BTree) saveNode(ctx context.Context, node *BTreeNode) (string, error) {
+	data, err := node.Serialize()
+	if err != nil {
+		return "", err
+	}
+	return b.store.Store(ctx, bytes.NewReader(data))
+}
+
+// Search returns the value entry for the latest sequence of the given key.
+func (b *BTree) Search(ctx context.Context, rootAddr string, key string) (ValueEntry, bool, error) {
+	if rootAddr == "" {
+		return ValueEntry{}, false, nil
+	}
+	currAddr := rootAddr
+	for {
+		node, err := b.loadNode(ctx, currAddr)
+		if err != nil {
+			return ValueEntry{}, false, err
+		}
+
+		i := 0
+		for i < len(node.Keys) && node.Keys[i].Key < key {
+			i++
+		}
+
+		if node.IsLeaf {
+			// In a leaf, check if we found the key. Since sequences are descending,
+			// the first one we find is the latest sequence for that key.
+			if i < len(node.Keys) && node.Keys[i].Key == key {
+				return node.Values[i], true, nil
+			}
+			return ValueEntry{}, false, nil
+		}
+
+		// It's an internal node. Descend to the appropriate child.
+		// If node.Keys[i].Key == key, since sequence descending means first match might be exact,
+		// but in B+Tree internal nodes just guide us to leaves. We follow child i.
+		currAddr = node.Children[i]
+	}
+}
+
+// InsertBatch inserts multiple records functionally and returns the new root address.
+func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Record, lastJournal string) (string, error) {
+	var root *BTreeNode
+	if rootAddr == "" {
+		root = &BTreeNode{IsLeaf: true, LastJournal: lastJournal}
+	} else {
+		var err error
+		root, err = b.loadNode(ctx, rootAddr)
+		if err != nil {
+			return "", err
+		}
+		// Copy root to functional update
+		root = cloneNode(root)
+		root.LastJournal = lastJournal
+	}
+
+	for _, rec := range records {
+		valEntry := ValueEntry{}
+		if len(rec.Value) > ValueThreshold {
+			addr, err := b.store.Store(ctx, bytes.NewReader(rec.Value))
+			if err != nil {
+				return "", err
+			}
+			valEntry.Address = addr
+		} else {
+			valEntry.Inline = rec.Value
+		}
+
+		k := BTreeKey{Key: rec.Key, Sequence: rec.Sequence, Time: rec.Time}
+		var err error
+		root, err = b.insert(ctx, root, k, valEntry)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return b.saveNode(ctx, root)
+}
+
+func cloneNode(n *BTreeNode) *BTreeNode {
+	c := &BTreeNode{
+		IsLeaf:      n.IsLeaf,
+		LastJournal: n.LastJournal,
+	}
+	c.Keys = append([]BTreeKey(nil), n.Keys...)
+	if n.IsLeaf {
+		c.Values = append([]ValueEntry(nil), n.Values...)
+	} else {
+		c.Children = append([]string(nil), n.Children...)
+	}
+	return c
+}
+
+func (b *BTree) insert(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, error) {
+	// A functional insert that might split the node.
+	// We will use a standard B-tree insertion approach, but return the modified node (or a new root if it splits).
+	// Since we need to save children as we go back up, we actually have to write the children to storage and update their addresses.
+	// Let's implement a recursive insert.
+
+	newNode, splitKey, splitChild, err := b.insertRecursive(ctx, node, key, val)
+	if err != nil {
+		return nil, err
+	}
+
+	if splitChild != "" {
+		// The root split, create a new root
+		newRoot := &BTreeNode{
+			IsLeaf:      false,
+			Keys:        []BTreeKey{splitKey},
+			Children:    []string{"", splitChild}, // Left child address will be filled after saving the split left half. Wait, no, newNode is the left half!
+			LastJournal: node.LastJournal,         // carry it up
+		}
+
+		leftAddr, err := b.saveNode(ctx, newNode)
+		if err != nil {
+			return nil, err
+		}
+		newRoot.Children[0] = leftAddr
+		return newRoot, nil
+	}
+
+	return newNode, nil
+}
+
+func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, BTreeKey, string, error) {
+	node = cloneNode(node) // functional copy
+
+	i := 0
+	for i < len(node.Keys) && CompareBTreeKey(key, node.Keys[i]) > 0 {
+		i++
+	}
+
+	if node.IsLeaf {
+		// Insert into leaf
+		if i < len(node.Keys) && CompareBTreeKey(key, node.Keys[i]) == 0 {
+			// Update existing (though sequence should usually prevent exact matches, unless same seq is pushed)
+			node.Values[i] = val
+		} else {
+			// Insert new
+			node.Keys = append(node.Keys[:i], append([]BTreeKey{key}, node.Keys[i:]...)...)
+			node.Values = append(node.Values[:i], append([]ValueEntry{val}, node.Values[i:]...)...)
+		}
+	} else {
+		// Insert into internal node
+		childAddr := node.Children[i]
+		child, err := b.loadNode(ctx, childAddr)
+		if err != nil {
+			return nil, BTreeKey{}, "", err
+		}
+
+		newChild, splitKey, splitRightAddr, err := b.insertRecursive(ctx, child, key, val)
+		if err != nil {
+			return nil, BTreeKey{}, "", err
+		}
+
+		newChildAddr, err := b.saveNode(ctx, newChild)
+		if err != nil {
+			return nil, BTreeKey{}, "", err
+		}
+
+		node.Children[i] = newChildAddr
+
+		if splitRightAddr != "" {
+			// Child split, we need to insert splitKey and splitRightAddr into this node
+			node.Keys = append(node.Keys[:i], append([]BTreeKey{splitKey}, node.Keys[i:]...)...)
+			node.Children = append(node.Children[:i+1], append([]string{splitRightAddr}, node.Children[i+1:]...)...)
+		}
+	}
+
+	// Check if this node needs to split
+	if len(node.Keys) > b.maxKeys {
+		mid := len(node.Keys) / 2
+		splitKey := node.Keys[mid]
+
+		rightNode := &BTreeNode{IsLeaf: node.IsLeaf}
+
+		if node.IsLeaf {
+			// B+Tree leaf split: right node keeps the mid key
+			rightNode.Keys = append([]BTreeKey(nil), node.Keys[mid:]...)
+			rightNode.Values = append([]ValueEntry(nil), node.Values[mid:]...)
+
+			node.Keys = node.Keys[:mid]
+			node.Values = node.Values[:mid]
+		} else {
+			// Internal node split: right node does not keep the mid key
+			rightNode.Keys = append([]BTreeKey(nil), node.Keys[mid+1:]...)
+			rightNode.Children = append([]string(nil), node.Children[mid+1:]...)
+
+			node.Keys = node.Keys[:mid]
+			node.Children = node.Children[:mid+1]
+		}
+
+		rightAddr, err := b.saveNode(ctx, rightNode)
+		if err != nil {
+			return nil, BTreeKey{}, "", err
+		}
+
+		return node, splitKey, rightAddr, nil
+	}
+
+	return node, BTreeKey{}, "", nil
+}
+
+type Record struct {
+	Key      string
+	Sequence uint64
+	Time     time.Time
+	Value    []byte
+}
