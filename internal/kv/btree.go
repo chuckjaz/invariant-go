@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	"invariant/internal/storage"
 )
@@ -15,9 +14,8 @@ import (
 const ValueThreshold = 1024 // 1K
 
 type BTreeKey struct {
-	Key      string    `json:"k"`
-	Sequence uint64    `json:"s"`
-	Time     time.Time `json:"t"`
+	Key      string `json:"k"`
+	Sequence uint64 `json:"s"`
 }
 
 // CompareBTreeKey compares two keys.
@@ -161,7 +159,7 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Reco
 			valEntry.Inline = rec.Value
 		}
 
-		k := BTreeKey{Key: rec.Key, Sequence: rec.Sequence, Time: rec.Time}
+		k := BTreeKey{Key: rec.Key, Sequence: rec.Sequence}
 		var err error
 		root, err = b.insert(ctx, root, k, valEntry)
 		if err != nil {
@@ -299,6 +297,5 @@ func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeK
 type Record struct {
 	Key      string
 	Sequence uint64
-	Time     time.Time
 	Value    []byte
 }

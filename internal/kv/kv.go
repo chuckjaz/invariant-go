@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -104,7 +103,6 @@ func (s *Store) Put(ctx context.Context, key string, value []byte) (uint64, erro
 	rec := Record{
 		Key:      key,
 		Sequence: seq,
-		Time:     time.Now(),
 		Value:    value,
 	}
 

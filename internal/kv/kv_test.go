@@ -12,7 +12,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	ctx := context.Background()
 	storeClient := storage.NewInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
-	
+
 	// Create store
 	s, err := NewStore(ctx, slotClient, "test-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 
 	// Force B-Tree retrieval by clearing cache
 	s.cache = NewCache(1000)
-	
+
 	val3, err := s.Get(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Get 3 (from BTree) failed: %v", err)
