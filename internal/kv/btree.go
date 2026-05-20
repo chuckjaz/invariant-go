@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"invariant/internal/content"
 	"invariant/internal/storage"
 )
 
@@ -38,8 +39,8 @@ func CompareBTreeKey(a, b BTreeKey) int {
 }
 
 type ValueEntry struct {
-	Inline  []byte `json:"in,omitempty"`
-	Address string `json:"addr,omitempty"`
+	Inline []byte               `json:"in,omitempty"`
+	Link   *content.ContentLink `json:"link,omitempty"`
 }
 
 type BTreeNode struct {
@@ -150,11 +151,11 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Reco
 	for _, rec := range records {
 		valEntry := ValueEntry{}
 		if len(rec.Value) > ValueThreshold {
-			addr, err := b.store.Store(ctx, bytes.NewReader(rec.Value))
+			link, err := content.Write(bytes.NewReader(rec.Value), b.store, content.WriterOptions{})
 			if err != nil {
 				return "", err
 			}
-			valEntry.Address = addr
+			valEntry.Link = &link
 		} else {
 			valEntry.Inline = rec.Value
 		}

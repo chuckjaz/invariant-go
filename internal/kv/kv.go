@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"invariant/internal/content"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -191,10 +192,10 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("key not found: %s", key)
 	}
 
-	if valEntry.Address != "" {
-		rc, ok := s.storage.Get(ctx, valEntry.Address)
-		if !ok {
-			return nil, fmt.Errorf("value block not found: %s", valEntry.Address)
+	if valEntry.Link != nil {
+		rc, err := content.Read(*valEntry.Link, s.storage, s.slotClient)
+		if err != nil {
+			return nil, fmt.Errorf("value block not found: %v", err)
 		}
 		defer rc.Close()
 		return io.ReadAll(rc)
