@@ -44,11 +44,11 @@ type ValueEntry struct {
 }
 
 type BTreeNode struct {
-	IsLeaf      bool         `json:"leaf"`
-	Keys        []BTreeKey   `json:"keys"`
-	Children    []string     `json:"children,omitempty"`
-	Values      []ValueEntry `json:"values,omitempty"`
-	LastJournal string       `json:"lastJournal,omitempty"`
+	IsLeaf      bool                 `json:"leaf"`
+	Keys        []BTreeKey           `json:"keys"`
+	Children    []string             `json:"children,omitempty"`
+	Values      []ValueEntry         `json:"values,omitempty"`
+	LastJournal *content.ContentLink `json:"lastJournal,omitempty"`
 }
 
 func (n *BTreeNode) Serialize() ([]byte, error) {
@@ -133,7 +133,7 @@ func (b *BTree) Search(ctx context.Context, rootAddr string, key string) (ValueE
 }
 
 // InsertBatch inserts multiple records functionally and returns the new root address.
-func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Record, lastJournal string) (string, error) {
+func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Record, lastJournal *content.ContentLink) (string, error) {
 	var root *BTreeNode
 	if rootAddr == "" {
 		root = &BTreeNode{IsLeaf: true, LastJournal: lastJournal}

@@ -56,7 +56,7 @@ func NewStore(
 	}
 	s.bTreeRoot = rootAddr
 
-	var lastJournal string
+	var lastJournal *content.ContentLink
 	if s.bTreeRoot != "" {
 		// 2. Load B-Tree root to get LastJournal
 		rootNode, err := s.btree.loadNode(ctx, s.bTreeRoot)

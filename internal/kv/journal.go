@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"invariant/internal/content"
 	"invariant/internal/storage"
 )
 
 type JournalHeader struct {
-	PreviousJournal string `json:"prev,omitempty"`
+	PreviousJournal *content.ContentLink `json:"prev,omitempty"`
 }
 
 type JournalEntry struct {
@@ -28,12 +29,12 @@ type Journal struct {
 	currentFile     *os.File
 	currentPath     string
 	currentEncoder  *json.Encoder
-	previousJournal string
+	previousJournal *content.ContentLink
 	entries         int
 	maxEntries      int
 }
 
-func NewJournal(baseDir string, store storage.Storage, previousJournal string, maxEntries int) (*Journal, error) {
+func NewJournal(baseDir string, store storage.Storage, previousJournal *content.ContentLink, maxEntries int) (*Journal, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
@@ -105,12 +106,12 @@ func (j *Journal) Flush(ctx context.Context) error {
 		return err
 	}
 
-	addr, err := j.storage.Store(ctx, bytes.NewReader(data))
+	link, err := content.Write(bytes.NewReader(data), j.storage, content.WriterOptions{})
 	if err != nil {
 		return err
 	}
 
-	j.previousJournal = addr
+	j.previousJournal = &link
 
 	// Delete the local file since it's uploaded
 	os.Remove(j.currentPath)
@@ -125,13 +126,13 @@ func (j *Journal) Close() error {
 	return nil
 }
 
-func (j *Journal) PreviousJournal() string {
+func (j *Journal) PreviousJournal() *content.ContentLink {
 	return j.previousJournal
 }
 
 // SetPreviousJournal updates the journal pointer, used after B-tree merge.
-func (j *Journal) SetPreviousJournal(addr string) {
-	j.previousJournal = addr
+func (j *Journal) SetPreviousJournal(link *content.ContentLink) {
+	j.previousJournal = link
 }
 
 // LoadLocalJournals reads all local un-flushed journals.
