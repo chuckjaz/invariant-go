@@ -2,6 +2,7 @@ package kv
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
@@ -21,7 +22,7 @@ type Store struct {
 	journal    *Journal
 	btree      *BTree
 	cache      *Cache
-	bTreeRoot  string
+	bTreeRoot  *content.ContentLink
 	seqCounter uint64
 
 	pendingRecords      []Record
@@ -38,6 +39,7 @@ func NewStore(
 	maxCacheSize int,
 	bTreeMergeThreshold int,
 	journalFlushThreshold int,
+	opts content.WriterOptions,
 ) (*Store, error) {
 	s := &Store{
 		slotClient:          slotClient,
@@ -45,21 +47,27 @@ func NewStore(
 		slotAuth:            slotAuth,
 		storage:             storage,
 		cache:               NewCache(maxCacheSize),
-		btree:               NewBTree(storage, 100), // MaxKeys = 100
+		btree:               NewBTree(storage, slotClient, 100, opts), // MaxKeys = 100
 		bTreeMergeThreshold: bTreeMergeThreshold,
 	}
 
 	// 1. Get B-Tree root from slot
-	rootAddr, err := slotClient.Get(ctx, slotID)
+	rootAddrStr, err := slotClient.Get(ctx, slotID)
 	if err != nil && err != slots.ErrSlotNotFound {
 		return nil, err
 	}
-	s.bTreeRoot = rootAddr
+
+	if rootAddrStr != "" {
+		s.bTreeRoot = &content.ContentLink{}
+		if err := json.Unmarshal([]byte(rootAddrStr), s.bTreeRoot); err != nil {
+			return nil, fmt.Errorf("failed to parse slot data as ContentLink: %v", err)
+		}
+	}
 
 	var lastJournal *content.ContentLink
-	if s.bTreeRoot != "" {
+	if s.bTreeRoot != nil {
 		// 2. Load B-Tree root to get LastJournal
-		rootNode, err := s.btree.loadNode(ctx, s.bTreeRoot)
+		rootNode, err := s.btree.loadNode(ctx, *s.bTreeRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +75,7 @@ func NewStore(
 	}
 
 	// 3. Initialize Journal
-	j, err := NewJournal(journalDir, storage, lastJournal, journalFlushThreshold)
+	j, err := NewJournal(journalDir, storage, lastJournal, journalFlushThreshold, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -152,17 +160,24 @@ func (s *Store) mergeToBTree(ctx context.Context) error {
 	}
 
 	// Update slot
-	if s.bTreeRoot == "" {
-		err = s.slotClient.Create(ctx, s.slotID, newRoot, "")
+	newRootBytes, err := json.Marshal(newRoot)
+	if err != nil {
+		return err
+	}
+	newRootStr := string(newRootBytes)
+
+	if s.bTreeRoot == nil {
+		err = s.slotClient.Create(ctx, s.slotID, newRootStr, "")
 	} else {
-		err = s.slotClient.Update(ctx, s.slotID, newRoot, s.bTreeRoot, s.slotAuth)
+		oldRootBytes, _ := json.Marshal(s.bTreeRoot)
+		err = s.slotClient.Update(ctx, s.slotID, newRootStr, string(oldRootBytes), s.slotAuth)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Update local state
-	s.bTreeRoot = newRoot
+	s.bTreeRoot = &newRoot
 	maxSeq := s.pendingRecords[len(s.pendingRecords)-1].Sequence
 	s.pendingRecords = nil
 

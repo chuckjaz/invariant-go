@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"invariant/internal/content"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -14,7 +15,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store
-	s, err := NewStore(ctx, slotClient, "test-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2)
+	s, err := NewStore(ctx, slotClient, "test-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}

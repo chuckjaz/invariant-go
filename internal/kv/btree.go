@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"invariant/internal/content"
+	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
@@ -44,11 +45,11 @@ type ValueEntry struct {
 }
 
 type BTreeNode struct {
-	IsLeaf      bool                 `json:"leaf"`
-	Keys        []BTreeKey           `json:"keys"`
-	Children    []string             `json:"children,omitempty"`
-	Values      []ValueEntry         `json:"values,omitempty"`
-	LastJournal *content.ContentLink `json:"lastJournal,omitempty"`
+	IsLeaf      bool                  `json:"leaf"`
+	Keys        []BTreeKey            `json:"keys"`
+	Children    []content.ContentLink `json:"children,omitempty"`
+	Values      []ValueEntry          `json:"values,omitempty"`
+	LastJournal *content.ContentLink  `json:"lastJournal,omitempty"`
 }
 
 func (n *BTreeNode) Serialize() ([]byte, error) {
@@ -64,24 +65,28 @@ func DeserializeBTreeNode(data []byte) (*BTreeNode, error) {
 }
 
 type BTree struct {
-	store   storage.Storage
-	maxKeys int
+	store      storage.Storage
+	slotClient slots.Slots
+	maxKeys    int
+	opts       content.WriterOptions
 }
 
-func NewBTree(store storage.Storage, maxKeys int) *BTree {
+func NewBTree(store storage.Storage, slotClient slots.Slots, maxKeys int, opts content.WriterOptions) *BTree {
 	if maxKeys < 3 {
 		maxKeys = 3
 	}
 	return &BTree{
-		store:   store,
-		maxKeys: maxKeys,
+		store:      store,
+		slotClient: slotClient,
+		maxKeys:    maxKeys,
+		opts:       opts,
 	}
 }
 
-func (b *BTree) loadNode(ctx context.Context, address string) (*BTreeNode, error) {
-	rc, ok := b.store.Get(ctx, address)
-	if !ok {
-		return nil, fmt.Errorf("node not found: %s", address)
+func (b *BTree) loadNode(ctx context.Context, link content.ContentLink) (*BTreeNode, error) {
+	rc, err := content.Read(link, b.store, b.slotClient)
+	if err != nil {
+		return nil, fmt.Errorf("node not found: %s", link.Address)
 	}
 	defer rc.Close()
 	data, err := io.ReadAll(rc)
@@ -91,20 +96,20 @@ func (b *BTree) loadNode(ctx context.Context, address string) (*BTreeNode, error
 	return DeserializeBTreeNode(data)
 }
 
-func (b *BTree) saveNode(ctx context.Context, node *BTreeNode) (string, error) {
+func (b *BTree) saveNode(ctx context.Context, node *BTreeNode) (content.ContentLink, error) {
 	data, err := node.Serialize()
 	if err != nil {
-		return "", err
+		return content.ContentLink{}, err
 	}
-	return b.store.Store(ctx, bytes.NewReader(data))
+	return content.Write(bytes.NewReader(data), b.store, b.opts)
 }
 
 // Search returns the value entry for the latest sequence of the given key.
-func (b *BTree) Search(ctx context.Context, rootAddr string, key string) (ValueEntry, bool, error) {
-	if rootAddr == "" {
+func (b *BTree) Search(ctx context.Context, rootAddr *content.ContentLink, key string) (ValueEntry, bool, error) {
+	if rootAddr == nil {
 		return ValueEntry{}, false, nil
 	}
-	currAddr := rootAddr
+	currAddr := *rootAddr
 	for {
 		node, err := b.loadNode(ctx, currAddr)
 		if err != nil {
@@ -133,15 +138,15 @@ func (b *BTree) Search(ctx context.Context, rootAddr string, key string) (ValueE
 }
 
 // InsertBatch inserts multiple records functionally and returns the new root address.
-func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Record, lastJournal *content.ContentLink) (string, error) {
+func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, records []Record, lastJournal *content.ContentLink) (content.ContentLink, error) {
 	var root *BTreeNode
-	if rootAddr == "" {
+	if rootAddr == nil {
 		root = &BTreeNode{IsLeaf: true, LastJournal: lastJournal}
 	} else {
 		var err error
-		root, err = b.loadNode(ctx, rootAddr)
+		root, err = b.loadNode(ctx, *rootAddr)
 		if err != nil {
-			return "", err
+			return content.ContentLink{}, err
 		}
 		// Copy root to functional update
 		root = cloneNode(root)
@@ -151,9 +156,9 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Reco
 	for _, rec := range records {
 		valEntry := ValueEntry{}
 		if len(rec.Value) > ValueThreshold {
-			link, err := content.Write(bytes.NewReader(rec.Value), b.store, content.WriterOptions{})
+			link, err := content.Write(bytes.NewReader(rec.Value), b.store, b.opts)
 			if err != nil {
-				return "", err
+				return content.ContentLink{}, err
 			}
 			valEntry.Link = &link
 		} else {
@@ -164,7 +169,7 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr string, records []Reco
 		var err error
 		root, err = b.insert(ctx, root, k, valEntry)
 		if err != nil {
-			return "", err
+			return content.ContentLink{}, err
 		}
 	}
 
@@ -180,7 +185,7 @@ func cloneNode(n *BTreeNode) *BTreeNode {
 	if n.IsLeaf {
 		c.Values = append([]ValueEntry(nil), n.Values...)
 	} else {
-		c.Children = append([]string(nil), n.Children...)
+		c.Children = append([]content.ContentLink(nil), n.Children...)
 	}
 	return c
 }
@@ -196,13 +201,13 @@ func (b *BTree) insert(ctx context.Context, node *BTreeNode, key BTreeKey, val V
 		return nil, err
 	}
 
-	if splitChild != "" {
+	if splitChild != nil {
 		// The root split, create a new root
 		newRoot := &BTreeNode{
 			IsLeaf:      false,
 			Keys:        []BTreeKey{splitKey},
-			Children:    []string{"", splitChild}, // Left child address will be filled after saving the split left half. Wait, no, newNode is the left half!
-			LastJournal: node.LastJournal,         // carry it up
+			Children:    []content.ContentLink{{}, *splitChild}, // Left child address will be filled after saving the split left half. Wait, no, newNode is the left half!
+			LastJournal: node.LastJournal,                       // carry it up
 		}
 
 		leftAddr, err := b.saveNode(ctx, newNode)
@@ -216,7 +221,7 @@ func (b *BTree) insert(ctx context.Context, node *BTreeNode, key BTreeKey, val V
 	return newNode, nil
 }
 
-func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, BTreeKey, string, error) {
+func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, BTreeKey, *content.ContentLink, error) {
 	node = cloneNode(node) // functional copy
 
 	i := 0
@@ -239,25 +244,25 @@ func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeK
 		childAddr := node.Children[i]
 		child, err := b.loadNode(ctx, childAddr)
 		if err != nil {
-			return nil, BTreeKey{}, "", err
+			return nil, BTreeKey{}, nil, err
 		}
 
 		newChild, splitKey, splitRightAddr, err := b.insertRecursive(ctx, child, key, val)
 		if err != nil {
-			return nil, BTreeKey{}, "", err
+			return nil, BTreeKey{}, nil, err
 		}
 
 		newChildAddr, err := b.saveNode(ctx, newChild)
 		if err != nil {
-			return nil, BTreeKey{}, "", err
+			return nil, BTreeKey{}, nil, err
 		}
 
 		node.Children[i] = newChildAddr
 
-		if splitRightAddr != "" {
+		if splitRightAddr != nil {
 			// Child split, we need to insert splitKey and splitRightAddr into this node
 			node.Keys = append(node.Keys[:i], append([]BTreeKey{splitKey}, node.Keys[i:]...)...)
-			node.Children = append(node.Children[:i+1], append([]string{splitRightAddr}, node.Children[i+1:]...)...)
+			node.Children = append(node.Children[:i+1], append([]content.ContentLink{*splitRightAddr}, node.Children[i+1:]...)...)
 		}
 	}
 
@@ -278,7 +283,7 @@ func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeK
 		} else {
 			// Internal node split: right node does not keep the mid key
 			rightNode.Keys = append([]BTreeKey(nil), node.Keys[mid+1:]...)
-			rightNode.Children = append([]string(nil), node.Children[mid+1:]...)
+			rightNode.Children = append([]content.ContentLink(nil), node.Children[mid+1:]...)
 
 			node.Keys = node.Keys[:mid]
 			node.Children = node.Children[:mid+1]
@@ -286,13 +291,13 @@ func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeK
 
 		rightAddr, err := b.saveNode(ctx, rightNode)
 		if err != nil {
-			return nil, BTreeKey{}, "", err
+			return nil, BTreeKey{}, nil, err
 		}
 
-		return node, splitKey, rightAddr, nil
+		return node, splitKey, &rightAddr, nil
 	}
 
-	return node, BTreeKey{}, "", nil
+	return node, BTreeKey{}, nil, nil
 }
 
 type Record struct {

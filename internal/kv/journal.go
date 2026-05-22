@@ -32,9 +32,10 @@ type Journal struct {
 	previousJournal *content.ContentLink
 	entries         int
 	maxEntries      int
+	opts            content.WriterOptions
 }
 
-func NewJournal(baseDir string, store storage.Storage, previousJournal *content.ContentLink, maxEntries int) (*Journal, error) {
+func NewJournal(baseDir string, store storage.Storage, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
@@ -43,6 +44,7 @@ func NewJournal(baseDir string, store storage.Storage, previousJournal *content.
 		storage:         store,
 		previousJournal: previousJournal,
 		maxEntries:      maxEntries,
+		opts:            opts,
 	}
 	if err := j.openNewFile(); err != nil {
 		return nil, err
@@ -106,7 +108,7 @@ func (j *Journal) Flush(ctx context.Context) error {
 		return err
 	}
 
-	link, err := content.Write(bytes.NewReader(data), j.storage, content.WriterOptions{})
+	link, err := content.Write(bytes.NewReader(data), j.storage, j.opts)
 	if err != nil {
 		return err
 	}

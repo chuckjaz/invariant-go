@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 
+	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
 	"invariant/internal/kv"
@@ -50,6 +51,15 @@ func main() {
 	flag.StringVar(&finderName, "finder", "finder", "Name of the finder service")
 	var slotsName string
 	flag.StringVar(&slotsName, "slots", "slots", "Name of the slots service")
+
+	var compress bool
+	flag.BoolVar(&compress, "compress", false, "Compress the written content")
+	var encrypt bool
+	flag.BoolVar(&encrypt, "encrypt", false, "Encrypt the written content")
+	var keyPolicyStr string
+	flag.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
+	var keyStr string
+	flag.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	flag.Parse()
 
@@ -109,6 +119,39 @@ func main() {
 	// Create slots client
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
+	var writerOpts content.WriterOptions
+	if compress {
+		writerOpts.CompressAlgorithm = "gzip"
+	}
+	if encrypt {
+		writerOpts.EncryptAlgorithm = "aes-256-cbc"
+
+		switch keyPolicyStr {
+		case "RandomPerBlock":
+			writerOpts.KeyPolicy = content.RandomPerBlock
+		case "RandomAllKey":
+			writerOpts.KeyPolicy = content.RandomAllKey
+		case "Deterministic":
+			writerOpts.KeyPolicy = content.Deterministic
+		case "SuppliedAllKey":
+			writerOpts.KeyPolicy = content.SuppliedAllKey
+			if keyStr == "" {
+				log.Fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
+			}
+
+			importHex, err := hex.DecodeString(keyStr)
+			if err != nil {
+				log.Fatalf("Error parsing --key: %v", err)
+			}
+			if len(importHex) != 32 {
+				log.Fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
+			}
+			writerOpts.SuppliedKey = importHex
+		default:
+			log.Fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
+		}
+	}
+
 	store, err := kv.NewStore(
 		context.Background(),
 		slotsClient,
@@ -119,6 +162,7 @@ func main() {
 		maxCacheSize,
 		btreeThreshold,
 		journalThreshold,
+		writerOpts,
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize KV store: %v", err)
