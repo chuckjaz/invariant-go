@@ -109,32 +109,58 @@ func (b *BTree) Search(ctx context.Context, rootAddr *content.ContentLink, key s
 	if rootAddr == nil {
 		return ValueEntry{}, false, nil
 	}
-	currAddr := *rootAddr
-	for {
-		node, err := b.loadNode(ctx, currAddr)
+	return b.searchRecursive(ctx, *rootAddr, key)
+}
+
+func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, key string) (ValueEntry, bool, error) {
+	node, err := b.loadNode(ctx, addr)
+	if err != nil {
+		return ValueEntry{}, false, err
+	}
+
+	if node.IsLeaf {
+		for i := 0; i < len(node.Keys); i++ {
+			if node.Keys[i].Key == key {
+				return node.Values[i], true, nil
+			}
+			if node.Keys[i].Key > key {
+				break
+			}
+		}
+		return ValueEntry{}, false, nil
+	}
+
+	// Internal node
+	// Find the first child that could contain `key`.
+	i := 0
+	for i < len(node.Keys) && node.Keys[i].Key < key {
+		i++
+	}
+
+	// Child i can contain `key` because its upper bound is node.Keys[i] >= key.
+	// Or if i == len(node.Keys), its upper bound is +infinity.
+	val, found, err := b.searchRecursive(ctx, node.Children[i], key)
+	if err != nil {
+		return ValueEntry{}, false, err
+	}
+	if found {
+		return val, true, nil
+	}
+
+	// If not found in child i, could it be in subsequent children?
+	// Yes, if node.Keys[i].Key == key.
+	for i < len(node.Keys) && node.Keys[i].Key == key {
+		i++
+		val, found, err := b.searchRecursive(ctx, node.Children[i], key)
 		if err != nil {
 			return ValueEntry{}, false, err
 		}
-
-		i := 0
-		for i < len(node.Keys) && node.Keys[i].Key < key {
-			i++
+		if found {
+			return val, true, nil
 		}
-
-		if node.IsLeaf {
-			// In a leaf, check if we found the key. Since sequences are descending,
-			// the first one we find is the latest sequence for that key.
-			if i < len(node.Keys) && node.Keys[i].Key == key {
-				return node.Values[i], true, nil
-			}
-			return ValueEntry{}, false, nil
-		}
-
-		// It's an internal node. Descend to the appropriate child.
-		// If node.Keys[i].Key == key, since sequence descending means first match might be exact,
-		// but in B+Tree internal nodes just guide us to leaves. We follow child i.
-		currAddr = node.Children[i]
 	}
+
+	return ValueEntry{}, false, nil
 }
 
 // InsertBatch inserts multiple records functionally and returns the new root address.

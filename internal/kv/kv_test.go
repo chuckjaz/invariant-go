@@ -2,6 +2,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"invariant/internal/content"
@@ -66,5 +67,87 @@ func TestStore_BasicPutGet(t *testing.T) {
 	}
 	if string(val3) != "again" {
 		t.Errorf("Expected 'again', got %s", string(val3))
+	}
+}
+
+func TestStore_BTreeSplit(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	// Create store. MaxKeys = 100, we need to insert > 100 to cause split. We set mergeThreshold = 10 to merge frequently.
+	s, err := NewStore(ctx, slotClient, "btree-split-slot", nil, "journal-split-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Insert 150 items to trigger B-Tree split
+	for i := range 150 {
+		key := fmt.Sprintf("key-%03d", i)
+		val := fmt.Sprintf("val-%03d", i)
+		_, err := s.Put(ctx, key, []byte(val))
+		if err != nil {
+			t.Fatalf("Put failed at %d: %v", i, err)
+		}
+	}
+
+	// Force B-Tree retrieval by clearing cache
+	s.cache = NewCache(10)
+
+	for i := range 150 {
+		key := fmt.Sprintf("key-%03d", i)
+		expected := fmt.Sprintf("val-%03d", i)
+		val, err := s.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("Get failed at %d: %v", i, err)
+		}
+		if string(val) != expected {
+			t.Errorf("Expected %s, got %s", expected, string(val))
+		}
+	}
+}
+
+func TestStore_JournalRecovery(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	journalDir := t.TempDir()
+
+	// Create first store with very large merge threshold to keep data in journal
+	s1, err := NewStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store 1: %v", err)
+	}
+
+	// Put 10 items
+	for i := range 10 {
+		key := fmt.Sprintf("jkey-%d", i)
+		val := fmt.Sprintf("jval-%d", i)
+		_, err := s1.Put(ctx, key, []byte(val))
+		if err != nil {
+			t.Fatalf("Put failed at %d: %v", i, err)
+		}
+	}
+	s1.Close() // this should close journal files
+
+	// Create second store pointing to same slots and journal directory
+	s2, err := NewStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store 2: %v", err)
+	}
+	defer s2.Close()
+
+	// Ensure items are recovered
+	for i := range 10 {
+		key := fmt.Sprintf("jkey-%d", i)
+		expected := fmt.Sprintf("jval-%d", i)
+		val, err := s2.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("Get recovered failed at %d: %v", i, err)
+		}
+		if string(val) != expected {
+			t.Errorf("Expected %s, got %s", expected, string(val))
+		}
 	}
 }
