@@ -63,13 +63,22 @@ func (c *Cache) Add(rec Record, inBTree bool) {
 
 func (c *Cache) Get(key string) (Record, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	if el, ok := c.items[key]; ok {
-		// We could MoveToFront here, but we are holding an RLock.
-		// For a simple cache, this is fine.
-		return el.Value.(*cacheItem).record, true
+		rec := el.Value.(*cacheItem).record
+		c.mu.RUnlock()
+
+		go func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			// Verify it wasn't removed or replaced before we acquired the write lock
+			if currentEl, stillExists := c.items[key]; stillExists && currentEl == el {
+				c.lruList.MoveToFront(el)
+			}
+		}()
+
+		return rec, true
 	}
+	c.mu.RUnlock()
 	return Record{}, false
 }
 
