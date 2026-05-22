@@ -36,10 +36,15 @@ func main() {
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 
-	var slotID string
-	flag.StringVar(&slotID, "slot-id", "", "Slot ID to use for the B-Tree root (32-byte hex). Randomly generated if not provided.")
-	var slotAuthHex string
-	flag.StringVar(&slotAuthHex, "slot-auth", "", "Hex encoded auth signature for slot updates (if required)")
+	var btreeSlotID string
+	flag.StringVar(&btreeSlotID, "btree-slot-id", "", "Slot ID to use for the B-Tree root (32-byte hex). Randomly generated if not provided.")
+	var btreeSlotAuthHex string
+	flag.StringVar(&btreeSlotAuthHex, "btree-slot-auth", "", "Hex encoded auth signature for B-Tree slot updates (if required)")
+
+	var journalSlotID string
+	flag.StringVar(&journalSlotID, "journal-slot-id", "", "Slot ID to use for the Journal (32-byte hex). Randomly generated if not provided.")
+	var journalSlotAuthHex string
+	flag.StringVar(&journalSlotAuthHex, "journal-slot-auth", "", "Hex encoded auth signature for Journal slot updates (if required)")
 
 	var btreeThreshold int
 	flag.IntVar(&btreeThreshold, "btree-threshold", 1000, "Number of pending records before merging into B-Tree")
@@ -63,16 +68,28 @@ func main() {
 
 	flag.Parse()
 
-	if slotID == "" {
-		slotID = generateID()
+	if btreeSlotID == "" {
+		btreeSlotID = generateID()
+	}
+	if journalSlotID == "" {
+		journalSlotID = generateID()
 	}
 
-	var slotAuth []byte
-	if slotAuthHex != "" {
+	var btreeSlotAuth []byte
+	if btreeSlotAuthHex != "" {
 		var err error
-		slotAuth, err = hex.DecodeString(slotAuthHex)
+		btreeSlotAuth, err = hex.DecodeString(btreeSlotAuthHex)
 		if err != nil {
-			log.Fatalf("Invalid slot-auth hex: %v", err)
+			log.Fatalf("Invalid btree-slot-auth hex: %v", err)
+		}
+	}
+
+	var journalSlotAuth []byte
+	if journalSlotAuthHex != "" {
+		var err error
+		journalSlotAuth, err = hex.DecodeString(journalSlotAuthHex)
+		if err != nil {
+			log.Fatalf("Invalid journal-slot-auth hex: %v", err)
 		}
 	}
 
@@ -155,8 +172,10 @@ func main() {
 	store, err := kv.NewStore(
 		context.Background(),
 		slotsClient,
-		slotID,
-		slotAuth,
+		btreeSlotID,
+		btreeSlotAuth,
+		journalSlotID,
+		journalSlotAuth,
 		storageClient,
 		dir,
 		maxCacheSize,
@@ -195,6 +214,6 @@ func main() {
 	}
 
 	server := kv.NewServer(store)
-	log.Printf("KV service listening on :%d (Slot ID: %s)...", actualPort, slotID)
+	log.Printf("KV service listening on :%d (BTree Slot ID: %s, Journal Slot ID: %s)...", actualPort, btreeSlotID, journalSlotID)
 	log.Fatal(http.Serve(listener, server))
 }

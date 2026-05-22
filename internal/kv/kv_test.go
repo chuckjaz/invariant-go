@@ -15,7 +15,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store
-	s, err := NewStore(ctx, slotClient, "test-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2, content.WriterOptions{})
+	s, err := NewStore(ctx, slotClient, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"invariant/internal/content"
+	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
@@ -26,6 +27,9 @@ type JournalEntry struct {
 type Journal struct {
 	baseDir         string
 	storage         storage.Storage
+	slotClient      slots.Slots
+	slotID          string
+	slotAuth        []byte
 	currentFile     *os.File
 	currentPath     string
 	currentEncoder  *json.Encoder
@@ -35,13 +39,16 @@ type Journal struct {
 	opts            content.WriterOptions
 }
 
-func NewJournal(baseDir string, store storage.Storage, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
+func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
 	j := &Journal{
 		baseDir:         baseDir,
 		storage:         store,
+		slotClient:      slotClient,
+		slotID:          slotID,
+		slotAuth:        slotAuth,
 		previousJournal: previousJournal,
 		maxEntries:      maxEntries,
 		opts:            opts,
@@ -109,6 +116,22 @@ func (j *Journal) Flush(ctx context.Context) error {
 	}
 
 	link, err := content.Write(bytes.NewReader(data), j.storage, j.opts)
+	if err != nil {
+		return err
+	}
+
+	linkBytes, err := json.Marshal(link)
+	if err != nil {
+		return err
+	}
+	newJournalStr := string(linkBytes)
+
+	if j.previousJournal == nil {
+		err = j.slotClient.Create(ctx, j.slotID, newJournalStr, "")
+	} else {
+		oldLinkBytes, _ := json.Marshal(j.previousJournal)
+		err = j.slotClient.Update(ctx, j.slotID, newJournalStr, string(oldLinkBytes), j.slotAuth)
+	}
 	if err != nil {
 		return err
 	}

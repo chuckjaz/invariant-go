@@ -14,16 +14,18 @@ import (
 
 // Store represents the Key-Value service orchestration layer.
 type Store struct {
-	mu         sync.RWMutex
-	slotClient slots.Slots
-	slotID     string
-	slotAuth   []byte
-	storage    storage.Storage
-	journal    *Journal
-	btree      *BTree
-	cache      *Cache
-	bTreeRoot  *content.ContentLink
-	seqCounter uint64
+	mu              sync.RWMutex
+	slotClient      slots.Slots
+	btreeSlotID     string
+	btreeSlotAuth   []byte
+	journalSlotID   string
+	journalSlotAuth []byte
+	storage         storage.Storage
+	journal         *Journal
+	btree           *BTree
+	cache           *Cache
+	bTreeRoot       *content.ContentLink
+	seqCounter      uint64
 
 	pendingRecords      []Record
 	bTreeMergeThreshold int
@@ -32,8 +34,10 @@ type Store struct {
 func NewStore(
 	ctx context.Context,
 	slotClient slots.Slots,
-	slotID string,
-	slotAuth []byte,
+	btreeSlotID string,
+	btreeSlotAuth []byte,
+	journalSlotID string,
+	journalSlotAuth []byte,
 	storage storage.Storage,
 	journalDir string,
 	maxCacheSize int,
@@ -43,8 +47,10 @@ func NewStore(
 ) (*Store, error) {
 	s := &Store{
 		slotClient:          slotClient,
-		slotID:              slotID,
-		slotAuth:            slotAuth,
+		btreeSlotID:         btreeSlotID,
+		btreeSlotAuth:       btreeSlotAuth,
+		journalSlotID:       journalSlotID,
+		journalSlotAuth:     journalSlotAuth,
 		storage:             storage,
 		cache:               NewCache(maxCacheSize),
 		btree:               NewBTree(storage, slotClient, 100, opts), // MaxKeys = 100
@@ -52,7 +58,7 @@ func NewStore(
 	}
 
 	// 1. Get B-Tree root from slot
-	rootAddrStr, err := slotClient.Get(ctx, slotID)
+	rootAddrStr, err := slotClient.Get(ctx, btreeSlotID)
 	if err != nil && err != slots.ErrSlotNotFound {
 		return nil, err
 	}
@@ -65,17 +71,20 @@ func NewStore(
 	}
 
 	var lastJournal *content.ContentLink
-	if s.bTreeRoot != nil {
-		// 2. Load B-Tree root to get LastJournal
-		rootNode, err := s.btree.loadNode(ctx, *s.bTreeRoot)
-		if err != nil {
-			return nil, err
+	journalAddrStr, err := slotClient.Get(ctx, journalSlotID)
+	if err != nil && err != slots.ErrSlotNotFound {
+		return nil, err
+	}
+
+	if journalAddrStr != "" {
+		lastJournal = &content.ContentLink{}
+		if err := json.Unmarshal([]byte(journalAddrStr), lastJournal); err != nil {
+			return nil, fmt.Errorf("failed to parse journal slot data as ContentLink: %v", err)
 		}
-		lastJournal = rootNode.LastJournal
 	}
 
 	// 3. Initialize Journal
-	j, err := NewJournal(journalDir, storage, lastJournal, journalFlushThreshold, opts)
+	j, err := NewJournal(journalDir, storage, slotClient, journalSlotID, journalSlotAuth, lastJournal, journalFlushThreshold, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +176,10 @@ func (s *Store) mergeToBTree(ctx context.Context) error {
 	newRootStr := string(newRootBytes)
 
 	if s.bTreeRoot == nil {
-		err = s.slotClient.Create(ctx, s.slotID, newRootStr, "")
+		err = s.slotClient.Create(ctx, s.btreeSlotID, newRootStr, "")
 	} else {
 		oldRootBytes, _ := json.Marshal(s.bTreeRoot)
-		err = s.slotClient.Update(ctx, s.slotID, newRootStr, string(oldRootBytes), s.slotAuth)
+		err = s.slotClient.Update(ctx, s.btreeSlotID, newRootStr, string(oldRootBytes), s.btreeSlotAuth)
 	}
 	if err != nil {
 		return err
