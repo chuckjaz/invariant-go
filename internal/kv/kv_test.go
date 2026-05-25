@@ -151,3 +151,52 @@ func TestStore_JournalRecovery(t *testing.T) {
 		}
 	}
 }
+
+func TestStore_RemoteJournalRecovery(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	journalDir := t.TempDir()
+
+	// Create first store: large bTree merge threshold to prevent merges,
+	// small journal flush threshold to force multiple uploads.
+	s1, err := NewStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, journalDir, 1000000, 1000, 2, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store 1: %v", err)
+	}
+
+	// Put 10 items. With threshold 2, this will flush and create multiple remote journal pages.
+	for i := range 10 {
+		key := fmt.Sprintf("remkey-%d", i)
+		val := fmt.Sprintf("remval-%d", i)
+		_, err := s1.Put(ctx, key, []byte(val))
+		if err != nil {
+			t.Fatalf("Put failed at %d: %v", i, err)
+		}
+	}
+	s1.Close()
+
+	// To ensure we're relying entirely on remote journals and not local ones,
+	// we create the second store using a completely empty local directory.
+	emptyDir := t.TempDir()
+
+	// Create second store pointing to the same slots, but empty local directory.
+	s2, err := NewStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, emptyDir, 1000000, 1000, 2, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store 2: %v", err)
+	}
+	defer s2.Close()
+
+	// Ensure items are recovered from storage
+	for i := range 10 {
+		key := fmt.Sprintf("remkey-%d", i)
+		expected := fmt.Sprintf("remval-%d", i)
+		val, err := s2.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("Get recovered failed at %d: %v", i, err)
+		}
+		if string(val) != expected {
+			t.Errorf("Expected %s, got %s", expected, string(val))
+		}
+	}
+}

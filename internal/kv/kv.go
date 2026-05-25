@@ -90,13 +90,29 @@ func NewStore(
 	}
 	s.journal = j
 
-	// 4. Load local journals and replay into cache
+	var btreeLastJournal *content.ContentLink
+	if s.bTreeRoot != nil {
+		rootNode, err := s.btree.loadNode(ctx, *s.bTreeRoot)
+		if err == nil && rootNode != nil {
+			btreeLastJournal = rootNode.LastJournal
+		}
+	}
+
+	// 4. Load remote journals and replay into cache
+	remoteRecs, err := s.journal.LoadRemoteJournals(ctx, btreeLastJournal)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Load local journals and replay into cache
 	localRecs, err := s.journal.LoadLocalJournals()
 	if err != nil {
 		return nil, err
 	}
 
-	for _, rec := range localRecs {
+	allRecs := append(remoteRecs, localRecs...)
+
+	for _, rec := range allRecs {
 		if rec.Sequence > s.seqCounter {
 			s.seqCounter = rec.Sequence
 		}

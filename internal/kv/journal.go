@@ -186,3 +186,48 @@ func (j *Journal) LoadLocalJournals() ([]Record, error) {
 	}
 	return records, nil
 }
+
+// LoadRemoteJournals reads journal entries from storage, starting at the current previousJournal
+// and going backward until it hits stopAt (or nil). It returns the records in chronological order.
+func (j *Journal) LoadRemoteJournals(ctx context.Context, stopAt *content.ContentLink) ([]Record, error) {
+	var pages [][]Record
+	curr := j.previousJournal
+
+	for curr != nil {
+		if stopAt != nil && curr.Address == stopAt.Address {
+			break
+		}
+
+		rc, err := content.Read(*curr, j.storage, j.slotClient)
+		if err != nil {
+			return nil, err
+		}
+
+		scanner := bufio.NewScanner(rc)
+		var pageRecs []Record
+		var prevLink *content.ContentLink
+
+		for scanner.Scan() {
+			var entry JournalEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
+				if entry.Header != nil {
+					prevLink = entry.Header.PreviousJournal
+				}
+				if entry.Record != nil {
+					pageRecs = append(pageRecs, *entry.Record)
+				}
+			}
+		}
+		rc.Close()
+
+		pages = append(pages, pageRecs)
+		curr = prevLink
+	}
+
+	// Pages are from newest to oldest. We want chronological order (oldest to newest).
+	var records []Record
+	for i := len(pages) - 1; i >= 0; i-- {
+		records = append(records, pages[i]...)
+	}
+	return records, nil
+}
