@@ -163,19 +163,68 @@ func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, k
 	return ValueEntry{}, false, nil
 }
 
-// InsertBatch inserts multiple records functionally and returns the new root address.
+type MemNode struct {
+	IsLeaf      bool
+	Keys        []BTreeKey
+	MemChildren []*MemNode
+	Links       []content.ContentLink
+	Values      []ValueEntry
+	LastJournal *content.ContentLink
+}
+
+func (b *BTree) loadMemNode(ctx context.Context, link content.ContentLink) (*MemNode, error) {
+	node, err := b.loadNode(ctx, link)
+	if err != nil {
+		return nil, err
+	}
+	mn := &MemNode{
+		IsLeaf:      node.IsLeaf,
+		Keys:        append([]BTreeKey(nil), node.Keys...),
+		Values:      append([]ValueEntry(nil), node.Values...),
+		LastJournal: node.LastJournal,
+	}
+	if !node.IsLeaf {
+		mn.Links = append([]content.ContentLink(nil), node.Children...)
+		mn.MemChildren = make([]*MemNode, len(node.Children))
+	}
+	return mn, nil
+}
+
+func (b *BTree) saveMemNode(ctx context.Context, mn *MemNode) (content.ContentLink, error) {
+	if !mn.IsLeaf {
+		for i, child := range mn.MemChildren {
+			if child != nil {
+				link, err := b.saveMemNode(ctx, child)
+				if err != nil {
+					return content.ContentLink{}, err
+				}
+				mn.Links[i] = link
+			}
+		}
+	}
+
+	node := &BTreeNode{
+		IsLeaf:      mn.IsLeaf,
+		Keys:        mn.Keys,
+		Values:      mn.Values,
+		Children:    mn.Links,
+		LastJournal: mn.LastJournal,
+	}
+	return b.saveNode(ctx, node)
+}
+
+// InsertBatch inserts multiple records functionally by caching nodes in memory,
+// and returning the new root address after saving all modified nodes.
 func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, records []Record, lastJournal *content.ContentLink) (content.ContentLink, error) {
-	var root *BTreeNode
+	var root *MemNode
 	if rootAddr == nil {
-		root = &BTreeNode{IsLeaf: true, LastJournal: lastJournal}
+		root = &MemNode{IsLeaf: true, LastJournal: lastJournal}
 	} else {
 		var err error
-		root, err = b.loadNode(ctx, *rootAddr)
+		root, err = b.loadMemNode(ctx, *rootAddr)
 		if err != nil {
 			return content.ContentLink{}, err
 		}
-		// Copy root to functional update
-		root = cloneNode(root)
 		root.LastJournal = lastJournal
 	}
 
@@ -192,138 +241,87 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, 
 		}
 
 		k := BTreeKey{Key: rec.Key, Sequence: rec.Sequence}
-		var err error
-		root, err = b.insert(ctx, root, k, valEntry)
+		splitKey, splitRight, err := b.insertMemRecursive(ctx, root, k, valEntry)
 		if err != nil {
 			return content.ContentLink{}, err
 		}
-	}
 
-	return b.saveNode(ctx, root)
-}
-
-func cloneNode(n *BTreeNode) *BTreeNode {
-	c := &BTreeNode{
-		IsLeaf:      n.IsLeaf,
-		LastJournal: n.LastJournal,
-	}
-	c.Keys = append([]BTreeKey(nil), n.Keys...)
-	if n.IsLeaf {
-		c.Values = append([]ValueEntry(nil), n.Values...)
-	} else {
-		c.Children = append([]content.ContentLink(nil), n.Children...)
-	}
-	return c
-}
-
-func (b *BTree) insert(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, error) {
-	// A functional insert that might split the node.
-	// We will use a standard B-tree insertion approach, but return the modified node (or a new root if it splits).
-	// Since we need to save children as we go back up, we actually have to write the children to storage and update their addresses.
-	// Let's implement a recursive insert.
-
-	newNode, splitKey, splitChild, err := b.insertRecursive(ctx, node, key, val)
-	if err != nil {
-		return nil, err
-	}
-
-	if splitChild != nil {
-		// The root split, create a new root
-		newRoot := &BTreeNode{
-			IsLeaf:      false,
-			Keys:        []BTreeKey{splitKey},
-			Children:    []content.ContentLink{{}, *splitChild}, // Left child address will be filled after saving the split left half. Wait, no, newNode is the left half!
-			LastJournal: node.LastJournal,                       // carry it up
+		if splitRight != nil {
+			newRoot := &MemNode{
+				IsLeaf:      false,
+				Keys:        []BTreeKey{splitKey},
+				Links:       make([]content.ContentLink, 2),
+				MemChildren: []*MemNode{root, splitRight},
+				LastJournal: root.LastJournal,
+			}
+			root = newRoot
 		}
-
-		leftAddr, err := b.saveNode(ctx, newNode)
-		if err != nil {
-			return nil, err
-		}
-		newRoot.Children[0] = leftAddr
-		return newRoot, nil
 	}
 
-	return newNode, nil
+	return b.saveMemNode(ctx, root)
 }
 
-func (b *BTree) insertRecursive(ctx context.Context, node *BTreeNode, key BTreeKey, val ValueEntry) (*BTreeNode, BTreeKey, *content.ContentLink, error) {
-	node = cloneNode(node) // functional copy
-
+func (b *BTree) insertMemRecursive(ctx context.Context, node *MemNode, key BTreeKey, val ValueEntry) (BTreeKey, *MemNode, error) {
 	i := 0
 	for i < len(node.Keys) && CompareBTreeKey(key, node.Keys[i]) > 0 {
 		i++
 	}
 
 	if node.IsLeaf {
-		// Insert into leaf
 		if i < len(node.Keys) && CompareBTreeKey(key, node.Keys[i]) == 0 {
-			// Update existing (though sequence should usually prevent exact matches, unless same seq is pushed)
 			node.Values[i] = val
 		} else {
-			// Insert new
 			node.Keys = append(node.Keys[:i], append([]BTreeKey{key}, node.Keys[i:]...)...)
 			node.Values = append(node.Values[:i], append([]ValueEntry{val}, node.Values[i:]...)...)
 		}
 	} else {
-		// Insert into internal node
-		childAddr := node.Children[i]
-		child, err := b.loadNode(ctx, childAddr)
-		if err != nil {
-			return nil, BTreeKey{}, nil, err
+		if node.MemChildren[i] == nil {
+			child, err := b.loadMemNode(ctx, node.Links[i])
+			if err != nil {
+				return BTreeKey{}, nil, err
+			}
+			node.MemChildren[i] = child
 		}
 
-		newChild, splitKey, splitRightAddr, err := b.insertRecursive(ctx, child, key, val)
+		child := node.MemChildren[i]
+		splitKey, splitRightMem, err := b.insertMemRecursive(ctx, child, key, val)
 		if err != nil {
-			return nil, BTreeKey{}, nil, err
+			return BTreeKey{}, nil, err
 		}
 
-		newChildAddr, err := b.saveNode(ctx, newChild)
-		if err != nil {
-			return nil, BTreeKey{}, nil, err
-		}
-
-		node.Children[i] = newChildAddr
-
-		if splitRightAddr != nil {
-			// Child split, we need to insert splitKey and splitRightAddr into this node
+		if splitRightMem != nil {
 			node.Keys = append(node.Keys[:i], append([]BTreeKey{splitKey}, node.Keys[i:]...)...)
-			node.Children = append(node.Children[:i+1], append([]content.ContentLink{*splitRightAddr}, node.Children[i+1:]...)...)
+			node.Links = append(node.Links[:i+1], append([]content.ContentLink{{}}, node.Links[i+1:]...)...)
+			node.MemChildren = append(node.MemChildren[:i+1], append([]*MemNode{splitRightMem}, node.MemChildren[i+1:]...)...)
 		}
 	}
 
-	// Check if this node needs to split
 	if len(node.Keys) > b.maxKeys {
 		mid := len(node.Keys) / 2
 		splitKey := node.Keys[mid]
 
-		rightNode := &BTreeNode{IsLeaf: node.IsLeaf}
+		rightNode := &MemNode{IsLeaf: node.IsLeaf}
 
 		if node.IsLeaf {
-			// B+Tree leaf split: right node keeps the mid key
 			rightNode.Keys = append([]BTreeKey(nil), node.Keys[mid:]...)
 			rightNode.Values = append([]ValueEntry(nil), node.Values[mid:]...)
 
 			node.Keys = node.Keys[:mid]
 			node.Values = node.Values[:mid]
 		} else {
-			// Internal node split: right node does not keep the mid key
 			rightNode.Keys = append([]BTreeKey(nil), node.Keys[mid+1:]...)
-			rightNode.Children = append([]content.ContentLink(nil), node.Children[mid+1:]...)
+			rightNode.Links = append([]content.ContentLink(nil), node.Links[mid+1:]...)
+			rightNode.MemChildren = append([]*MemNode(nil), node.MemChildren[mid+1:]...)
 
 			node.Keys = node.Keys[:mid]
-			node.Children = node.Children[:mid+1]
+			node.Links = node.Links[:mid+1]
+			node.MemChildren = node.MemChildren[:mid+1]
 		}
 
-		rightAddr, err := b.saveNode(ctx, rightNode)
-		if err != nil {
-			return nil, BTreeKey{}, nil, err
-		}
-
-		return node, splitKey, &rightAddr, nil
+		return splitKey, rightNode, nil
 	}
 
-	return node, BTreeKey{}, nil, nil
+	return BTreeKey{}, nil, nil
 }
 
 type Record struct {
