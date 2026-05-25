@@ -224,7 +224,7 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	rootAddr := s.bTreeRoot
 	s.mu.RUnlock()
 
-	valEntry, found, err := s.btree.Search(ctx, rootAddr, key)
+	valEntry, seq, found, err := s.btree.Search(ctx, rootAddr, key)
 	if err != nil {
 		return nil, err
 	}
@@ -232,14 +232,28 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("key not found: %s", key)
 	}
 
+	var valBytes []byte
 	if valEntry.Link != nil {
 		rc, err := content.Read(*valEntry.Link, s.storage, s.slotClient)
 		if err != nil {
 			return nil, fmt.Errorf("value block not found: %v", err)
 		}
 		defer rc.Close()
-		return io.ReadAll(rc)
+		valBytes, err = io.ReadAll(rc)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		valBytes = valEntry.Inline
 	}
 
-	return valEntry.Inline, nil
+	// Add the missed item to the cache. Since it was found in the BTree,
+	// mark inBTree as true.
+	s.cache.Add(Record{
+		Key:      key,
+		Sequence: seq,
+		Value:    valBytes,
+	}, true)
+
+	return valBytes, nil
 }

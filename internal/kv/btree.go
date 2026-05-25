@@ -104,30 +104,30 @@ func (b *BTree) saveNode(ctx context.Context, node *BTreeNode) (content.ContentL
 	return content.Write(bytes.NewReader(data), b.store, b.opts)
 }
 
-// Search returns the value entry for the latest sequence of the given key.
-func (b *BTree) Search(ctx context.Context, rootAddr *content.ContentLink, key string) (ValueEntry, bool, error) {
+// Search returns the value entry and sequence for the latest sequence of the given key.
+func (b *BTree) Search(ctx context.Context, rootAddr *content.ContentLink, key string) (ValueEntry, uint64, bool, error) {
 	if rootAddr == nil {
-		return ValueEntry{}, false, nil
+		return ValueEntry{}, 0, false, nil
 	}
 	return b.searchRecursive(ctx, *rootAddr, key)
 }
 
-func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, key string) (ValueEntry, bool, error) {
+func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, key string) (ValueEntry, uint64, bool, error) {
 	node, err := b.loadNode(ctx, addr)
 	if err != nil {
-		return ValueEntry{}, false, err
+		return ValueEntry{}, 0, false, err
 	}
 
 	if node.IsLeaf {
 		for i := 0; i < len(node.Keys); i++ {
 			if node.Keys[i].Key == key {
-				return node.Values[i], true, nil
+				return node.Values[i], node.Keys[i].Sequence, true, nil
 			}
 			if node.Keys[i].Key > key {
 				break
 			}
 		}
-		return ValueEntry{}, false, nil
+		return ValueEntry{}, 0, false, nil
 	}
 
 	// Internal node
@@ -139,28 +139,28 @@ func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, k
 
 	// Child i can contain `key` because its upper bound is node.Keys[i] >= key.
 	// Or if i == len(node.Keys), its upper bound is +infinity.
-	val, found, err := b.searchRecursive(ctx, node.Children[i], key)
+	val, seq, found, err := b.searchRecursive(ctx, node.Children[i], key)
 	if err != nil {
-		return ValueEntry{}, false, err
+		return ValueEntry{}, 0, false, err
 	}
 	if found {
-		return val, true, nil
+		return val, seq, true, nil
 	}
 
 	// If not found in child i, could it be in subsequent children?
 	// Yes, if node.Keys[i].Key == key.
 	for i < len(node.Keys) && node.Keys[i].Key == key {
 		i++
-		val, found, err := b.searchRecursive(ctx, node.Children[i], key)
+		val, seq, found, err := b.searchRecursive(ctx, node.Children[i], key)
 		if err != nil {
-			return ValueEntry{}, false, err
+			return ValueEntry{}, 0, false, err
 		}
 		if found {
-			return val, true, nil
+			return val, seq, true, nil
 		}
 	}
 
-	return ValueEntry{}, false, nil
+	return ValueEntry{}, 0, false, nil
 }
 
 type MemNode struct {
