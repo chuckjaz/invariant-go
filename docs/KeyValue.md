@@ -49,3 +49,40 @@ The request requires the `key` query parameter. The body of the request is the o
 ### Response
 
 The body of the response is empty. The `X-Sequence` header contains the sequence number of the update, which monotonically increases for each successful put operation.
+
+## `POST /batch_get`
+
+Retrieve the values associated with a batch of keys.
+
+### Request
+
+The request body should be a JSON array containing the keys to retrieve:
+
+```json
+[
+  "key1",
+  "key2"
+]
+```
+
+### Response
+
+The response is a `multipart/form-data` payload where each part corresponds to a found key. The part's name is the key, and the part's body is the octet stream value. Keys that are not found are omitted from the response.
+
+## `POST /batch_put`
+
+Store values for a batch of keys.
+
+### Request
+
+The request should be a `multipart/form-data` payload. Each part's name represents the key, and the part's body is the octet stream to store as the value.
+
+### Required response headers
+
+| Header        | Value                     |
+| ------------- | ------------------------- |
+| X-Sequence    | `:sequence`               |
+
+### Response
+
+The body of the response is empty. The `X-Sequence` header contains the highest sequence number resulting from the batch update.
