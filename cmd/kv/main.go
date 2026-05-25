@@ -196,7 +196,7 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	myID := generateID()
-	err = discovery.AdvertiseAndRegister(context.Background(), disc, myID, advertiseAddr, actualPort, []string{"kv-v1"})
+	err = discovery.AdvertiseAndRegister(context.Background(), disc, myID, advertiseAddr, actualPort, []string{"kv-v1", "kv-batch-v1"})
 	if err != nil {
 		log.Fatalf("Failed to register with discovery service: %v", err)
 	}
@@ -204,7 +204,7 @@ func main() {
 
 	if name != "" {
 		go func() {
-			err := discovery.RegisterName(context.Background(), disc, name, myID, []string{"kv-v1"})
+			err := discovery.RegisterName(context.Background(), disc, name, myID, []string{"kv-v1", "kv-batch-v1"})
 			if err != nil {
 				log.Printf("Failed to register name %q: %v", name, err)
 			} else {
