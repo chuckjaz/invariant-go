@@ -32,7 +32,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	}
 
 	// Get "hello"
-	val, err := s.Get(ctx, "hello")
+	val, _, err := s.Get(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	}
 
 	// Get "hello" should return "again"
-	val2, err := s.Get(ctx, "hello")
+	val2, _, err := s.Get(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Get 2 failed: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	// Force B-Tree retrieval by clearing cache
 	s.cache = NewCache(1000)
 
-	val3, err := s.Get(ctx, "hello")
+	val3, _, err := s.Get(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Get 3 (from BTree) failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestStore_BTreeSplit(t *testing.T) {
 	for i := range 150 {
 		key := fmt.Sprintf("key-%03d", i)
 		expected := fmt.Sprintf("val-%03d", i)
-		val, err := s.Get(ctx, key)
+		val, _, err := s.Get(ctx, key)
 		if err != nil {
 			t.Fatalf("Get failed at %d: %v", i, err)
 		}
@@ -142,7 +142,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("jkey-%d", i)
 		expected := fmt.Sprintf("jval-%d", i)
-		val, err := s2.Get(ctx, key)
+		val, _, err := s2.Get(ctx, key)
 		if err != nil {
 			t.Fatalf("Get recovered failed at %d: %v", i, err)
 		}
@@ -191,7 +191,7 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("remkey-%d", i)
 		expected := fmt.Sprintf("remval-%d", i)
-		val, err := s2.Get(ctx, key)
+		val, _, err := s2.Get(ctx, key)
 		if err != nil {
 			t.Fatalf("Get recovered failed at %d: %v", i, err)
 		}

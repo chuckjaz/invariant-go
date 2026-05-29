@@ -213,10 +213,10 @@ func (s *FileKeyValueStore) mergeToBTree(ctx context.Context) error {
 }
 
 // Get retrieves the latest value for a key.
-func (s *FileKeyValueStore) Get(ctx context.Context, key string) ([]byte, error) {
+func (s *FileKeyValueStore) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	// Try cache first
 	if rec, ok := s.cache.Get(key); ok {
-		return rec.Value, nil
+		return rec.Value, rec.Sequence, nil
 	}
 
 	// Cache miss, consult B-Tree
@@ -226,22 +226,22 @@ func (s *FileKeyValueStore) Get(ctx context.Context, key string) ([]byte, error)
 
 	valEntry, seq, found, err := s.btree.Search(ctx, rootAddr, key)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !found {
-		return nil, fmt.Errorf("key not found: %s", key)
+		return nil, 0, fmt.Errorf("key not found: %s", key)
 	}
 
 	var valBytes []byte
 	if valEntry.Link != nil {
 		rc, err := content.Read(*valEntry.Link, s.storage, s.slotClient)
 		if err != nil {
-			return nil, fmt.Errorf("value block not found: %v", err)
+			return nil, 0, fmt.Errorf("value block not found: %v", err)
 		}
 		defer rc.Close()
 		valBytes, err = io.ReadAll(rc)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	} else {
 		valBytes = valEntry.Inline
@@ -255,7 +255,7 @@ func (s *FileKeyValueStore) Get(ctx context.Context, key string) ([]byte, error)
 		Value:    valBytes,
 	}, true)
 
-	return valBytes, nil
+	return valBytes, seq, nil
 }
 
 // BatchPut adds multiple key-value pairs at once.
@@ -274,12 +274,15 @@ func (s *FileKeyValueStore) BatchPut(ctx context.Context, kvs map[string][]byte)
 }
 
 // BatchGet fetches the values for multiple keys at once.
-func (s *FileKeyValueStore) BatchGet(ctx context.Context, keys []string) (map[string][]byte, error) {
-	results := make(map[string][]byte)
+func (s *FileKeyValueStore) BatchGet(ctx context.Context, keys []string) (map[string]ValueWithSequence, error) {
+	results := make(map[string]ValueWithSequence)
 	for _, key := range keys {
-		val, err := s.Get(ctx, key)
+		val, seq, err := s.Get(ctx, key)
 		if err == nil && val != nil {
-			results[key] = val
+			results[key] = ValueWithSequence{
+				Value:    val,
+				Sequence: seq,
+			}
 		}
 	}
 	return results, nil

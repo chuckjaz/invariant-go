@@ -62,12 +62,13 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, err := s.store.Get(r.Context(), key)
+	val, seq, err := s.store.Get(r.Context(), key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
+	w.Header().Set("X-Sequence", fmt.Sprint(seq))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(val)
 }
@@ -152,18 +153,20 @@ func (s *Server) handleBatchGet(w http.ResponseWriter, r *http.Request) {
 		for key, val := range results {
 			h := make(textproto.MIMEHeader)
 			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
+			h.Set("X-Sequence", fmt.Sprint(val.Sequence))
 			part, err := mw.CreatePart(h)
 			if err != nil {
 				continue
 			}
-			part.Write(val)
+			part.Write(val.Value)
 		}
 	} else {
 		for _, key := range keys {
-			val, err := s.store.Get(r.Context(), key)
+			val, seq, err := s.store.Get(r.Context(), key)
 			if err == nil && val != nil {
 				h := make(textproto.MIMEHeader)
 				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
+				h.Set("X-Sequence", fmt.Sprint(seq))
 				part, err := mw.CreatePart(h)
 				if err != nil {
 					continue

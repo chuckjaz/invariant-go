@@ -27,6 +27,7 @@ The request requires the `key` query parameter.
 | Header        | Value                     |
 | ------------- | ------------------------- |
 | Content-Type  | application/octet-stream  |
+| X-Sequence    | `:sequence`               |
 
 ### Response
 
@@ -67,7 +68,7 @@ The request body should be a JSON array containing the keys to retrieve:
 
 ### Response
 
-The response is a `multipart/form-data` payload where each part corresponds to a found key. The part's name is the key, and the part's body is the octet stream value. Keys that are not found are omitted from the response.
+The response is a `multipart/form-data` payload where each part corresponds to a found key. The part's name is the key, and the part's body is the octet stream value. Each part also includes an `X-Sequence` header indicating the sequence number of that specific key's value. Keys that are not found are omitted from the response.
 
 ## `POST /batch_put`
 

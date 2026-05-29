@@ -68,33 +68,42 @@ func (c *Client) Put(ctx context.Context, key string, value []byte) (uint64, err
 }
 
 // Get fetches the value for the given key from the remote kv service.
-func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
+func (c *Client) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	reqURL := fmt.Sprintf("%s/get?key=%s", c.baseURL, url.QueryEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("key not found: %s", key)
+		return nil, 0, fmt.Errorf("key not found: %s", key)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+		return nil, 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	seqStr := resp.Header.Get("X-Sequence")
+	var seq uint64
+	if seqStr != "" {
+		seq, err = strconv.ParseUint(seqStr, 10, 64)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid sequence number: %s", seqStr)
+		}
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return body, nil
+	return body, seq, nil
 }
 
 // BatchPut adds multiple key-value pairs to the remote kv service.
@@ -155,7 +164,7 @@ func (c *Client) BatchPut(ctx context.Context, kvs map[string][]byte) (uint64, e
 }
 
 // BatchGet fetches the values for the given keys from the remote kv service.
-func (c *Client) BatchGet(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (c *Client) BatchGet(ctx context.Context, keys []string) (map[string]ValueWithSequence, error) {
 	data, err := json.Marshal(keys)
 	if err != nil {
 		return nil, err
@@ -186,7 +195,7 @@ func (c *Client) BatchGet(ctx context.Context, keys []string) (map[string][]byte
 	boundary := params["boundary"]
 
 	reader := multipart.NewReader(resp.Body, boundary)
-	results := make(map[string][]byte)
+	results := make(map[string]ValueWithSequence)
 
 	for {
 		part, err := reader.NextPart()
@@ -202,12 +211,21 @@ func (c *Client) BatchGet(ctx context.Context, keys []string) (map[string][]byte
 			continue
 		}
 
+		seqStr := part.Header.Get("X-Sequence")
+		var seq uint64
+		if seqStr != "" {
+			seq, _ = strconv.ParseUint(seqStr, 10, 64)
+		}
+
 		val, err := io.ReadAll(part)
 		if err != nil {
 			return nil, err
 		}
 
-		results[key] = val
+		results[key] = ValueWithSequence{
+			Value:    val,
+			Sequence: seq,
+		}
 	}
 
 	return results, nil
