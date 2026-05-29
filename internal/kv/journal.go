@@ -43,6 +43,10 @@ type JournalEntry struct {
 	Record *Record        `json:"r,omitempty"`
 }
 
+// Journal represents a write-ahead journal for durability.
+// ACID Durability Rule: Whenever a transaction is committed, all associated updates
+// and the commit record must be successfully written and synchronized to physical disk
+// storage to ensure the changes survive unexpected crashes or power failures.
 type Journal struct {
 	mu              sync.Mutex
 	baseDir         string
@@ -104,6 +108,8 @@ func (j *Journal) openNewFile() error {
 }
 
 // Append writes a new record to the local journal. Returns true if it was flushed.
+// Crucial: For transactional commit records, this must trigger a physical disk flush
+// (via file.Sync()) before returning to guarantee ACID durability.
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
