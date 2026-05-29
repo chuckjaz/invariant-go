@@ -23,7 +23,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	defer s.Close()
 
 	// Put "hello" -> "world"
-	seq, err := s.Put(ctx, "hello", []byte("world"))
+	seq, err := s.Put(ctx, nil, "hello", []byte("world"))
 	if err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	}
 
 	// Get "hello"
-	val, _, err := s.Get(ctx, "hello")
+	val, _, err := s.Get(ctx, nil, "hello")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -41,16 +41,16 @@ func TestStore_BasicPutGet(t *testing.T) {
 	}
 
 	// Put "hello" -> "again" to trigger merge (threshold = 2)
-	seq2, err := s.Put(ctx, "hello", []byte("again"))
+	seq2, err := s.Put(ctx, nil, "hello", []byte("again"))
 	if err != nil {
 		t.Fatalf("Put 2 failed: %v", err)
 	}
-	if seq2 != 2 {
-		t.Errorf("Expected sequence 2, got %d", seq2)
+	if seq2 != 3 {
+		t.Errorf("Expected transaction ID 3, got %d", seq2)
 	}
 
 	// Get "hello" should return "again"
-	val2, _, err := s.Get(ctx, "hello")
+	val2, _, err := s.Get(ctx, nil, "hello")
 	if err != nil {
 		t.Fatalf("Get 2 failed: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	// Force B-Tree retrieval by clearing cache
 	s.cache = NewCache(1000)
 
-	val3, _, err := s.Get(ctx, "hello")
+	val3, _, err := s.Get(ctx, nil, "hello")
 	if err != nil {
 		t.Fatalf("Get 3 (from BTree) failed: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestStore_BTreeSplit(t *testing.T) {
 	for i := range 150 {
 		key := fmt.Sprintf("key-%03d", i)
 		val := fmt.Sprintf("val-%03d", i)
-		_, err := s.Put(ctx, key, []byte(val))
+		_, err := s.Put(ctx, nil, key, []byte(val))
 		if err != nil {
 			t.Fatalf("Put failed at %d: %v", i, err)
 		}
@@ -98,7 +98,7 @@ func TestStore_BTreeSplit(t *testing.T) {
 	for i := range 150 {
 		key := fmt.Sprintf("key-%03d", i)
 		expected := fmt.Sprintf("val-%03d", i)
-		val, _, err := s.Get(ctx, key)
+		val, _, err := s.Get(ctx, nil, key)
 		if err != nil {
 			t.Fatalf("Get failed at %d: %v", i, err)
 		}
@@ -124,7 +124,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("jkey-%d", i)
 		val := fmt.Sprintf("jval-%d", i)
-		_, err := s1.Put(ctx, key, []byte(val))
+		_, err := s1.Put(ctx, nil, key, []byte(val))
 		if err != nil {
 			t.Fatalf("Put failed at %d: %v", i, err)
 		}
@@ -142,7 +142,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("jkey-%d", i)
 		expected := fmt.Sprintf("jval-%d", i)
-		val, _, err := s2.Get(ctx, key)
+		val, _, err := s2.Get(ctx, nil, key)
 		if err != nil {
 			t.Fatalf("Get recovered failed at %d: %v", i, err)
 		}
@@ -169,11 +169,13 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("remkey-%d", i)
 		val := fmt.Sprintf("remval-%d", i)
-		_, err := s1.Put(ctx, key, []byte(val))
+		_, err := s1.Put(ctx, nil, key, []byte(val))
 		if err != nil {
 			t.Fatalf("Put failed at %d: %v", i, err)
 		}
 	}
+	// Flush remaining journal entries so they become remote journals.
+	s1.journal.Flush(ctx)
 	s1.Close()
 
 	// To ensure we're relying entirely on remote journals and not local ones,
@@ -191,7 +193,7 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("remkey-%d", i)
 		expected := fmt.Sprintf("remval-%d", i)
-		val, _, err := s2.Get(ctx, key)
+		val, _, err := s2.Get(ctx, nil, key)
 		if err != nil {
 			t.Fatalf("Get recovered failed at %d: %v", i, err)
 		}
@@ -214,14 +216,14 @@ func TestStore_GetHistory(t *testing.T) {
 
 	// Put multiple versions of "hist-key"
 	for i := 1; i <= 5; i++ {
-		_, err := s.Put(ctx, "hist-key", []byte(fmt.Sprintf("val-%d", i)))
+		_, err := s.Put(ctx, nil, "hist-key", fmt.Appendf(nil, "val-%d", i))
 		if err != nil {
 			t.Fatalf("Put failed: %v", err)
 		}
 	}
 
 	// Fetch history with limit 2
-	page, err := s.GetHistory(ctx, "hist-key", 0, 100, 2)
+	page, err := s.GetHistory(ctx, nil, "hist-key", 0, 100, 2)
 	if err != nil {
 		t.Fatalf("GetHistory failed: %v", err)
 	}
@@ -240,7 +242,7 @@ func TestStore_GetHistory(t *testing.T) {
 	}
 
 	// Fetch remaining history
-	page2, err := s.GetHistory(ctx, "hist-key", 0, page.Values[1].Sequence-1, 10)
+	page2, err := s.GetHistory(ctx, nil, "hist-key", 0, page.Values[1].TransactionID-1, 10)
 	if err != nil {
 		t.Fatalf("GetHistory failed: %v", err)
 	}

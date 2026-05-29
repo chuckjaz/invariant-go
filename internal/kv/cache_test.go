@@ -11,9 +11,9 @@ func TestCache_LRUEviction(t *testing.T) {
 	// This means the cache can hold at most 2 items.
 	cache := NewCache(20)
 
-	rec1 := Record{Key: "key1", Sequence: 1, Value: []byte("1234567890")}
-	rec2 := Record{Key: "key2", Sequence: 2, Value: []byte("1234567890")}
-	rec3 := Record{Key: "key3", Sequence: 3, Value: []byte("1234567890")}
+	rec1 := Record{Key: "key1", TransactionID: 1, Value: []byte("1234567890")}
+	rec2 := Record{Key: "key2", TransactionID: 2, Value: []byte("1234567890")}
+	rec3 := Record{Key: "key3", TransactionID: 3, Value: []byte("1234567890")}
 
 	// Add 1 and 2. Set inBTree=true so they are eligible for eviction.
 	cache.Add(rec1, true)

@@ -7,7 +7,7 @@ import (
 
 type cacheItem struct {
 	key     string
-	seq     uint64
+	txID    uint64
 	record  Record
 	inBTree bool
 }
@@ -37,10 +37,10 @@ func (c *Cache) Add(rec Record, inBTree bool) {
 
 	if el, ok := c.items[rec.Key]; ok {
 		item := el.Value.(*cacheItem)
-		// Only update if sequence is newer
-		if rec.Sequence > item.seq {
+		// Only update if transaction ID is newer
+		if rec.TransactionID > item.txID {
 			c.currSize -= len(item.record.Value)
-			item.seq = rec.Sequence
+			item.txID = rec.TransactionID
 			item.record = rec
 			item.inBTree = inBTree
 			c.currSize += size
@@ -49,7 +49,7 @@ func (c *Cache) Add(rec Record, inBTree bool) {
 	} else {
 		item := &cacheItem{
 			key:     rec.Key,
-			seq:     rec.Sequence,
+			txID:    rec.TransactionID,
 			record:  rec,
 			inBTree: inBTree,
 		}
@@ -82,18 +82,31 @@ func (c *Cache) Get(key string) (Record, bool) {
 	return Record{}, false
 }
 
-// MarkInBTree marks all records up to the given maxSequence as inBTree, allowing them to be evicted.
-func (c *Cache) MarkInBTree(maxSequence uint64) {
+// MarkInBTree marks all records up to the given maxTxID as inBTree, allowing them to be evicted.
+func (c *Cache) MarkInBTree(maxTxID uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for e := c.lruList.Front(); e != nil; e = e.Next() {
 		item := e.Value.(*cacheItem)
-		if item.seq <= maxSequence {
+		if item.txID <= maxTxID {
 			item.inBTree = true
 		}
 	}
 	c.evictIfNeeded()
+}
+
+// Remove removes an item from the cache.
+func (c *Cache) Remove(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if el, ok := c.items[key]; ok {
+		item := el.Value.(*cacheItem)
+		c.lruList.Remove(el)
+		delete(c.items, key)
+		c.currSize -= len(item.record.Value)
+	}
 }
 
 func (c *Cache) evictIfNeeded() {

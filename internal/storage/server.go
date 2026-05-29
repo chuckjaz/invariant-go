@@ -284,7 +284,7 @@ func (s *StorageServer) handleBatchHas(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"missing": missing})
+		json.NewEncoder(w).Encode(map[string]any{"missing": missing})
 		return
 	}
 
@@ -299,7 +299,7 @@ func (s *StorageServer) handleBatchHas(w http.ResponseWriter, r *http.Request) {
 	if missing == nil {
 		missing = []string{}
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"missing": missing})
+	json.NewEncoder(w).Encode(map[string]any{"missing": missing})
 }
 
 func (s *StorageServer) handleBatchStore(w http.ResponseWriter, r *http.Request) {

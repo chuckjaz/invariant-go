@@ -16,13 +16,13 @@ import (
 const ValueThreshold = 1024 // 1K
 
 type BTreeKey struct {
-	Key      string `json:"k"`
-	Sequence uint64 `json:"s"`
+	Key           string `json:"k"`
+	TransactionID uint64 `json:"tx"`
 }
 
 // CompareBTreeKey compares two keys.
 // Primary sort is Key ascending.
-// Secondary sort is Sequence descending, so the latest version of a key comes first.
+// Secondary sort is TransactionID descending, so the latest version of a key comes first.
 func CompareBTreeKey(a, b BTreeKey) int {
 	if a.Key < b.Key {
 		return -1
@@ -30,10 +30,10 @@ func CompareBTreeKey(a, b BTreeKey) int {
 	if a.Key > b.Key {
 		return 1
 	}
-	if a.Sequence > b.Sequence {
+	if a.TransactionID > b.TransactionID {
 		return -1
 	}
-	if a.Sequence < b.Sequence {
+	if a.TransactionID < b.TransactionID {
 		return 1
 	}
 	return 0
@@ -50,6 +50,7 @@ type BTreeNode struct {
 	Children    []content.ContentLink `json:"children,omitempty"`
 	Values      []ValueEntry          `json:"values,omitempty"`
 	LastJournal *content.ContentLink  `json:"lastJournal,omitempty"`
+	MaxTxID     uint64                `json:"maxTxID,omitempty"`
 }
 
 func (n *BTreeNode) Serialize() ([]byte, error) {
@@ -104,7 +105,7 @@ func (b *BTree) saveNode(ctx context.Context, node *BTreeNode) (content.ContentL
 	return content.Write(bytes.NewReader(data), b.store, b.opts)
 }
 
-// Search returns the value entry and sequence for the latest sequence of the given key.
+// Search returns the value entry and transaction ID for the latest version of the given key.
 func (b *BTree) Search(ctx context.Context, rootAddr *content.ContentLink, key string) (ValueEntry, uint64, bool, error) {
 	if rootAddr == nil {
 		return ValueEntry{}, 0, false, nil
@@ -121,7 +122,7 @@ func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, k
 	if node.IsLeaf {
 		for i := 0; i < len(node.Keys); i++ {
 			if node.Keys[i].Key == key {
-				return node.Values[i], node.Keys[i].Sequence, true, nil
+				return node.Values[i], node.Keys[i].TransactionID, true, nil
 			}
 			if node.Keys[i].Key > key {
 				break
@@ -139,41 +140,41 @@ func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, k
 
 	// Child i can contain `key` because its upper bound is node.Keys[i] >= key.
 	// Or if i == len(node.Keys), its upper bound is +infinity.
-	val, seq, found, err := b.searchRecursive(ctx, node.Children[i], key)
+	val, txID, found, err := b.searchRecursive(ctx, node.Children[i], key)
 	if err != nil {
 		return ValueEntry{}, 0, false, err
 	}
 	if found {
-		return val, seq, true, nil
+		return val, txID, true, nil
 	}
 
 	// If not found in child i, could it be in subsequent children?
 	// Yes, if node.Keys[i].Key == key.
 	for i < len(node.Keys) && node.Keys[i].Key == key {
 		i++
-		val, seq, found, err := b.searchRecursive(ctx, node.Children[i], key)
+		val, txID, found, err := b.searchRecursive(ctx, node.Children[i], key)
 		if err != nil {
 			return ValueEntry{}, 0, false, err
 		}
 		if found {
-			return val, seq, true, nil
+			return val, txID, true, nil
 		}
 	}
 
 	return ValueEntry{}, 0, false, nil
 }
 
-// SearchHistory returns a slice of historical values for a key within the sequence range.
-func (b *BTree) SearchHistory(ctx context.Context, rootAddr *content.ContentLink, key string, minSeq, maxSeq uint64, pageSize int) ([]ValueWithSequence, bool, error) {
+// SearchHistory returns a slice of historical values for a key within the transaction ID range.
+func (b *BTree) SearchHistory(ctx context.Context, rootAddr *content.ContentLink, key string, minTxID, maxTxID uint64, pageSize int) ([]ValueWithTransaction, bool, error) {
 	if rootAddr == nil {
 		return nil, false, nil
 	}
-	var results []ValueWithSequence
-	hasMore, err := b.searchHistoryRecursive(ctx, *rootAddr, key, minSeq, maxSeq, pageSize, &results)
+	var results []ValueWithTransaction
+	hasMore, err := b.searchHistoryRecursive(ctx, *rootAddr, key, minTxID, maxTxID, pageSize, &results)
 	return results, hasMore, err
 }
 
-func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.ContentLink, key string, minSeq, maxSeq uint64, pageSize int, results *[]ValueWithSequence) (bool, error) {
+func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.ContentLink, key string, minTxID, maxTxID uint64, pageSize int, results *[]ValueWithTransaction) (bool, error) {
 	node, err := b.loadNode(ctx, addr)
 	if err != nil {
 		return false, err
@@ -182,8 +183,8 @@ func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.Content
 	if node.IsLeaf {
 		for i := 0; i < len(node.Keys); i++ {
 			if node.Keys[i].Key == key {
-				seq := node.Keys[i].Sequence
-				if seq <= maxSeq && seq >= minSeq {
+				txID := node.Keys[i].TransactionID
+				if txID <= maxTxID && txID >= minTxID {
 					if len(*results) >= pageSize {
 						return true, nil // Hit page limit, optimistically assume more
 					}
@@ -202,9 +203,9 @@ func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.Content
 					} else {
 						valBytes = node.Values[i].Inline
 					}
-					*results = append(*results, ValueWithSequence{Value: valBytes, Sequence: seq})
-				} else if seq < minSeq {
-					// Keys are sorted descending by sequence. If we drop below minSeq, no more versions of this key will match.
+					*results = append(*results, ValueWithTransaction{Value: valBytes, TransactionID: txID})
+				} else if txID < minTxID {
+					// Keys are sorted descending by txID. If we drop below minTxID, no more versions of this key will match.
 					return false, nil
 				}
 			} else if node.Keys[i].Key > key {
@@ -219,14 +220,14 @@ func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.Content
 	for i < len(node.Keys) && node.Keys[i].Key < key {
 		i++
 	}
-	// For historical search, we also need to consider sequence ordering.
-	// We want the first instance where Key == key and Sequence <= maxSeq.
-	// CompareBTreeKey: Key ASC, Sequence DESC.
-	for i < len(node.Keys) && node.Keys[i].Key == key && node.Keys[i].Sequence > maxSeq {
+	// For historical search, we also need to consider transaction ordering.
+	// We want the first instance where Key == key and TransactionID <= maxTxID.
+	// CompareBTreeKey: Key ASC, TransactionID DESC.
+	for i < len(node.Keys) && node.Keys[i].Key == key && node.Keys[i].TransactionID > maxTxID {
 		i++
 	}
 
-	hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minSeq, maxSeq, pageSize, results)
+	hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minTxID, maxTxID, pageSize, results)
 	if err != nil {
 		return false, err
 	}
@@ -237,7 +238,7 @@ func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.Content
 	// Explore subsequent children
 	for i < len(node.Keys) && node.Keys[i].Key == key {
 		i++
-		hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minSeq, maxSeq, pageSize, results)
+		hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minTxID, maxTxID, pageSize, results)
 		if err != nil {
 			return false, err
 		}
@@ -256,6 +257,7 @@ type MemNode struct {
 	Links       []content.ContentLink
 	Values      []ValueEntry
 	LastJournal *content.ContentLink
+	MaxTxID     uint64
 }
 
 func (b *BTree) loadMemNode(ctx context.Context, link content.ContentLink) (*MemNode, error) {
@@ -268,6 +270,7 @@ func (b *BTree) loadMemNode(ctx context.Context, link content.ContentLink) (*Mem
 		Keys:        append([]BTreeKey(nil), node.Keys...),
 		Values:      append([]ValueEntry(nil), node.Values...),
 		LastJournal: node.LastJournal,
+		MaxTxID:     node.MaxTxID,
 	}
 	if !node.IsLeaf {
 		mn.Links = append([]content.ContentLink(nil), node.Children...)
@@ -295,16 +298,17 @@ func (b *BTree) saveMemNode(ctx context.Context, mn *MemNode) (content.ContentLi
 		Values:      mn.Values,
 		Children:    mn.Links,
 		LastJournal: mn.LastJournal,
+		MaxTxID:     mn.MaxTxID,
 	}
 	return b.saveNode(ctx, node)
 }
 
 // InsertBatch inserts multiple records functionally by caching nodes in memory,
 // and returning the new root address after saving all modified nodes.
-func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, records []Record, lastJournal *content.ContentLink) (content.ContentLink, error) {
+func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, records []Record, lastJournal *content.ContentLink, maxTxID uint64) (content.ContentLink, error) {
 	var root *MemNode
 	if rootAddr == nil {
-		root = &MemNode{IsLeaf: true, LastJournal: lastJournal}
+		root = &MemNode{IsLeaf: true, LastJournal: lastJournal, MaxTxID: maxTxID}
 	} else {
 		var err error
 		root, err = b.loadMemNode(ctx, *rootAddr)
@@ -312,6 +316,9 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, 
 			return content.ContentLink{}, err
 		}
 		root.LastJournal = lastJournal
+		if maxTxID > root.MaxTxID {
+			root.MaxTxID = maxTxID
+		}
 	}
 
 	for _, rec := range records {
@@ -326,7 +333,7 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, 
 			valEntry.Inline = rec.Value
 		}
 
-		k := BTreeKey{Key: rec.Key, Sequence: rec.Sequence}
+		k := BTreeKey{Key: rec.Key, TransactionID: rec.TransactionID}
 		splitKey, splitRight, err := b.insertMemRecursive(ctx, root, k, valEntry)
 		if err != nil {
 			return content.ContentLink{}, err
@@ -339,6 +346,7 @@ func (b *BTree) InsertBatch(ctx context.Context, rootAddr *content.ContentLink, 
 				Links:       make([]content.ContentLink, 2),
 				MemChildren: []*MemNode{root, splitRight},
 				LastJournal: root.LastJournal,
+				MaxTxID:     root.MaxTxID,
 			}
 			root = newRoot
 		}
@@ -408,10 +416,4 @@ func (b *BTree) insertMemRecursive(ctx context.Context, node *MemNode, key BTree
 	}
 
 	return BTreeKey{}, nil, nil
-}
-
-type Record struct {
-	Key      string
-	Sequence uint64
-	Value    []byte
 }

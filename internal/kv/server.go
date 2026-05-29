@@ -21,6 +21,11 @@ func NewServer(store KeyValueStore) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("POST /tx/start", s.handleTxStart)
+	mux.HandleFunc("POST /tx/commit", s.handleTxCommit)
+	mux.HandleFunc("POST /tx/abort", s.handleTxAbort)
+	mux.HandleFunc("POST /tx/checkpoint", s.handleTxCheckpoint)
+
 	mux.HandleFunc("POST /put", s.handlePut)
 	mux.HandleFunc("GET /get", s.handleGet)
 	mux.HandleFunc("GET /history", s.handleGetHistory)
@@ -48,13 +53,22 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seq, err := s.store.Put(r.Context(), key, value)
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
+	seq, err := s.store.Put(r.Context(), txID, key, value)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("X-Sequence", fmt.Sprint(seq))
+	w.Header().Set("X-Transaction-ID", fmt.Sprint(seq))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -65,13 +79,22 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, seq, err := s.store.Get(r.Context(), key)
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
+	val, seq, err := s.store.Get(r.Context(), txID, key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("X-Sequence", fmt.Sprint(seq))
+	w.Header().Set("X-Transaction-ID", fmt.Sprint(seq))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(val)
 }
@@ -108,21 +131,30 @@ func (s *Server) handleBatchPut(w http.ResponseWriter, r *http.Request) {
 		kvs[key] = val
 	}
 
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
 	if batchStore, ok := s.store.(BatchKeyValueStore); ok {
-		seq, err := batchStore.BatchPut(r.Context(), kvs)
+		seq, err := batchStore.BatchPut(r.Context(), txID, kvs)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		w.Header().Set("X-Sequence", fmt.Sprint(seq))
+		w.Header().Set("X-Transaction-ID", fmt.Sprint(seq))
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
 	var maxSeq uint64
 	for key, val := range kvs {
-		seq, err := s.store.Put(r.Context(), key, val)
+		seq, err := s.store.Put(r.Context(), txID, key, val)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -132,7 +164,7 @@ func (s *Server) handleBatchPut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("X-Sequence", fmt.Sprint(maxSeq))
+	w.Header().Set("X-Transaction-ID", fmt.Sprint(maxSeq))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -143,11 +175,20 @@ func (s *Server) handleBatchGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
 	mw := multipart.NewWriter(w)
 	w.Header().Set("Content-Type", mw.FormDataContentType())
 
 	if batchStore, ok := s.store.(BatchKeyValueStore); ok {
-		results, err := batchStore.BatchGet(r.Context(), keys)
+		results, err := batchStore.BatchGet(r.Context(), txID, keys)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -156,7 +197,7 @@ func (s *Server) handleBatchGet(w http.ResponseWriter, r *http.Request) {
 		for key, val := range results {
 			h := make(textproto.MIMEHeader)
 			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
-			h.Set("X-Sequence", fmt.Sprint(val.Sequence))
+			h.Set("X-Transaction-ID", fmt.Sprint(val.TransactionID))
 			part, err := mw.CreatePart(h)
 			if err != nil {
 				continue
@@ -165,11 +206,11 @@ func (s *Server) handleBatchGet(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		for _, key := range keys {
-			val, seq, err := s.store.Get(r.Context(), key)
+			val, seq, err := s.store.Get(r.Context(), txID, key)
 			if err == nil && val != nil {
 				h := make(textproto.MIMEHeader)
 				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
-				h.Set("X-Sequence", fmt.Sprint(seq))
+				h.Set("X-Transaction-ID", fmt.Sprint(seq))
 				part, err := mw.CreatePart(h)
 				if err != nil {
 					continue
@@ -203,11 +244,20 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
 	minSeq := parseUintQuery(r, "min", 0)
 	maxSeq := parseUintQuery(r, "max", ^uint64(0))
 	limit := int(parseUintQuery(r, "limit", 100))
 
-	page, err := s.store.GetHistory(r.Context(), key, minSeq, maxSeq, limit)
+	page, err := s.store.GetHistory(r.Context(), txID, key, minSeq, maxSeq, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -221,7 +271,7 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	for _, val := range page.Values {
 		h := make(textproto.MIMEHeader)
 		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
-		h.Set("X-Sequence", fmt.Sprint(val.Sequence))
+		h.Set("X-Transaction-ID", fmt.Sprint(val.TransactionID))
 		part, err := mw.CreatePart(h)
 		if err != nil {
 			continue
@@ -239,6 +289,15 @@ func (s *Server) handleBatchGetHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var txID *uint64
+	txStr := r.URL.Query().Get("tx")
+	if txStr != "" {
+		id, err := strconv.ParseUint(txStr, 10, 64)
+		if err == nil {
+			txID = &id
+		}
+	}
+
 	minSeq := parseUintQuery(r, "min", 0)
 	maxSeq := parseUintQuery(r, "max", ^uint64(0))
 	limit := int(parseUintQuery(r, "limit", 100))
@@ -249,7 +308,7 @@ func (s *Server) handleBatchGetHistory(w http.ResponseWriter, r *http.Request) {
 	var results map[string]HistoryPage
 	if batchStore, ok := s.store.(BatchKeyValueStore); ok {
 		var err error
-		results, err = batchStore.BatchGetHistory(r.Context(), keys, minSeq, maxSeq, limit)
+		results, err = batchStore.BatchGetHistory(r.Context(), txID, keys, minSeq, maxSeq, limit)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -257,7 +316,7 @@ func (s *Server) handleBatchGetHistory(w http.ResponseWriter, r *http.Request) {
 	} else {
 		results = make(map[string]HistoryPage)
 		for _, key := range keys {
-			page, err := s.store.GetHistory(r.Context(), key, minSeq, maxSeq, limit)
+			page, err := s.store.GetHistory(r.Context(), txID, key, minSeq, maxSeq, limit)
 			if err == nil && len(page.Values) > 0 {
 				results[key] = page
 			}
@@ -268,7 +327,7 @@ func (s *Server) handleBatchGetHistory(w http.ResponseWriter, r *http.Request) {
 		for i, val := range page.Values {
 			h := make(textproto.MIMEHeader)
 			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
-			h.Set("X-Sequence", fmt.Sprint(val.Sequence))
+			h.Set("X-Transaction-ID", fmt.Sprint(val.TransactionID))
 			if i == 0 {
 				h.Set("X-Has-More", fmt.Sprint(page.HasMore))
 			}
@@ -281,4 +340,55 @@ func (s *Server) handleBatchGetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mw.Close()
+}
+
+func (s *Server) handleTxStart(w http.ResponseWriter, r *http.Request) {
+	sequential := r.URL.Query().Get("sequential") == "true"
+	id, err := s.store.StartTransaction(r.Context(), sequential)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]uint64{"transaction_id": id})
+}
+
+func (s *Server) handleTxCommit(w http.ResponseWriter, r *http.Request) {
+	txStr := r.URL.Query().Get("tx")
+	id, err := strconv.ParseUint(txStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid tx param", http.StatusBadRequest)
+		return
+	}
+	err = s.store.CommitTransaction(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleTxAbort(w http.ResponseWriter, r *http.Request) {
+	txStr := r.URL.Query().Get("tx")
+	id, err := strconv.ParseUint(txStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid tx param", http.StatusBadRequest)
+		return
+	}
+	err = s.store.AbortTransaction(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleTxCheckpoint(w http.ResponseWriter, r *http.Request) {
+	id, err := s.store.CreateCheckpoint(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]uint64{"transaction_id": id})
 }

@@ -19,6 +19,24 @@ type JournalHeader struct {
 	PreviousJournal *content.ContentLink `json:"prev,omitempty"`
 }
 
+type RecordType int
+
+const (
+	RecordTypePut RecordType = iota
+	RecordTypeTxStart
+	RecordTypeTxCommit
+	RecordTypeTxAbort
+	RecordTypeTxCheckpoint
+)
+
+type Record struct {
+	Type          RecordType `json:"t"`
+	Key           string     `json:"k,omitempty"`
+	TransactionID uint64     `json:"tx"`
+	Value         []byte     `json:"v,omitempty"`
+	Sequential    bool       `json:"seq,omitempty"`
+}
+
 type JournalEntry struct {
 	Header *JournalHeader `json:"h,omitempty"`
 	Record *Record        `json:"r,omitempty"`
@@ -37,6 +55,7 @@ type Journal struct {
 	entries         int
 	maxEntries      int
 	opts            content.WriterOptions
+	lastRecordType  RecordType
 }
 
 func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
@@ -92,6 +111,7 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 		return false, err
 	}
 
+	j.lastRecordType = rec.Type
 	j.entries++
 	if j.entries >= j.maxEntries {
 		if err := j.Flush(ctx); err != nil {
@@ -100,6 +120,11 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// LastRecordType returns the type of the most recently appended record in the current active journal.
+func (j *Journal) LastRecordType() RecordType {
+	return j.lastRecordType
 }
 
 // Flush closes the current journal, uploads it to storage, updates the previousJournal pointer, and opens a new file.

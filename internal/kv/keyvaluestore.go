@@ -2,28 +2,33 @@ package kv
 
 import "context"
 
-// ValueWithSequence wraps the retrieved value along with its sequence number.
-type ValueWithSequence struct {
-	Value    []byte
-	Sequence uint64
+// ValueWithTransaction wraps the retrieved value along with its transaction ID.
+type ValueWithTransaction struct {
+	Value         []byte
+	TransactionID uint64
 }
 
 // HistoryPage wraps a page of historical values and a flag indicating if more exist.
 type HistoryPage struct {
-	Values  []ValueWithSequence
+	Values  []ValueWithTransaction
 	HasMore bool
 }
 
 // KeyValueStore represents the Key-Value service orchestration layer.
 type KeyValueStore interface {
-	Put(ctx context.Context, key string, value []byte) (uint64, error)
-	Get(ctx context.Context, key string) ([]byte, uint64, error)
-	GetHistory(ctx context.Context, key string, minSeq uint64, maxSeq uint64, pageSize int) (HistoryPage, error)
+	StartTransaction(ctx context.Context, sequential bool) (uint64, error)
+	CommitTransaction(ctx context.Context, txID uint64) error
+	AbortTransaction(ctx context.Context, txID uint64) error
+	CreateCheckpoint(ctx context.Context) (uint64, error)
+
+	Put(ctx context.Context, txID *uint64, key string, value []byte) (uint64, error)
+	Get(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error)
+	GetHistory(ctx context.Context, txID *uint64, key string, minTxID uint64, maxTxID uint64, pageSize int) (HistoryPage, error)
 }
 
 // BatchKeyValueStore provides batched key-value operations.
 type BatchKeyValueStore interface {
-	BatchPut(ctx context.Context, kvs map[string][]byte) (uint64, error)
-	BatchGet(ctx context.Context, keys []string) (map[string]ValueWithSequence, error)
-	BatchGetHistory(ctx context.Context, keys []string, minSeq uint64, maxSeq uint64, pageSize int) (map[string]HistoryPage, error)
+	BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error)
+	BatchGet(ctx context.Context, txID *uint64, keys []string) (map[string]ValueWithTransaction, error)
+	BatchGetHistory(ctx context.Context, txID *uint64, keys []string, minTxID uint64, maxTxID uint64, pageSize int) (map[string]HistoryPage, error)
 }

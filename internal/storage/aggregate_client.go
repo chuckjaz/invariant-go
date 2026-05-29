@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -155,13 +156,7 @@ func (c *AggregateClient) addLiveServer(serverID string) Storage {
 	// Assuming svc.Address is the base URL
 	client := NewClient(svc.Address, httpClient)
 
-	supportsBatch := false
-	for _, p := range svc.Protocols {
-		if p == "batch-storage-v1" {
-			supportsBatch = true
-			break
-		}
-	}
+	supportsBatch := slices.Contains(svc.Protocols, "batch-storage-v1")
 
 	c.liveServers[serverID] = liveServerEntry{
 		client:        client,
