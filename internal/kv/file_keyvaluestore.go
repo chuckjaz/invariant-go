@@ -287,3 +287,56 @@ func (s *FileKeyValueStore) BatchGet(ctx context.Context, keys []string) (map[st
 	}
 	return results, nil
 }
+
+// GetHistory retrieves historical values for a key.
+func (s *FileKeyValueStore) GetHistory(ctx context.Context, key string, minSeq uint64, maxSeq uint64, pageSize int) (HistoryPage, error) {
+	var page HistoryPage
+
+	s.mu.RLock()
+	// pendingRecords is appended to, so newest is at the end. Traverse backwards.
+	for i := len(s.pendingRecords) - 1; i >= 0; i-- {
+		rec := s.pendingRecords[i]
+		if rec.Key == key && rec.Sequence <= maxSeq && rec.Sequence >= minSeq {
+			page.Values = append(page.Values, ValueWithSequence{
+				Value:    rec.Value,
+				Sequence: rec.Sequence,
+			})
+			if len(page.Values) >= pageSize {
+				page.HasMore = true
+				s.mu.RUnlock()
+				return page, nil
+			}
+		} else if rec.Key == key && rec.Sequence < minSeq {
+			// Sequence goes down as we go backwards, but only loosely (other keys interleave).
+			// We can't break just because one rec is < minSeq, because another key could have caused sequence to increase.
+			// Actually, rec.Sequence monotonically increases with i. So if we hit < minSeq, we can break.
+			break
+		}
+	}
+	rootAddr := s.bTreeRoot
+	s.mu.RUnlock()
+
+	remaining := pageSize - len(page.Values)
+	if remaining > 0 {
+		btreeVals, btreeHasMore, err := s.btree.SearchHistory(ctx, rootAddr, key, minSeq, maxSeq, remaining)
+		if err != nil {
+			return page, err
+		}
+		page.Values = append(page.Values, btreeVals...)
+		page.HasMore = btreeHasMore
+	}
+
+	return page, nil
+}
+
+// BatchGetHistory fetches historical values for multiple keys at once.
+func (s *FileKeyValueStore) BatchGetHistory(ctx context.Context, keys []string, minSeq uint64, maxSeq uint64, pageSize int) (map[string]HistoryPage, error) {
+	results := make(map[string]HistoryPage)
+	for _, key := range keys {
+		page, err := s.GetHistory(ctx, key, minSeq, maxSeq, pageSize)
+		if err == nil && len(page.Values) > 0 {
+			results[key] = page
+		}
+	}
+	return results, nil
+}

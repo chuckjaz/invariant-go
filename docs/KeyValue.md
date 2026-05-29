@@ -87,3 +87,34 @@ The request should be a `multipart/form-data` payload. Each part's name represen
 ### Response
 
 The body of the response is empty. The `X-Sequence` header contains the highest sequence number resulting from the batch update.
+
+## `GET /history?key=:key&min=:min&max=:max&limit=:limit`
+
+Retrieve the historical values associated with the given `:key` within a sequence range.
+
+### Request
+
+The request requires the `key` query parameter. Optional parameters include `min` (minimum sequence, default 0), `max` (maximum sequence, default infinity), and `limit` (max number of records to return, default 100).
+
+### Required response headers
+
+| Header        | Value                     |
+| ------------- | ------------------------- |
+| Content-Type  | multipart/form-data       |
+| X-Has-More    | `true` or `false`         |
+
+### Response
+
+The response is a `multipart/form-data` payload where each part corresponds to a historical version of the key. Each part includes an `X-Sequence` header. The top-level `X-Has-More` header indicates if there might be more versions available beyond the returned page.
+
+## `POST /batch_history?min=:min&max=:max&limit=:limit`
+
+Retrieve the historical values associated with a batch of keys within a sequence range.
+
+### Request
+
+The request body should be a JSON array containing the keys to retrieve. Optional query parameters include `min`, `max`, and `limit`.
+
+### Response
+
+The response is a `multipart/form-data` payload where each part corresponds to a historical version of a requested key. The part's name is the key. Each part includes an `X-Sequence` header. Additionally, the **first** part returned for each key will include an `X-Has-More` header indicating if there might be more versions available for that specific key. Keys that are not found or have no versions in the range are omitted.

@@ -230,3 +230,136 @@ func (c *Client) BatchGet(ctx context.Context, keys []string) (map[string]ValueW
 
 	return results, nil
 }
+
+// GetHistory fetches historical values for the given key from the remote kv service.
+func (c *Client) GetHistory(ctx context.Context, key string, minSeq uint64, maxSeq uint64, pageSize int) (HistoryPage, error) {
+	reqURL := fmt.Sprintf("%s/history?key=%s&min=%d&max=%d&limit=%d", c.baseURL, url.QueryEscape(key), minSeq, maxSeq, pageSize)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return HistoryPage{}, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var page HistoryPage
+	page.HasMore = resp.Header.Get("X-Has-More") == "true"
+
+	_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	boundary := params["boundary"]
+
+	reader := multipart.NewReader(resp.Body, boundary)
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return HistoryPage{}, err
+		}
+
+		seqStr := part.Header.Get("X-Sequence")
+		var seq uint64
+		if seqStr != "" {
+			seq, _ = strconv.ParseUint(seqStr, 10, 64)
+		}
+
+		val, err := io.ReadAll(part)
+		if err != nil {
+			return HistoryPage{}, err
+		}
+
+		page.Values = append(page.Values, ValueWithSequence{
+			Value:    val,
+			Sequence: seq,
+		})
+	}
+
+	return page, nil
+}
+
+// BatchGetHistory fetches historical values for the given keys from the remote kv service.
+func (c *Client) BatchGetHistory(ctx context.Context, keys []string, minSeq uint64, maxSeq uint64, pageSize int) (map[string]HistoryPage, error) {
+	data, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+
+	reqURL := fmt.Sprintf("%s/batch_history?min=%d&max=%d&limit=%d", c.baseURL, minSeq, maxSeq, pageSize)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, err
+	}
+	boundary := params["boundary"]
+
+	reader := multipart.NewReader(resp.Body, boundary)
+	results := make(map[string]HistoryPage)
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		key := part.FormName()
+		if key == "" {
+			continue
+		}
+
+		seqStr := part.Header.Get("X-Sequence")
+		var seq uint64
+		if seqStr != "" {
+			seq, _ = strconv.ParseUint(seqStr, 10, 64)
+		}
+
+		hasMoreStr := part.Header.Get("X-Has-More")
+
+		val, err := io.ReadAll(part)
+		if err != nil {
+			return nil, err
+		}
+
+		page := results[key]
+		if hasMoreStr == "true" {
+			page.HasMore = true
+		}
+		page.Values = append(page.Values, ValueWithSequence{
+			Value:    val,
+			Sequence: seq,
+		})
+		results[key] = page
+	}
+
+	return results, nil
+}

@@ -163,6 +163,92 @@ func (b *BTree) searchRecursive(ctx context.Context, addr content.ContentLink, k
 	return ValueEntry{}, 0, false, nil
 }
 
+// SearchHistory returns a slice of historical values for a key within the sequence range.
+func (b *BTree) SearchHistory(ctx context.Context, rootAddr *content.ContentLink, key string, minSeq, maxSeq uint64, pageSize int) ([]ValueWithSequence, bool, error) {
+	if rootAddr == nil {
+		return nil, false, nil
+	}
+	var results []ValueWithSequence
+	hasMore, err := b.searchHistoryRecursive(ctx, *rootAddr, key, minSeq, maxSeq, pageSize, &results)
+	return results, hasMore, err
+}
+
+func (b *BTree) searchHistoryRecursive(ctx context.Context, addr content.ContentLink, key string, minSeq, maxSeq uint64, pageSize int, results *[]ValueWithSequence) (bool, error) {
+	node, err := b.loadNode(ctx, addr)
+	if err != nil {
+		return false, err
+	}
+
+	if node.IsLeaf {
+		for i := 0; i < len(node.Keys); i++ {
+			if node.Keys[i].Key == key {
+				seq := node.Keys[i].Sequence
+				if seq <= maxSeq && seq >= minSeq {
+					if len(*results) >= pageSize {
+						return true, nil // Hit page limit, optimistically assume more
+					}
+
+					var valBytes []byte
+					if node.Values[i].Link != nil {
+						rc, err := content.Read(*node.Values[i].Link, b.store, b.slotClient)
+						if err != nil {
+							return false, fmt.Errorf("value block not found: %v", err)
+						}
+						valBytes, err = io.ReadAll(rc)
+						rc.Close()
+						if err != nil {
+							return false, err
+						}
+					} else {
+						valBytes = node.Values[i].Inline
+					}
+					*results = append(*results, ValueWithSequence{Value: valBytes, Sequence: seq})
+				} else if seq < minSeq {
+					// Keys are sorted descending by sequence. If we drop below minSeq, no more versions of this key will match.
+					return false, nil
+				}
+			} else if node.Keys[i].Key > key {
+				return false, nil
+			}
+		}
+		return false, nil
+	}
+
+	// Internal node
+	i := 0
+	for i < len(node.Keys) && node.Keys[i].Key < key {
+		i++
+	}
+	// For historical search, we also need to consider sequence ordering.
+	// We want the first instance where Key == key and Sequence <= maxSeq.
+	// CompareBTreeKey: Key ASC, Sequence DESC.
+	for i < len(node.Keys) && node.Keys[i].Key == key && node.Keys[i].Sequence > maxSeq {
+		i++
+	}
+
+	hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minSeq, maxSeq, pageSize, results)
+	if err != nil {
+		return false, err
+	}
+	if hasMore || len(*results) >= pageSize {
+		return true, nil
+	}
+
+	// Explore subsequent children
+	for i < len(node.Keys) && node.Keys[i].Key == key {
+		i++
+		hasMore, err := b.searchHistoryRecursive(ctx, node.Children[i], key, minSeq, maxSeq, pageSize, results)
+		if err != nil {
+			return false, err
+		}
+		if hasMore || len(*results) >= pageSize {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 type MemNode struct {
 	IsLeaf      bool
 	Keys        []BTreeKey

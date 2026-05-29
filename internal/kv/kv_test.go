@@ -200,3 +200,57 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 		}
 	}
 }
+
+func TestStore_GetHistory(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-hist", nil, "journal-hist", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Put multiple versions of "hist-key"
+	for i := 1; i <= 5; i++ {
+		_, err := s.Put(ctx, "hist-key", []byte(fmt.Sprintf("val-%d", i)))
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+
+	// Fetch history with limit 2
+	page, err := s.GetHistory(ctx, "hist-key", 0, 100, 2)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+
+	if len(page.Values) != 2 {
+		t.Fatalf("Expected 2 values, got %d", len(page.Values))
+	}
+	if string(page.Values[0].Value) != "val-5" {
+		t.Errorf("Expected val-5, got %s", string(page.Values[0].Value))
+	}
+	if string(page.Values[1].Value) != "val-4" {
+		t.Errorf("Expected val-4, got %s", string(page.Values[1].Value))
+	}
+	if !page.HasMore {
+		t.Errorf("Expected HasMore to be true")
+	}
+
+	// Fetch remaining history
+	page2, err := s.GetHistory(ctx, "hist-key", 0, page.Values[1].Sequence-1, 10)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+	if len(page2.Values) != 3 {
+		t.Fatalf("Expected 3 values, got %d", len(page2.Values))
+	}
+	if string(page2.Values[2].Value) != "val-1" {
+		t.Errorf("Expected val-1, got %s", string(page2.Values[2].Value))
+	}
+	if page2.HasMore {
+		t.Errorf("Expected HasMore to be false")
+	}
+}
