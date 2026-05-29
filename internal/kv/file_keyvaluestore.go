@@ -327,9 +327,7 @@ func (s *FileKeyValueStore) AbortTransaction(ctx context.Context, txID uint64) e
 	delete(s.activeTxs, txID)
 
 	for key := range tx.WriteSet {
-		if cachedRec, ok := s.cache.Get(key); ok && cachedRec.TransactionID == txID {
-			s.cache.Remove(key)
-		}
+		s.cache.Invalidate(key, txID)
 	}
 
 	return nil
@@ -380,9 +378,7 @@ func (s *FileKeyValueStore) CommitTransaction(ctx context.Context, txID uint64) 
 		tx.State = TxAborted
 		delete(s.activeTxs, txID)
 		for key := range tx.WriteSet {
-			if cachedRec, ok := s.cache.Get(key); ok && cachedRec.TransactionID == txID {
-				s.cache.Remove(key)
-			}
+			s.cache.Invalidate(key, txID)
 		}
 		return fmt.Errorf("transaction %d aborted due to conflicts on keys: %v", txID, conflicts)
 	}

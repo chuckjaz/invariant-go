@@ -2,6 +2,7 @@ package kv
 
 import (
 	"container/list"
+	"math"
 	"sync"
 )
 
@@ -96,16 +97,17 @@ func (c *Cache) MarkInBTree(maxTxID uint64) {
 	c.evictIfNeeded()
 }
 
-// Remove removes an item from the cache.
-func (c *Cache) Remove(key string) {
+// Invalidate marks an item in the cache as aborted so it will be ignored and eventually evicted.
+func (c *Cache) Invalidate(key string, txID uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if el, ok := c.items[key]; ok {
 		item := el.Value.(*cacheItem)
-		c.lruList.Remove(el)
-		delete(c.items, key)
-		c.currSize -= len(item.record.Value)
+		if item.txID == txID {
+			item.txID = math.MaxUint64
+			item.inBTree = true
+		}
 	}
 }
 
