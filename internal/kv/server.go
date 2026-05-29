@@ -104,13 +104,31 @@ func (s *Server) handleBatchPut(w http.ResponseWriter, r *http.Request) {
 		kvs[key] = val
 	}
 
-	seq, err := s.store.BatchPut(r.Context(), kvs)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if batchStore, ok := s.store.(BatchKeyValueStore); ok {
+		seq, err := batchStore.BatchPut(r.Context(), kvs)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("X-Sequence", fmt.Sprint(seq))
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	w.Header().Set("X-Sequence", fmt.Sprint(seq))
+	var maxSeq uint64
+	for key, val := range kvs {
+		seq, err := s.store.Put(r.Context(), key, val)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+
+	w.Header().Set("X-Sequence", fmt.Sprint(maxSeq))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -121,23 +139,38 @@ func (s *Server) handleBatchGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.store.BatchGet(r.Context(), keys)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	mw := multipart.NewWriter(w)
 	w.Header().Set("Content-Type", mw.FormDataContentType())
 
-	for key, val := range results {
-		h := make(textproto.MIMEHeader)
-		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
-		part, err := mw.CreatePart(h)
+	if batchStore, ok := s.store.(BatchKeyValueStore); ok {
+		results, err := batchStore.BatchGet(r.Context(), keys)
 		if err != nil {
-			continue
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		part.Write(val)
+
+		for key, val := range results {
+			h := make(textproto.MIMEHeader)
+			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
+			part, err := mw.CreatePart(h)
+			if err != nil {
+				continue
+			}
+			part.Write(val)
+		}
+	} else {
+		for _, key := range keys {
+			val, err := s.store.Get(r.Context(), key)
+			if err == nil && val != nil {
+				h := make(textproto.MIMEHeader)
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, key))
+				part, err := mw.CreatePart(h)
+				if err != nil {
+					continue
+				}
+				part.Write(val)
+			}
+		}
 	}
 
 	if err := mw.Close(); err != nil {
