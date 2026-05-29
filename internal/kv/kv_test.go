@@ -425,4 +425,55 @@ func TestStore_TransactionConsistency(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected tx2 commit to fail due to conflict, but it succeeded")
 	}
+
+	// Ensure tx2's writes are not visible
+	_, _, err = s.Get(ctx, nil, "account2")
+	if err == nil {
+		t.Fatalf("Expected account2 to not exist since tx2 aborted due to conflict")
+	}
+}
+
+func TestStore_TransactionAbortPreservesOldValue(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-abort-pres", nil, "journal-abort-pres", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Initial committed value
+	_, err = s.Put(ctx, nil, "shared-key", []byte("old-valid-value"))
+	if err != nil {
+		t.Fatalf("Initial put failed: %v", err)
+	}
+
+	// Start tx1 that modifies the key
+	tx1, err := s.StartTransaction(ctx, false)
+	if err != nil {
+		t.Fatalf("Failed to start tx1: %v", err)
+	}
+
+	_, err = s.Put(ctx, &tx1, "shared-key", []byte("new-aborted-value"))
+	if err != nil {
+		t.Fatalf("tx1 put failed: %v", err)
+	}
+
+	// Abort tx1
+	err = s.AbortTransaction(ctx, tx1)
+	if err != nil {
+		t.Fatalf("Abort failed: %v", err)
+	}
+
+	// Fetch key; should get the old value, not an error and not the aborted value
+	val, _, err := s.Get(ctx, nil, "shared-key")
+	if err != nil {
+		t.Fatalf("Get failed after abort: %v", err)
+	}
+
+	if string(val) != "old-valid-value" {
+		t.Errorf("Expected 'old-valid-value', got '%s'", string(val))
+	}
 }
