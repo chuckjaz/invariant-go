@@ -3,6 +3,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"invariant/internal/content"
@@ -475,5 +476,178 @@ func TestStore_TransactionAbortPreservesOldValue(t *testing.T) {
 
 	if string(val) != "old-valid-value" {
 		t.Errorf("Expected 'old-valid-value', got '%s'", string(val))
+	}
+}
+
+func TestStore_GetHistoryMerging(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-hist-merging", nil, "journal-hist-merging", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Put a value to trigger transaction initialization
+	_, err = s.Put(ctx, nil, "mkey", []byte("mval1"))
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Manually inject merging state
+	s.mu.Lock()
+	s.isMerging = true
+	s.mergingRecords = []Record{
+		{
+			Type:          RecordTypePut,
+			Key:           "mkey",
+			Value:         []byte("mval-merging"),
+			TransactionID: 2,
+		},
+	}
+	s.mergingIndex = map[string][]int{
+		"mkey": {0},
+	}
+	delete(s.pendingIndex, "mkey")
+	s.cache.mu.Lock()
+	delete(s.cache.items, "mkey")
+	s.cache.mu.Unlock()
+	s.mu.Unlock()
+
+	// Call GetHistory. It should read from mergingRecords!
+	page, err := s.GetHistory(ctx, nil, "mkey", 0, 100, 10)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+
+	// We expect the merging record to be found!
+	foundMerging := false
+	for _, val := range page.Values {
+		if string(val.Value) == "mval-merging" {
+			foundMerging = true
+		}
+	}
+	if !foundMerging {
+		t.Errorf("Expected to find the merging record, but it was not returned. Values: %+v", page.Values)
+	}
+
+	// Call Get. It should also read from mergingRecords!
+	val, txID, err := s.Get(ctx, nil, "mkey")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(val) != "mval-merging" || txID != 2 {
+		t.Errorf("Expected 'mval-merging' at txID 2, got '%s' at txID %d", string(val), txID)
+	}
+}
+
+type mockSlotsGetError struct {
+	slots.Slots
+	getError error
+	getData  string
+}
+
+func (m *mockSlotsGetError) Get(ctx context.Context, id string) (string, error) {
+	if m.getError != nil {
+		return "", m.getError
+	}
+	return m.getData, nil
+}
+
+type mockSlotsMulti struct {
+	slots.Slots
+	getFunc func(ctx context.Context, id string) (string, error)
+}
+
+func (m *mockSlotsMulti) Get(ctx context.Context, id string) (string, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, id)
+	}
+	return "", slots.ErrSlotNotFound
+}
+
+func TestStore_NewFileKeyValueStore_Errors(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+
+	// 1. slotClient.Get returns error on bTree root
+	badSlot1 := &mockSlotsGetError{
+		Slots:    slots.NewMemorySlots("test"),
+		getError: fmt.Errorf("simulated get error"),
+	}
+	_, err := NewFileKeyValueStore(ctx, badSlot1, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err == nil {
+		t.Errorf("Expected error when slotClient.Get fails on bTree root, got nil")
+	}
+
+	// 2. bTree root slot has invalid JSON
+	badSlot2 := &mockSlotsGetError{
+		Slots:   slots.NewMemorySlots("test"),
+		getData: "{invalid json",
+	}
+	_, err = NewFileKeyValueStore(ctx, badSlot2, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err == nil {
+		t.Errorf("Expected error when B-tree root slot has invalid JSON, got nil")
+	}
+
+	// 3. slotClient.Get returns error on journal slot
+	badSlot3 := &mockSlotsMulti{
+		Slots: slots.NewMemorySlots("test"),
+		getFunc: func(ctx context.Context, id string) (string, error) {
+			if id == "btree-slot" {
+				return "", slots.ErrSlotNotFound
+			}
+			return "", fmt.Errorf("simulated journal get error")
+		},
+	}
+	_, err = NewFileKeyValueStore(ctx, badSlot3, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err == nil {
+		t.Errorf("Expected error when slotClient.Get fails on journal slot, got nil")
+	}
+
+	// 4. journal slot has invalid JSON
+	badSlot4 := &mockSlotsMulti{
+		Slots: slots.NewMemorySlots("test"),
+		getFunc: func(ctx context.Context, id string) (string, error) {
+			if id == "btree-slot" {
+				return "", slots.ErrSlotNotFound
+			}
+			return "{invalid json", nil
+		},
+	}
+	_, err = NewFileKeyValueStore(ctx, badSlot4, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err == nil {
+		t.Errorf("Expected error when journal slot has invalid JSON, got nil")
+	}
+
+	// 5. NewJournal error (e.g. invalid journal baseDir)
+	tempFile, err := os.CreateTemp("", "journal-file-err")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	tempFile.Close()
+
+	emptySlot := slots.NewMemorySlots("test")
+	_, err = NewFileKeyValueStore(ctx, emptySlot, "btree-slot", nil, "journal-slot", nil, storeClient, tempFile.Name(), 1000000, 10, 10, content.WriterOptions{})
+	if err == nil {
+		t.Errorf("Expected error when NewJournal fails due to file path, got nil")
+	}
+
+	// 6. bTree root loadNode error
+	badSlot6 := &mockSlotsMulti{
+		Slots: slots.NewMemorySlots("test"),
+		getFunc: func(ctx context.Context, id string) (string, error) {
+			if id == "btree-slot" {
+				return `{"addr":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`, nil
+			}
+			return "", slots.ErrSlotNotFound
+		},
+	}
+	_, err = NewFileKeyValueStore(ctx, badSlot6, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Errorf("Expected store creation to succeed even if B-Tree root fails to load, but got: %v", err)
 	}
 }

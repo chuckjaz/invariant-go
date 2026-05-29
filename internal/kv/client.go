@@ -151,14 +151,17 @@ func (c *Client) Put(ctx context.Context, txID *uint64, key string, value []byte
 		return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	seqStr := resp.Header.Get("X-Sequence")
+	seqStr := resp.Header.Get("X-Transaction-ID")
 	if seqStr == "" {
-		return 0, fmt.Errorf("missing X-Sequence header")
+		seqStr = resp.Header.Get("X-Sequence")
+	}
+	if seqStr == "" {
+		return 0, fmt.Errorf("missing X-Transaction-ID header")
 	}
 
 	seq, err := strconv.ParseUint(seqStr, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid sequence number: %s", seqStr)
+		return 0, fmt.Errorf("invalid transaction ID: %s", seqStr)
 	}
 
 	return seq, nil

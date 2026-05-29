@@ -737,7 +737,8 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 			return HistoryPage{}, err
 		}
 		id = chk
-		txID = &id
+	} else {
+		id = *txID
 	}
 
 	var page HistoryPage
@@ -758,7 +759,9 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 	if indices, ok := s.pendingIndex[key]; ok {
 		for i := len(indices) - 1; i >= 0; i-- {
 			rec := s.pendingRecords[indices[i]]
-			if rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID && s.isVisibleLocked(id, rec.TransactionID) {
+			visible := s.isVisibleLocked(id, rec.TransactionID)
+			inRange := rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID
+			if inRange && visible {
 				page.Values = append(page.Values, ValueWithTransaction{
 					Value:         rec.Value,
 					TransactionID: rec.TransactionID,

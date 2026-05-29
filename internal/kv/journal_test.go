@@ -1,0 +1,138 @@
+package kv
+
+import (
+	"context"
+	"testing"
+
+	"invariant/internal/content"
+	"invariant/internal/slots"
+	"invariant/internal/storage"
+)
+
+func TestJournal_GettersAndSetters(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	tempDir := t.TempDir()
+
+	j, err := NewJournal(tempDir, store, slotClient, "j-slot", nil, nil, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create journal: %v", err)
+	}
+	defer j.Close()
+
+	if j.PreviousJournal() != nil {
+		t.Errorf("Expected nil previous journal link, got %+v", j.PreviousJournal())
+	}
+
+	dummyLink := &content.ContentLink{Address: "sha256:dummy"}
+	j.SetPreviousJournal(dummyLink)
+
+	if j.PreviousJournal() == nil || j.PreviousJournal().Address != "sha256:dummy" {
+		t.Errorf("Expected dummy link, got %+v", j.PreviousJournal())
+	}
+
+	// Verify LastRecordType defaults to RecordTypePut or TxStart
+	// Append a RecordTypeTxStart
+	rec := Record{Type: RecordTypeTxStart, TransactionID: 100}
+	flushed, err := j.Append(ctx, rec)
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+	if flushed {
+		t.Errorf("Did not expect flush on first write")
+	}
+
+	if j.LastRecordType() != RecordTypeTxStart {
+		t.Errorf("Expected LastRecordType to be RecordTypeTxStart, got %v", j.LastRecordType())
+	}
+}
+
+func TestJournal_AutoFlush(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	tempDir := t.TempDir()
+
+	// maxEntries = 2 (first write is header, second is record, third triggers flush? No, entries count increments on Record append)
+	// Let's trace NewJournal:
+	// - NewJournal opens file, writes header, and does file.Sync()
+	// - entries count is reset to 0 in openNewFile()
+	// - j.Append increments j.entries. When entries >= maxEntries, it flushes.
+	// So with maxEntries = 2:
+	// Append 1: entries = 1 (no flush)
+	// Append 2: entries = 2 (flushes!)
+	j, err := NewJournal(tempDir, store, slotClient, "j-slot", nil, nil, 2, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create journal: %v", err)
+	}
+	defer j.Close()
+
+	// Append first record
+	rec1 := Record{Type: RecordTypePut, Key: "k1", Value: []byte("v1"), TransactionID: 1}
+	flushed1, err := j.Append(ctx, rec1)
+	if err != nil {
+		t.Fatalf("Append 1 failed: %v", err)
+	}
+	if flushed1 {
+		t.Errorf("Expected flushed=false on first append, got true")
+	}
+
+	// Append second record; this should trigger flush and return flushed=true
+	rec2 := Record{Type: RecordTypeTxCommit, Key: "", Value: nil, TransactionID: 1}
+	flushed2, err := j.Append(ctx, rec2)
+	if err != nil {
+		t.Fatalf("Append 2 failed: %v", err)
+	}
+	if !flushed2 {
+		t.Errorf("Expected flushed=true on second append, got false")
+	}
+
+	// The slots should have been updated with the new journal pointer
+	slotVal, err := slotClient.Get(ctx, "j-slot")
+	if err != nil {
+		t.Fatalf("Failed to retrieve slot: %v", err)
+	}
+	if slotVal == "" {
+		t.Errorf("Expected slot to contain the flushed journal content link, got empty")
+	}
+}
+
+func TestJournal_LoadLocalJournals_Error(t *testing.T) {
+	// Directly construct a journal with an invalid directory to verify LoadLocalJournals error path
+	j := &Journal{
+		baseDir: "/nonexistent-directory-path-should-fail",
+	}
+
+	_, err := j.LoadLocalJournals()
+	if err == nil {
+		t.Errorf("Expected error when loading from nonexistent directory, got nil")
+	}
+}
+
+func TestJournal_CloseMultipleTimes(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	tempDir := t.TempDir()
+
+	j, err := NewJournal(tempDir, store, slotClient, "j-slot", nil, nil, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create journal: %v", err)
+	}
+
+	// First close: closes currentFile
+	if err := j.Close(); err != nil {
+		t.Errorf("First close failed: %v", err)
+	}
+
+	// Second close: should return an error since underlying file is already closed
+	if err := j.Close(); err == nil {
+		t.Errorf("Expected error on second close, got nil")
+	}
+
+	// Manually set currentFile to nil and close to cover nil branch
+	j.currentFile = nil
+	if err := j.Close(); err != nil {
+		t.Errorf("Close on nil currentFile failed: %v", err)
+	}
+}
