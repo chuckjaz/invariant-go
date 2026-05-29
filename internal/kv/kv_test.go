@@ -256,3 +256,173 @@ func TestStore_GetHistory(t *testing.T) {
 		t.Errorf("Expected HasMore to be false")
 	}
 }
+
+func TestStore_TransactionIsolation(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-iso", nil, "journal-iso", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Start a transaction
+	tx1, err := s.StartTransaction(ctx, false)
+	if err != nil {
+		t.Fatalf("Failed to start transaction: %v", err)
+	}
+
+	// tx1 writes a value
+	_, err = s.Put(ctx, &tx1, "iso-key", []byte("tx1-val"))
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Implicit read should NOT see tx1's write yet
+	_, _, err = s.Get(ctx, nil, "iso-key")
+	if err == nil {
+		t.Fatalf("Expected error getting uncommitted key, got nil")
+	}
+
+	// tx1 should see its own write
+	val, _, err := s.Get(ctx, &tx1, "iso-key")
+	if err != nil {
+		t.Fatalf("tx1 Get failed: %v", err)
+	}
+	if string(val) != "tx1-val" {
+		t.Errorf("Expected 'tx1-val', got %s", string(val))
+	}
+
+	// Abort tx1
+	err = s.AbortTransaction(ctx, tx1)
+	if err != nil {
+		t.Fatalf("Abort failed: %v", err)
+	}
+
+	// Implicit read should STILL NOT see tx1's write
+	_, _, err = s.Get(ctx, nil, "iso-key")
+	if err == nil {
+		t.Fatalf("Expected error getting aborted key, got nil")
+	}
+}
+
+func TestStore_TransactionAtomicity(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-atom", nil, "journal-atom", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// tx1 writes two keys
+	tx1, err := s.StartTransaction(ctx, false)
+	if err != nil {
+		t.Fatalf("Failed to start transaction: %v", err)
+	}
+
+	_, err = s.Put(ctx, &tx1, "atom-key1", []byte("val1"))
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+	_, err = s.Put(ctx, &tx1, "atom-key2", []byte("val2"))
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Neither is visible yet
+	_, _, err = s.Get(ctx, nil, "atom-key1")
+	if err == nil {
+		t.Fatalf("Expected error getting uncommitted key1")
+	}
+	_, _, err = s.Get(ctx, nil, "atom-key2")
+	if err == nil {
+		t.Fatalf("Expected error getting uncommitted key2")
+	}
+
+	// Commit tx1
+	err = s.CommitTransaction(ctx, tx1)
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Both should be visible now
+	v1, _, err := s.Get(ctx, nil, "atom-key1")
+	if err != nil || string(v1) != "val1" {
+		t.Errorf("Expected val1, got %s (err: %v)", string(v1), err)
+	}
+	v2, _, err := s.Get(ctx, nil, "atom-key2")
+	if err != nil || string(v2) != "val2" {
+		t.Errorf("Expected val2, got %s (err: %v)", string(v2), err)
+	}
+}
+
+func TestStore_TransactionConsistency(t *testing.T) {
+	ctx := context.Background()
+	storeClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-cons", nil, "journal-cons", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	// Initial setup
+	_, err = s.Put(ctx, nil, "account1", []byte("100"))
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// tx1 starts (sequential)
+	tx1, err := s.StartTransaction(ctx, true)
+	if err != nil {
+		t.Fatalf("Failed to start tx1: %v", err)
+	}
+
+	// tx2 starts (sequential)
+	tx2, err := s.StartTransaction(ctx, true)
+	if err != nil {
+		t.Fatalf("Failed to start tx2: %v", err)
+	}
+
+	// tx1 reads "account1"
+	v1, _, err := s.Get(ctx, &tx1, "account1")
+	if err != nil || string(v1) != "100" {
+		t.Fatalf("tx1 Get failed: %v", err)
+	}
+
+	// tx2 reads "account1"
+	v2, _, err := s.Get(ctx, &tx2, "account1")
+	if err != nil || string(v2) != "100" {
+		t.Fatalf("tx2 Get failed: %v", err)
+	}
+
+	// tx1 writes "account1" = "101"
+	_, err = s.Put(ctx, &tx1, "account1", []byte("101"))
+	if err != nil {
+		t.Fatalf("tx1 Put failed: %v", err)
+	}
+
+	// tx1 commits successfully
+	err = s.CommitTransaction(ctx, tx1)
+	if err != nil {
+		t.Fatalf("tx1 Commit failed: %v", err)
+	}
+
+	// tx2 writes "account2" = "1" (dependent on reading account1)
+	_, err = s.Put(ctx, &tx2, "account2", []byte("1"))
+	if err != nil {
+		t.Fatalf("tx2 Put failed: %v", err)
+	}
+
+	// tx2 commit should fail because its read set ("account1") was modified by tx1 after tx2 started
+	err = s.CommitTransaction(ctx, tx2)
+	if err == nil {
+		t.Fatalf("Expected tx2 commit to fail due to conflict, but it succeeded")
+	}
+}
