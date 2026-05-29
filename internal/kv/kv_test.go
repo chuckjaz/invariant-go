@@ -16,7 +16,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store
-	s, err := NewStore(ctx, slotClient, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2, content.WriterOptions{})
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-slot", nil, "journal-slot", nil, storeClient, t.TempDir(), 1000000, 2, 2, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestStore_BTreeSplit(t *testing.T) {
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store. MaxKeys = 100, we need to insert > 100 to cause split. We set mergeThreshold = 10 to merge frequently.
-	s, err := NewStore(ctx, slotClient, "btree-split-slot", nil, "journal-split-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
+	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-split-slot", nil, "journal-split-slot", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 	journalDir := t.TempDir()
 
 	// Create first store with very large merge threshold to keep data in journal
-	s1, err := NewStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
+	s1, err := NewFileKeyValueStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store 1: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 	s1.Close() // this should close journal files
 
 	// Create second store pointing to same slots and journal directory
-	s2, err := NewStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
+	s2, err := NewFileKeyValueStore(ctx, slotClient, "btree-recovery-slot", nil, "journal-recovery-slot", nil, storeClient, journalDir, 1000000, 1000, 1000, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store 2: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 
 	// Create first store: large bTree merge threshold to prevent merges,
 	// small journal flush threshold to force multiple uploads.
-	s1, err := NewStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, journalDir, 1000000, 1000, 2, content.WriterOptions{})
+	s1, err := NewFileKeyValueStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, journalDir, 1000000, 1000, 2, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store 1: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 	emptyDir := t.TempDir()
 
 	// Create second store pointing to the same slots, but empty local directory.
-	s2, err := NewStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, emptyDir, 1000000, 1000, 2, content.WriterOptions{})
+	s2, err := NewFileKeyValueStore(ctx, slotClient, "btree-remote-rec-slot", nil, "journal-remote-rec-slot", nil, storeClient, emptyDir, 1000000, 1000, 2, content.WriterOptions{})
 	if err != nil {
 		t.Fatalf("Failed to create store 2: %v", err)
 	}

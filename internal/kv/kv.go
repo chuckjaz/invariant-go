@@ -13,7 +13,15 @@ import (
 )
 
 // Store represents the Key-Value service orchestration layer.
-type Store struct {
+type KeyValueStore interface {
+	Put(ctx context.Context, key string, value []byte) (uint64, error)
+	Get(ctx context.Context, key string) ([]byte, error)
+	BatchPut(ctx context.Context, kvs map[string][]byte) (uint64, error)
+	BatchGet(ctx context.Context, keys []string) (map[string][]byte, error)
+}
+
+// FileKeyValueStore represents the Key-Value service orchestration layer.
+type FileKeyValueStore struct {
 	mu              sync.RWMutex
 	slotClient      slots.Slots
 	btreeSlotID     string
@@ -31,7 +39,7 @@ type Store struct {
 	bTreeMergeThreshold int
 }
 
-func NewStore(
+func NewFileKeyValueStore(
 	ctx context.Context,
 	slotClient slots.Slots,
 	btreeSlotID string,
@@ -44,8 +52,8 @@ func NewStore(
 	bTreeMergeThreshold int,
 	journalFlushThreshold int,
 	opts content.WriterOptions,
-) (*Store, error) {
-	s := &Store{
+) (*FileKeyValueStore, error) {
+	s := &FileKeyValueStore{
 		slotClient:          slotClient,
 		btreeSlotID:         btreeSlotID,
 		btreeSlotAuth:       btreeSlotAuth,
@@ -123,12 +131,12 @@ func NewStore(
 	return s, nil
 }
 
-func (s *Store) Close() error {
+func (s *FileKeyValueStore) Close() error {
 	return s.journal.Close()
 }
 
 // Put adds a new key-value pair.
-func (s *Store) Put(ctx context.Context, key string, value []byte) (uint64, error) {
+func (s *FileKeyValueStore) Put(ctx context.Context, key string, value []byte) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -164,7 +172,7 @@ func (s *Store) Put(ctx context.Context, key string, value []byte) (uint64, erro
 
 // mergeToBTree takes pending records and inserts them into the B-Tree, updating the slot.
 // MUST be called with s.mu Lock held.
-func (s *Store) mergeToBTree(ctx context.Context) error {
+func (s *FileKeyValueStore) mergeToBTree(ctx context.Context) error {
 	if len(s.pendingRecords) == 0 {
 		return nil
 	}
@@ -213,7 +221,7 @@ func (s *Store) mergeToBTree(ctx context.Context) error {
 }
 
 // Get retrieves the latest value for a key.
-func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
+func (s *FileKeyValueStore) Get(ctx context.Context, key string) ([]byte, error) {
 	// Try cache first
 	if rec, ok := s.cache.Get(key); ok {
 		return rec.Value, nil
@@ -256,4 +264,31 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	}, true)
 
 	return valBytes, nil
+}
+
+// BatchPut adds multiple key-value pairs at once.
+func (s *FileKeyValueStore) BatchPut(ctx context.Context, kvs map[string][]byte) (uint64, error) {
+	var maxSeq uint64
+	for key, val := range kvs {
+		seq, err := s.Put(ctx, key, val)
+		if err != nil {
+			return 0, err
+		}
+		if seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return maxSeq, nil
+}
+
+// BatchGet fetches the values for multiple keys at once.
+func (s *FileKeyValueStore) BatchGet(ctx context.Context, keys []string) (map[string][]byte, error) {
+	results := make(map[string][]byte)
+	for _, key := range keys {
+		val, err := s.Get(ctx, key)
+		if err == nil && val != nil {
+			results[key] = val
+		}
+	}
+	return results, nil
 }

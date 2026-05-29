@@ -169,7 +169,7 @@ func main() {
 		}
 	}
 
-	store, err := kv.NewStore(
+	store, err := kv.NewFileKeyValueStore(
 		context.Background(),
 		slotsClient,
 		btreeSlotID,
