@@ -601,12 +601,19 @@ func (s *FileKeyValueStore) Get(ctx context.Context, txID *uint64, key string) (
 		id = *txID
 	}
 
-	s.mu.Lock()
+	s.mu.RLock()
 	tx := s.transactions[id]
-	if tx != nil && tx.Sequential && tx.State == TxActive {
-		tx.ReadSet[key] = struct{}{}
+	isSeqAndActive := tx != nil && tx.Sequential && tx.State == TxActive
+	s.mu.RUnlock()
+
+	if isSeqAndActive {
+		s.mu.Lock()
+		tx = s.transactions[id]
+		if tx != nil && tx.Sequential && tx.State == TxActive {
+			tx.ReadSet[key] = struct{}{}
+		}
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 
 	// Try cache first
 	if rec, ok := s.cache.Get(key); ok {
@@ -738,7 +745,14 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 	s.mu.RLock()
 	tx := s.transactions[id]
 	if tx != nil && tx.Sequential && tx.State == TxActive {
-		tx.ReadSet[key] = struct{}{}
+		s.mu.RUnlock()
+		s.mu.Lock()
+		tx = s.transactions[id]
+		if tx != nil && tx.Sequential && tx.State == TxActive {
+			tx.ReadSet[key] = struct{}{}
+		}
+		s.mu.Unlock()
+		s.mu.RLock()
 	}
 
 	if indices, ok := s.pendingIndex[key]; ok {

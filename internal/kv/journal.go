@@ -118,8 +118,12 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	if err := j.currentEncoder.Encode(entry); err != nil {
 		return false, err
 	}
-	if err := j.currentFile.Sync(); err != nil {
-		return false, err
+	// ACID Durability Rule: Only sync to disk synchronously for commit or checkpoint records.
+	// This ensures previously buffered updates are safely persisted at commit time.
+	if rec.Type == RecordTypeTxCommit || rec.Type == RecordTypeTxCheckpoint {
+		if err := j.currentFile.Sync(); err != nil {
+			return false, err
+		}
 	}
 
 	j.lastRecordType = rec.Type
