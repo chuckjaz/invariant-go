@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"invariant/internal/content"
@@ -43,6 +44,7 @@ type JournalEntry struct {
 }
 
 type Journal struct {
+	mu              sync.Mutex
 	baseDir         string
 	storage         storage.Storage
 	slotClient      slots.Slots
@@ -103,6 +105,9 @@ func (j *Journal) openNewFile() error {
 
 // Append writes a new record to the local journal. Returns true if it was flushed.
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	entry := JournalEntry{Record: &rec}
 	if err := j.currentEncoder.Encode(entry); err != nil {
 		return false, err
@@ -114,7 +119,7 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.lastRecordType = rec.Type
 	j.entries++
 	if j.entries >= j.maxEntries {
-		if err := j.Flush(ctx); err != nil {
+		if err := j.flushLocked(ctx); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -124,11 +129,13 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 
 // LastRecordType returns the type of the most recently appended record in the current active journal.
 func (j *Journal) LastRecordType() RecordType {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	return j.lastRecordType
 }
 
-// Flush closes the current journal, uploads it to storage, updates the previousJournal pointer, and opens a new file.
-func (j *Journal) Flush(ctx context.Context) error {
+// flushLocked performs the actual flush, assumes j.mu is held.
+func (j *Journal) flushLocked(ctx context.Context) error {
 	if j.currentFile == nil {
 		return nil
 	}
@@ -169,7 +176,16 @@ func (j *Journal) Flush(ctx context.Context) error {
 	return j.openNewFile()
 }
 
+// Flush closes the current journal, uploads it to storage, updates the previousJournal pointer, and opens a new file.
+func (j *Journal) Flush(ctx context.Context) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.flushLocked(ctx)
+}
+
 func (j *Journal) Close() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	if j.currentFile != nil {
 		return j.currentFile.Close()
 	}
@@ -177,11 +193,15 @@ func (j *Journal) Close() error {
 }
 
 func (j *Journal) PreviousJournal() *content.ContentLink {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	return j.previousJournal
 }
 
 // SetPreviousJournal updates the journal pointer, used after B-tree merge.
 func (j *Journal) SetPreviousJournal(link *content.ContentLink) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	j.previousJournal = link
 }
 

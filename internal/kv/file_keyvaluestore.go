@@ -47,7 +47,13 @@ type FileKeyValueStore struct {
 	activeTxs    map[uint64]struct{}
 
 	pendingRecords      []Record
+	pendingIndex        map[string][]int
 	bTreeMergeThreshold int
+
+	mergingRecords []Record
+	mergingIndex   map[string][]int
+	mergeMu        sync.Mutex
+	isMerging      bool
 }
 
 func NewFileKeyValueStore(
@@ -76,6 +82,8 @@ func NewFileKeyValueStore(
 		bTreeMergeThreshold: bTreeMergeThreshold,
 		transactions:        make(map[uint64]*Transaction),
 		activeTxs:           make(map[uint64]struct{}),
+		pendingIndex:        make(map[string][]int),
+		mergingIndex:        make(map[string][]int),
 	}
 
 	// 1. Get B-Tree root from slot
@@ -181,6 +189,7 @@ func (s *FileKeyValueStore) replayJournalRecord(rec Record) {
 	case RecordTypePut:
 		s.cache.Add(rec, false)
 		s.pendingRecords = append(s.pendingRecords, rec)
+		s.pendingIndex[rec.Key] = append(s.pendingIndex[rec.Key], len(s.pendingRecords)-1)
 		if tx, ok := s.transactions[rec.TransactionID]; ok {
 			tx.WriteSet[rec.Key] = struct{}{}
 		}
@@ -220,14 +229,25 @@ func (s *FileKeyValueStore) isVisibleLocked(txID uint64, recordTxID uint64) bool
 }
 
 func (s *FileKeyValueStore) getLatestCommittedTxIDLocked(ctx context.Context, key string) (uint64, bool) {
-	for i := len(s.pendingRecords) - 1; i >= 0; i-- {
-		rec := s.pendingRecords[i]
-		if rec.Key == key {
+	if indices, ok := s.pendingIndex[key]; ok {
+		for i := len(indices) - 1; i >= 0; i-- {
+			rec := s.pendingRecords[indices[i]]
 			if tx, ok := s.transactions[rec.TransactionID]; ok && tx.State == TxCommitted {
 				return rec.TransactionID, true
 			}
 		}
 	}
+	if s.isMerging {
+		if indices, ok := s.mergingIndex[key]; ok {
+			for i := len(indices) - 1; i >= 0; i-- {
+				rec := s.mergingRecords[indices[i]]
+				if tx, ok := s.transactions[rec.TransactionID]; ok && tx.State == TxCommitted {
+					return rec.TransactionID, true
+				}
+			}
+		}
+	}
+
 	// Warning: Calling B-Tree search while holding a lock might be slow if a network fetch occurs.
 	_, txID, found, _ := s.btree.Search(ctx, s.bTreeRoot, key)
 	if found {
@@ -237,6 +257,8 @@ func (s *FileKeyValueStore) getLatestCommittedTxIDLocked(ctx context.Context, ke
 }
 
 func (s *FileKeyValueStore) Close() error {
+	s.mergeMu.Lock()
+	defer s.mergeMu.Unlock()
 	return s.journal.Close()
 }
 
@@ -396,10 +418,7 @@ func (s *FileKeyValueStore) CommitTransaction(ctx context.Context, txID uint64) 
 	delete(s.activeTxs, txID)
 
 	if len(s.pendingRecords) >= s.bTreeMergeThreshold || flushed {
-		err := s.mergeToBTree(ctx)
-		if err != nil {
-			fmt.Printf("Error merging to BTree: %v\n", err)
-		}
+		s.triggerAsyncMerge(ctx)
 	}
 
 	return nil
@@ -445,13 +464,11 @@ func (s *FileKeyValueStore) Put(ctx context.Context, txID *uint64, key string, v
 	// 2. Add to cache and pending
 	s.cache.Add(rec, false)
 	s.pendingRecords = append(s.pendingRecords, rec)
+	s.pendingIndex[key] = append(s.pendingIndex[key], len(s.pendingRecords)-1)
 
 	// 3. Merge to BTree if threshold reached
 	if len(s.pendingRecords) >= s.bTreeMergeThreshold || flushed {
-		err := s.mergeToBTree(ctx)
-		if err != nil {
-			fmt.Printf("Error merging to BTree: %v\n", err)
-		}
+		s.triggerAsyncMerge(ctx)
 	}
 	s.mu.Unlock()
 
@@ -465,75 +482,108 @@ func (s *FileKeyValueStore) Put(ctx context.Context, txID *uint64, key string, v
 	return *txID, nil
 }
 
-// mergeToBTree takes committed pending records and inserts them into the B-Tree.
+// triggerAsyncMerge starts a background B-Tree merge if one isn't already running.
 // MUST be called with s.mu Lock held.
-func (s *FileKeyValueStore) mergeToBTree(ctx context.Context) error {
-	if len(s.pendingRecords) == 0 {
-		return nil
+func (s *FileKeyValueStore) triggerAsyncMerge(ctx context.Context) {
+	if s.isMerging || len(s.pendingRecords) == 0 {
+		return
 	}
-
-	// Upload journal if not flushed yet
-	if s.journal.entries > 0 {
-		if err := s.journal.Flush(ctx); err != nil {
-			return err
-		}
-	}
-
-	lastJournal := s.journal.PreviousJournal()
 
 	var toMerge []Record
 	var newPending []Record
-	var maxTxID uint64
 
 	for _, rec := range s.pendingRecords {
 		tx := s.transactions[rec.TransactionID]
 		if tx != nil && (tx.State == TxCommitted || tx.State == TxAborted || rec.Type == RecordTypeTxCheckpoint) {
 			if tx.State == TxCommitted || rec.Type == RecordTypeTxCheckpoint {
 				toMerge = append(toMerge, rec)
-				if rec.TransactionID > maxTxID {
-					maxTxID = rec.TransactionID
-				}
 			}
-			// Aborted are just dropped from pending
 		} else {
 			newPending = append(newPending, rec)
 		}
 	}
 
-	s.pendingRecords = newPending
-
 	if len(toMerge) == 0 {
-		return nil
+		s.pendingRecords = newPending
+		s.pendingIndex = make(map[string][]int)
+		for i, rec := range newPending {
+			s.pendingIndex[rec.Key] = append(s.pendingIndex[rec.Key], i)
+		}
+		return
 	}
 
+	s.mergingRecords = toMerge
+	s.mergingIndex = make(map[string][]int)
+	for i, rec := range toMerge {
+		s.mergingIndex[rec.Key] = append(s.mergingIndex[rec.Key], i)
+	}
+
+	s.pendingRecords = newPending
+	s.pendingIndex = make(map[string][]int)
+	for i, rec := range newPending {
+		s.pendingIndex[rec.Key] = append(s.pendingIndex[rec.Key], i)
+	}
+
+	lastJournal := s.journal.PreviousJournal()
+	s.isMerging = true
+
+	go func(records []Record, jLink *content.ContentLink) {
+		s.mergeMu.Lock()
+		defer s.mergeMu.Unlock()
+
+		err := s.performMergeToBTree(context.Background(), records, jLink)
+		if err != nil {
+			fmt.Printf("Error merging to BTree: %v\n", err)
+		}
+
+		s.mu.Lock()
+		s.mergingRecords = nil
+		s.mergingIndex = nil
+		s.isMerging = false
+		s.mu.Unlock()
+	}(s.mergingRecords, lastJournal)
+}
+
+func (s *FileKeyValueStore) performMergeToBTree(ctx context.Context, records []Record, lastJournal *content.ContentLink) error {
+
+	var maxTxID uint64
+	for _, rec := range records {
+		if rec.TransactionID > maxTxID {
+			maxTxID = rec.TransactionID
+		}
+	}
+
+	s.mu.RLock()
+	rootAddr := s.bTreeRoot
+	txCounter := s.txCounter
+	s.mu.RUnlock()
+
 	// Insert into B-Tree
-	newRoot, err := s.btree.InsertBatch(ctx, s.bTreeRoot, toMerge, lastJournal, s.txCounter)
+	newRoot, err := s.btree.InsertBatch(ctx, rootAddr, records, lastJournal, txCounter)
 	if err != nil {
 		return err
 	}
 
-	// Update slot
 	newRootBytes, err := json.Marshal(newRoot)
 	if err != nil {
 		return err
 	}
 	newRootStr := string(newRootBytes)
 
-	if s.bTreeRoot == nil {
+	if rootAddr == nil {
 		err = s.slotClient.Create(ctx, s.btreeSlotID, newRootStr, "")
 	} else {
-		oldRootBytes, _ := json.Marshal(s.bTreeRoot)
+		oldRootBytes, _ := json.Marshal(rootAddr)
 		err = s.slotClient.Update(ctx, s.btreeSlotID, newRootStr, string(oldRootBytes), s.btreeSlotAuth)
 	}
 	if err != nil {
 		return err
 	}
 
-	// Update local state
+	s.mu.Lock()
 	s.bTreeRoot = &newRoot
-
-	// Mark cache items as in BTree so they can be evicted
-	s.cache.MarkInBTree(maxTxID) // Simplified
+	s.cache.MarkInBTree(maxTxID)
+	s.mu.Unlock()
 
 	return nil
 }
@@ -571,13 +621,28 @@ func (s *FileKeyValueStore) Get(ctx context.Context, txID *uint64, key string) (
 	var foundTxID uint64
 	var found bool
 
-	for i := len(s.pendingRecords) - 1; i >= 0; i-- {
-		rec := s.pendingRecords[i]
-		if rec.Key == key && s.isVisibleLocked(id, rec.TransactionID) {
-			valBytes = rec.Value
-			foundTxID = rec.TransactionID
-			found = true
-			break
+	if indices, ok := s.pendingIndex[key]; ok {
+		for i := len(indices) - 1; i >= 0; i-- {
+			rec := s.pendingRecords[indices[i]]
+			if s.isVisibleLocked(id, rec.TransactionID) {
+				valBytes = rec.Value
+				foundTxID = rec.TransactionID
+				found = true
+				break
+			}
+		}
+	}
+	if !found && s.isMerging {
+		if indices, ok := s.mergingIndex[key]; ok {
+			for i := len(indices) - 1; i >= 0; i-- {
+				rec := s.mergingRecords[indices[i]]
+				if s.isVisibleLocked(id, rec.TransactionID) {
+					valBytes = rec.Value
+					foundTxID = rec.TransactionID
+					found = true
+					break
+				}
+			}
 		}
 	}
 	rootAddr := s.bTreeRoot
@@ -676,20 +741,38 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 		tx.ReadSet[key] = struct{}{}
 	}
 
-	for i := len(s.pendingRecords) - 1; i >= 0; i-- {
-		rec := s.pendingRecords[i]
-		if rec.Key == key && rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID && s.isVisibleLocked(id, rec.TransactionID) {
-			page.Values = append(page.Values, ValueWithTransaction{
-				Value:         rec.Value,
-				TransactionID: rec.TransactionID,
-			})
-			if len(page.Values) >= pageSize {
-				page.HasMore = true
-				s.mu.RUnlock()
-				return page, nil
+	if indices, ok := s.pendingIndex[key]; ok {
+		for i := len(indices) - 1; i >= 0; i-- {
+			rec := s.pendingRecords[indices[i]]
+			if rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID && s.isVisibleLocked(id, rec.TransactionID) {
+				page.Values = append(page.Values, ValueWithTransaction{
+					Value:         rec.Value,
+					TransactionID: rec.TransactionID,
+				})
+				if len(page.Values) >= pageSize {
+					page.HasMore = true
+					s.mu.RUnlock()
+					return page, nil
+				}
 			}
-		} else if rec.Key == key && rec.TransactionID < minTxID {
-			break
+		}
+	}
+	if s.isMerging {
+		if indices, ok := s.mergingIndex[key]; ok {
+			for i := len(indices) - 1; i >= 0; i-- {
+				rec := s.mergingRecords[indices[i]]
+				if rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID && s.isVisibleLocked(id, rec.TransactionID) {
+					page.Values = append(page.Values, ValueWithTransaction{
+						Value:         rec.Value,
+						TransactionID: rec.TransactionID,
+					})
+					if len(page.Values) >= pageSize {
+						page.HasMore = true
+						s.mu.RUnlock()
+						return page, nil
+					}
+				}
+			}
 		}
 	}
 	rootAddr := s.bTreeRoot
