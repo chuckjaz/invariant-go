@@ -9,6 +9,9 @@ A directory can be uploaded to the storage system and then mounted locally via F
 
 The file system can be layered, which allows for files in a dirctory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
 
+### Key-Value store
+A key-value store is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data. The key-value store is backed by an immutable journal, an immutable B-Tree index, and an in-memory cache. 
+
 ### Automatic backup and recovery
 The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encyrpted copies of the files at rest.
 
@@ -17,7 +20,24 @@ If the local storage device fails, the system can be configured to automatically
 ### Replication
 When storing files locally, either on the same machine, or via a connected storage device, the data can be distributed amoung multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor. If the data is backed up to the cloud, the data will not be lost if the local storage device fails. The data will be read from the cloud storage provider not cached locally.
 
-## Executing the services
+## Microservices
+
+The file system and key-value are built on microservices. Here is a list of the services and their descriptions.
+
+| Service | Description |
+|---------|-----|
+| Storage | The storage service is the primary service that is used to store and retrieve data. It is a content addressed storage system that is built on top of a distributed storage system that can be scaled arbitrarily. |
+| Finder | The finder service is responsible for finding data among multiple storage devices. |
+| Distribute | The distribute service is responsible for distributing data among multiple storage devices. |
+| Discovery | The discovery service allows service detection, service registration, and service delegation. |
+| Slots | The slots service is responsible for allocating and managing slots. Slots are updateable addresses that maintain the current address of the root of a file system or the key-value store journal. |
+| Names | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs such as the ID of a device or the ID of a slot. |
+| Files | A file services that is the backing service for the FUSE file system and the NFS service. |
+| KeyValue | A key-value store service that allows storing and retrieving values for a given key. |
+
+Both the File and KeyValue service are privleged services as both services initized with the root content-link for all the data reachable by the service. If the data is encrypted, for example, they have access to the root link key, transitviely, all the other keys for the data. The Files service should only be run on the system that mounts the file system or the NFS export. The other services are unprivileged. They do not have access to the unecrypted data.
+
+## Executing services
 
 Many of the services support dynamic port binding if you omit the `-port` flag or provide `-port 0`. This is useful for avoiding port conflicts when running multiple instances.
 
