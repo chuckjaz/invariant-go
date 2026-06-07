@@ -100,4 +100,13 @@ func TestClient(t *testing.T) {
 	if ok {
 		t.Fatal("Expected Get to return false for non-existent data")
 	}
+
+	// Test unsupported methods List and Subscribe
+	chList := client.List(context.Background(), 10)
+	for range chList {
+	}
+
+	chSub := client.Subscribe(context.Background())
+	for range chSub {
+	}
 }

@@ -3,6 +3,8 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"strings"
 	"testing"
@@ -205,5 +207,79 @@ func TestCachingStorageSync(t *testing.T) {
 
 	if !hasA || !hasB {
 		t.Errorf("Sync failed to mark blocks as present in destHas")
+	}
+}
+
+func TestCachingStorageExtra(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+	overflow := NewInMemoryStorage()
+
+	// Max size = 100, desired size = 50
+	cs := NewCachingStorage(local, remote, 100, 50, false)
+	defer cs.Close()
+
+	// Test SetOverflow
+	cs.SetOverflow(overflow)
+
+	// Store directly to overflow
+	data := []byte("overflow block data")
+	addr, err := overflow.Store(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Store in overflow failed: %v", err)
+	}
+
+	// Test Has on overflow
+	if !cs.Has(context.Background(), addr) {
+		t.Error("Expected Has to return true for overflow block")
+	}
+
+	// Test Size on overflow
+	sz, ok := cs.Size(context.Background(), addr)
+	if !ok || sz != int64(len(data)) {
+		t.Errorf("Expected Size to return %d (ok: true), got %d (ok: %t)", len(data), sz, ok)
+	}
+
+	// Test Get on overflow (should fetch and cache locally)
+	rc, ok := cs.Get(context.Background(), addr)
+	if !ok {
+		t.Fatal("Expected Get to succeed for overflow block")
+	}
+	readData, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil || !bytes.Equal(readData, data) {
+		t.Errorf("Read mismatch or error: err=%v, got=%q", err, readData)
+	}
+
+	// Wait for cache promotion
+	time.Sleep(100 * time.Millisecond)
+	if !local.Has(context.Background(), addr) {
+		t.Error("Expected overflow block to be cached locally after Get")
+	}
+
+	// Test BatchStore & BatchHas
+	content1 := []byte("batch-1")
+	hash1 := sha256.Sum256(content1)
+	addr1 := hex.EncodeToString(hash1[:])
+
+	content2 := []byte("batch-2")
+	hash2 := sha256.Sum256(content2)
+	addr2 := hex.EncodeToString(hash2[:])
+
+	blocks := map[string]io.Reader{
+		addr1: bytes.NewReader(content1),
+		addr2: bytes.NewReader(content2),
+	}
+	err = cs.BatchStore(context.Background(), blocks)
+	if err != nil {
+		t.Fatalf("BatchStore failed: %v", err)
+	}
+
+	missing, err := cs.BatchHas(context.Background(), []string{addr1, addr2, "b3"})
+	if err != nil {
+		t.Fatalf("BatchHas failed: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "b3" {
+		t.Errorf("Expected missing to be ['b3'], got %v", missing)
 	}
 }

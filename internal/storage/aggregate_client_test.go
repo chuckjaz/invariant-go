@@ -3,6 +3,8 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -255,5 +257,82 @@ func TestAggregateClient_Sync(t *testing.T) {
 	c.Sync(ctx)
 	if mock.syncCount != 1 {
 		t.Errorf("expected still 1 sync, got %d", mock.syncCount)
+	}
+}
+
+func TestAggregateClient_Batch(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Setup with a client that supports batch
+	d := discovery.NewInMemoryDiscovery()
+	ts1, _ := setupTestServer()
+	defer ts1.Close()
+	d.Register(ctx, discovery.ServiceRegistration{ID: "node1", Address: ts1.URL, Protocols: []string{"storage-v1", "batch-storage-v1"}})
+
+	c := NewAggregateClient(nil, d, 1, 10)
+
+	// Test StoreAt
+	content := []byte("storeat aggregate data")
+	addrA, err := c.Store(ctx, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+	ok, err := c.StoreAt(ctx, addrA, bytes.NewReader(content))
+	if err != nil || !ok {
+		t.Errorf("StoreAt failed: err=%v, ok=%t", err, ok)
+	}
+
+	// Test BatchStore (supports batch)
+	content1 := []byte("batch-1")
+	hash1 := sha256.Sum256(content1)
+	addr1 := hex.EncodeToString(hash1[:])
+
+	content2 := []byte("batch-2")
+	hash2 := sha256.Sum256(content2)
+	addr2 := hex.EncodeToString(hash2[:])
+
+	blocks := map[string]io.Reader{
+		addr1: bytes.NewReader(content1),
+		addr2: bytes.NewReader(content2),
+	}
+	err = c.BatchStore(ctx, blocks)
+	if err != nil {
+		t.Fatalf("BatchStore (supportsBatch) failed: %v", err)
+	}
+
+	// Test BatchHas (supports batch)
+	missing, err := c.BatchHas(ctx, []string{addr1, addr2, "b3"})
+	if err != nil {
+		t.Fatalf("BatchHas (supportsBatch) failed: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "b3" {
+		t.Errorf("Expected missing to be ['b3'], got %v", missing)
+	}
+
+	// 2. Setup with a client that does NOT support batch
+	d2 := discovery.NewInMemoryDiscovery()
+	ts2, _ := setupTestServer()
+	defer ts2.Close()
+	d2.Register(ctx, discovery.ServiceRegistration{ID: "node2", Address: ts2.URL, Protocols: []string{"storage-v1"}}) // no batch-storage-v1
+
+	c2 := NewAggregateClient(nil, d2, 1, 10)
+
+	// Test BatchStore (does NOT support batch)
+	blocksNoBatch := map[string]io.Reader{
+		addr1: bytes.NewReader(content1),
+		addr2: bytes.NewReader(content2),
+	}
+	err = c2.BatchStore(ctx, blocksNoBatch)
+	if err != nil {
+		t.Fatalf("BatchStore (no supportsBatch) failed: %v", err)
+	}
+
+	// Test BatchHas (does NOT support batch)
+	missing2, err := c2.BatchHas(ctx, []string{addr1, addr2, "b3"})
+	if err != nil {
+		t.Fatalf("BatchHas (no supportsBatch) failed: %v", err)
+	}
+	if len(missing2) != 1 || missing2[0] != "b3" {
+		t.Errorf("Expected missing to be ['b3'], got %v", missing2)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStorageServer(t *testing.T) {
@@ -176,15 +177,11 @@ func TestStorageServer_Fetch(t *testing.T) {
 		t.Errorf("expected HEAD /storage/fetch to return 200 OK, got %d", resHead.StatusCode)
 	}
 
-	// 2. Fetch from source ID
-	fetchReqBody := `{"address":"` + sourceAddr + `","container":"` + sourceID + `"}`
-	resFetch, err := http.Post(destTS.URL+"/fetch", "application/json", strings.NewReader(fetchReqBody))
+	// 2. Fetch from source ID using Client.Fetch
+	destClient := NewClient(destTS.URL, destTS.Client())
+	err = destClient.Fetch(context.Background(), sourceAddr, sourceID, "")
 	if err != nil {
-		t.Fatal(err)
-	}
-	resFetch.Body.Close()
-	if resFetch.StatusCode != http.StatusOK {
-		t.Errorf("expected POST /storage/fetch to return 200 OK, got %d", resFetch.StatusCode)
+		t.Fatalf("Fetch failed: %v", err)
 	}
 
 	// 3. Verify destination has the block
@@ -201,10 +198,148 @@ func TestStorageServer_Fetch(t *testing.T) {
 	// 4. Fetch missing ID (should fail)
 	// Use a new arbitrary address so the local storage optimization logic doesn't return 200 early.
 	badAddr := "0101010101010101010101010101010101010101010101010101010101010101"
-	badFetchReqBody := `{"address":"` + badAddr + `","container":"missing-node-id"}`
-	resBadFetch, _ := http.Post(destTS.URL+"/fetch", "application/json", strings.NewReader(badFetchReqBody))
-	resBadFetch.Body.Close()
-	if resBadFetch.StatusCode != http.StatusBadGateway {
-		t.Errorf("expected 502 Bad Gateway for missing node, got %d", resBadFetch.StatusCode)
+	err = destClient.Fetch(context.Background(), badAddr, "missing-node-id", "")
+	if err == nil {
+		t.Error("expected fetch of missing node to return error")
+	}
+
+	// 5. Fetch using fallback address
+	// Clear block from destStorage so we can test retrieving it again via fallback
+	destStorage.Remove(context.Background(), sourceAddr)
+	err = destClient.Fetch(context.Background(), sourceAddr, "missing-node-id-with-fallback", sourceTS.URL)
+	if err != nil {
+		t.Fatalf("Fetch with fallback failed: %v", err)
+	}
+	if !destStorage.Has(context.Background(), sourceAddr) {
+		t.Error("expected destination to store block retrieved via fallback")
+	}
+}
+
+// nonBatchServerStorage wraps Storage but hides BatchStorage interface.
+type nonBatchServerStorage struct {
+	Storage
+}
+
+func TestStorageServer_Batch(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Test with a backend that implements BatchStorage (InMemoryStorage)
+	storageImpl := NewInMemoryStorage()
+	server := NewStorageServer(storageImpl)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+
+	content1 := []byte("batch-payload-1")
+	hash1 := sha256.Sum256(content1)
+	addr1 := hex.EncodeToString(hash1[:])
+
+	content2 := []byte("batch-payload-2")
+	hash2 := sha256.Sum256(content2)
+	addr2 := hex.EncodeToString(hash2[:])
+
+	blocks := map[string]io.Reader{
+		addr1: bytes.NewReader(content1),
+		addr2: bytes.NewReader(content2),
+	}
+
+	err := client.BatchStore(ctx, blocks)
+	if err != nil {
+		t.Fatalf("BatchStore failed: %v", err)
+	}
+
+	missing, err := client.BatchHas(ctx, []string{addr1, addr2, "b3"})
+	if err != nil {
+		t.Fatalf("BatchHas failed: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "b3" {
+		t.Errorf("Expected missing to be ['b3'], got %v", missing)
+	}
+
+	// 2. Test with a backend that does NOT implement BatchStorage
+	nonBatchImpl := &nonBatchServerStorage{storageImpl}
+	server2 := NewStorageServer(nonBatchImpl)
+	ts2 := httptest.NewServer(server2.Handler())
+	defer ts2.Close()
+
+	client2 := NewClient(ts2.URL, ts2.Client())
+
+	content3 := []byte("batch-payload-4")
+	hash3 := sha256.Sum256(content3)
+	addr3 := hex.EncodeToString(hash3[:])
+
+	blocks2 := map[string]io.Reader{
+		addr3: bytes.NewReader(content3),
+	}
+
+	err = client2.BatchStore(ctx, blocks2)
+	if err != nil {
+		t.Fatalf("BatchStore (non-batch server) failed: %v", err)
+	}
+
+	missing2, err := client2.BatchHas(ctx, []string{addr3, "b5"})
+	if err != nil {
+		t.Fatalf("BatchHas (non-batch server) failed: %v", err)
+	}
+	if len(missing2) != 1 || missing2[0] != "b5" {
+		t.Errorf("Expected missing to be ['b5'], got %v", missing2)
+	}
+}
+
+type mockNotifyClient struct {
+	notified chan []string
+}
+
+func (m *mockNotifyClient) Notify(id string, batch []string) error {
+	m.notified <- batch
+	return nil
+}
+
+func TestStorageServer_StartNotification(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	memStore := NewInMemoryStorage()
+	server := NewStorageServer(memStore)
+
+	// Pre-load a block
+	content := []byte("notify content")
+	addr, err := memStore.Store(ctx, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+
+	client := &mockNotifyClient{
+		notified: make(chan []string, 10),
+	}
+
+	// Start notifications with batchSize=1, duration=10ms
+	server.StartNotification(ctx, []NotifyClient{client}, 1, 10*time.Millisecond)
+
+	// 1. Should notify about the existing block immediately
+	select {
+	case batch := <-client.notified:
+		if len(batch) != 1 || batch[0] != addr {
+			t.Errorf("Expected initial notification for %s, got %v", addr, batch)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("Timed out waiting for initial notification")
+	}
+
+	// 2. Store another block, should notify via subscribe
+	content2 := []byte("notify content 2")
+	addr2, err := memStore.Store(ctx, bytes.NewReader(content2))
+	if err != nil {
+		t.Fatalf("Store failed: %v", err)
+	}
+
+	select {
+	case batch := <-client.notified:
+		if len(batch) != 1 || batch[0] != addr2 {
+			t.Errorf("Expected live notification for %s, got %v", addr2, batch)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("Timed out waiting for live notification")
 	}
 }

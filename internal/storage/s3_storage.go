@@ -19,9 +19,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+type s3ClientAPI interface {
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+}
+
 // S3Storage implements the Storage interface by saving blobs to AWS S3.
 type S3Storage struct {
-	client      *s3.Client
+	client      s3ClientAPI
 	bucket      string
 	prefix      string
 	id          string
@@ -43,7 +51,10 @@ func NewS3Storage(ctx context.Context, bucket string, prefix string) (*S3Storage
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 	client := s3.NewFromConfig(cfg)
+	return newS3StorageWithClient(ctx, bucket, prefix, client)
+}
 
+func newS3StorageWithClient(ctx context.Context, bucket string, prefix string, client s3ClientAPI) (*S3Storage, error) {
 	// Fetch or create ID
 	idKey := "id"
 	if prefix != "" {
