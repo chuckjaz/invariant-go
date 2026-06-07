@@ -98,19 +98,26 @@ func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []stri
 
 	go func() {
 		defer close(ch)
+
+		var ids []string
 		s.store.Read(func(store map[string]SlotRecord) {
-			var chunk []string
+			ids = make([]string, 0, len(store))
 			for id := range store {
-				chunk = append(chunk, id)
-				if len(chunk) >= chunkSize {
-					ch <- chunk
-					chunk = nil
-				}
-			}
-			if len(chunk) > 0 {
-				ch <- chunk
+				ids = append(ids, id)
 			}
 		})
+
+		for i := 0; i < len(ids); i += chunkSize {
+			end := i + chunkSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			select {
+			case ch <- ids[i:end]:
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	return ch

@@ -103,18 +103,22 @@ func (m *MemorySlots) List(ctx context.Context, chunkSize int) <-chan []string {
 	go func() {
 		defer close(ch)
 		m.mu.RLock()
-		defer m.mu.RUnlock()
-
-		var chunk []string
+		ids := make([]string, 0, len(m.slots))
 		for id := range m.slots {
-			chunk = append(chunk, id)
-			if len(chunk) >= chunkSize {
-				ch <- chunk
-				chunk = nil
-			}
+			ids = append(ids, id)
 		}
-		if len(chunk) > 0 {
-			ch <- chunk
+		m.mu.RUnlock()
+
+		for i := 0; i < len(ids); i += chunkSize {
+			end := i + chunkSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			select {
+			case ch <- ids[i:end]:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
