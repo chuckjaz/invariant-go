@@ -1,10 +1,12 @@
 package finder
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"invariant/internal/discovery"
 	"invariant/internal/notify"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
@@ -56,7 +58,7 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 	f, _ := NewMemoryFinder(selfIDStr)
 	server := NewFinderServer(f, disc)
 
-	ts := httptest.NewServer(server.Handler())
+	ts := httptest.NewServer(server)
 	defer ts.Close()
 
 	client := NewClient(ts.URL, nil)
@@ -109,7 +111,7 @@ func TestFinderPeerAndPushBlocks(t *testing.T) {
 	idA := "0000000000000000000000000000000000000000000000000000000000000001"
 	fA, _ := NewMemoryFinder(idA)
 	serverA := NewFinderServer(fA, disc)
-	tsA := httptest.NewServer(serverA.Handler())
+	tsA := httptest.NewServer(serverA)
 	defer tsA.Close()
 
 	// Finder B is distance 2 from block (XOR: 2 ^ 0 = 2).
@@ -117,7 +119,7 @@ func TestFinderPeerAndPushBlocks(t *testing.T) {
 	idB := "0000000000000000000000000000000000000000000000000000000000000000"
 	fB, _ := NewMemoryFinder(idB)
 	serverB := NewFinderServer(fB, disc)
-	tsB := httptest.NewServer(serverB.Handler())
+	tsB := httptest.NewServer(serverB)
 	defer tsB.Close()
 
 	// Register Finder B in discovery so Finder A can push to it
@@ -163,7 +165,7 @@ func TestFinderReturnsFinders(t *testing.T) {
 	idA := "0000000000000000000000000000000000000000000000000000000000000001"
 	fA, _ := NewMemoryFinder(idA)
 	serverA := NewFinderServer(fA, disc)
-	tsA := httptest.NewServer(serverA.Handler())
+	tsA := httptest.NewServer(serverA)
 	defer tsA.Close()
 
 	// Add B and C to A's routing table
@@ -200,5 +202,64 @@ func TestFinderReturnsFinders(t *testing.T) {
 		if r.ID != idB && r.ID != idC {
 			t.Errorf("Unexpected finder ID: %s", r.ID)
 		}
+	}
+}
+
+func TestFinderServer_Errors(t *testing.T) {
+	disc := newMockDiscovery()
+	selfIDStr := "1111111111111111111111111111111111111111111111111111111111111111"
+	f, _ := NewMemoryFinder(selfIDStr)
+	server := NewFinderServer(f, disc)
+
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+
+	client := NewClient(ts.URL, nil)
+
+	// 1. Client ID() should return empty string
+	if id := client.ID(); id != "" {
+		t.Errorf("Expected empty string for client.ID(), got %q", id)
+	}
+
+	// 2. GET /id
+	resp, err := ts.Client().Get(ts.URL + "/id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 OK for /id, got %d", resp.StatusCode)
+	}
+
+	// 3. GET /address with invalid format (contains 'z')
+	resp, err = ts.Client().Get(ts.URL + "/zz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid address, got %d", resp.StatusCode)
+	}
+
+	// 4. PUT /notify/{id} with invalid JSON
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/notify/storage1", bytes.NewBuffer([]byte("{invalid json")))
+	resp, err = ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid JSON notify, got %d", resp.StatusCode)
+	}
+
+	// 5. PUT /peer/{id} with invalid peer ID
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/peer/invalid-peer-id", nil)
+	resp, err = ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid peer ID, got %d", resp.StatusCode)
 	}
 }

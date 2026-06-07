@@ -107,3 +107,109 @@ func TestFindClosest(t *testing.T) {
 		t.Errorf("Expected n3 to be 3rd closest")
 	}
 }
+
+func TestParseNodeID_Invalid(t *testing.T) {
+	_, err := ParseNodeID("invalid-hex")
+	if err == nil {
+		t.Error("Expected error parsing invalid hex, got nil")
+	}
+
+	_, err = NewMemoryFinder("invalid-hex")
+	if err == nil {
+		t.Error("Expected error creating MemoryFinder with invalid ID, got nil")
+	}
+}
+
+func TestRoutingTable_AddSelfAndDupAndEviction(t *testing.T) {
+	self := parse("0000000000000000000000000000000000000000000000000000000000000000")
+	rt := NewRoutingTable(self)
+
+	// 1. Add self (should be ignored)
+	rt.Add(self)
+	if len(rt.Snapshot()) != 0 {
+		t.Error("Adding self should not add to routing table")
+	}
+
+	// 2. Add node
+	n1 := parse("0000000000000000000000000000000000000000000000000000000000000001")
+	rt.Add(n1)
+	if len(rt.Snapshot()) != 1 {
+		t.Fatal("Failed to add node")
+	}
+
+	// 3. Add same node again (moves to tail/no-op since size is 1)
+	rt.Add(n1)
+	if len(rt.Snapshot()) != 1 {
+		t.Fatal("Routing table size changed on duplicate add")
+	}
+
+	// 4. MemoryFinder.RoutingTable method
+	mf, err := NewMemoryFinder("0000000000000000000000000000000000000000000000000000000000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mf.RoutingTable() == nil {
+		t.Error("RoutingTable() returned nil")
+	}
+}
+
+func TestRoutingTable_BucketLRUAndDuplicates(t *testing.T) {
+	self := parse("0000000000000000000000000000000000000000000000000000000000000000")
+	rt := NewRoutingTable(self)
+
+	// We'll add nodes that belong to the same bucket.
+	// PrefixLen(node) determines the bucket.
+	// Since self is all 0s, the bucket is the index of the first non-zero bit.
+	// Let's use nodes that have the first non-zero bit in the first byte at bit position 7 (value 1).
+	// So prefix len is 7. BucketIdx = 7.
+	// We can generate up to BucketSize + 2 nodes that fall into this bucket.
+	nodes := make([]NodeID, BucketSize+2)
+	for i := range nodes {
+		var n NodeID
+		n[0] = 1
+		n[1] = byte(i)
+		nodes[i] = n
+	}
+
+	// Add first BucketSize nodes
+	for i := 0; i < BucketSize; i++ {
+		rt.Add(nodes[i])
+	}
+
+	// Verify they are all in the bucket (index 7)
+	bucket7 := rt.buckets[7]
+	if len(bucket7) != BucketSize {
+		t.Fatalf("Expected bucket size %d, got %d", BucketSize, len(bucket7))
+	}
+
+	// Add the first node again. It should be moved to the tail of the bucket.
+	firstNode := nodes[0]
+	rt.Add(firstNode)
+	bucket7 = rt.buckets[7]
+	if len(bucket7) != BucketSize {
+		t.Fatalf("Bucket size changed: %d", len(bucket7))
+	}
+	if !bucket7[BucketSize-1].Equals(firstNode) {
+		t.Errorf("Expected first node to move to tail, but tail is %v", bucket7[BucketSize-1])
+	}
+
+	// Add a new node (nodes[BucketSize]), which should trigger eviction of the head (nodes[1])
+	headNode := bucket7[0] // this is nodes[1] since nodes[0] was moved to tail
+	if !headNode.Equals(nodes[1]) {
+		t.Errorf("Expected nodes[1] at the head, got %v", headNode)
+	}
+
+	newNode := nodes[BucketSize]
+	rt.Add(newNode)
+
+	bucket7 = rt.buckets[7]
+	// nodes[1] should be evicted, and newNode should be at the tail
+	for _, n := range bucket7 {
+		if n.Equals(headNode) {
+			t.Error("Expected head node nodes[1] to be evicted, but it is still in the bucket")
+		}
+	}
+	if !bucket7[BucketSize-1].Equals(newNode) {
+		t.Error("Expected new node to be at the tail of the bucket")
+	}
+}
