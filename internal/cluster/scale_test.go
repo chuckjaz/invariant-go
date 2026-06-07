@@ -47,21 +47,10 @@ func (l *LocalRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	return resp, nil
 }
 
-func registerHandlers(rt *LocalRoundTripper, cl *Cluster) {
-	cl.mu.Lock()
-	defer cl.mu.Unlock()
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-
-	for _, m := range cl.machines {
-		m.mu.Lock()
-		for svc, srv := range m.servers {
-			port := m.ports[svc]
-			host := fmt.Sprintf("127.0.0.1:%d", port)
-			rt.handlers[host] = srv.Handler
-		}
-		m.mu.Unlock()
-	}
+func (l *LocalRoundTripper) RegisterHandler(host string, h http.Handler) {
+	l.mu.Lock()
+	l.handlers[host] = h
+	l.mu.Unlock()
 }
 
 func getDistribute(distServer *distribute.DistributeServer) distribute.Distribute {
@@ -125,7 +114,7 @@ func waitWithTimeout(cond func() bool, timeout time.Duration) error {
 		if cond() {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout reached")
 }
@@ -153,6 +142,7 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 		t.Fatalf("failed to create cluster: %v", err)
 	}
 	defer cl.Close()
+	cl.Registry = rt
 
 	// Use InMemoryStorage for extreme speed and low footprint under heavy load
 	cl.UseInMemoryStorage = true
@@ -186,28 +176,37 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 		t.Fatalf("failed to start finder: %v", err)
 	}
 
-	// Register their handlers
-	registerHandlers(rt, cl)
-
 	// 2. Start 100 storage services
 	t.Log("Starting 100 storage services...")
 	const numStorage = 100
 	storageMachines := make([]*Machine, numStorage)
+	var wg sync.WaitGroup
+	errs := make(chan error, numStorage)
 	for i := 0; i < numStorage; i++ {
-		name := fmt.Sprintf("machine-storage-%d", i)
-		m, err := cl.NewMachine(name)
-		if err != nil {
-			t.Fatalf("failed to create %s: %v", name, err)
-		}
-		_, err = m.StartStorage(ctx, discURL, distURL, finderURL)
-		if err != nil {
-			t.Fatalf("failed to start storage on %s: %v", name, err)
-		}
-		storageMachines[i] = m
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			name := fmt.Sprintf("machine-storage-%d", i)
+			m, err := cl.NewMachine(name)
+			if err != nil {
+				errs <- fmt.Errorf("failed to create %s: %w", name, err)
+				return
+			}
+			_, err = m.StartStorage(ctx, discURL, distURL, finderURL)
+			if err != nil {
+				errs <- fmt.Errorf("failed to start storage on %s: %w", name, err)
+				return
+			}
+			storageMachines[i] = m
+		}(i)
 	}
-
-	// Register all handlers
-	registerHandlers(rt, cl)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Failed to initialize storage cluster: %v", err)
+		}
+	}
 
 	// Wait for registrations to settle
 	time.Sleep(500 * time.Millisecond)
@@ -306,8 +305,6 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 			newMachines = append(newMachines, m)
 			storageMachines = append(storageMachines, m)
 		}
-
-		registerHandlers(rt, cl)
 
 		// Wait for distribute sync loop to replicate blocks onto the new machines
 		t.Log("Waiting for distribute sync to replicate blocks and maintain factor (6)...")

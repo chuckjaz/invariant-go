@@ -18,6 +18,7 @@ type nodeState struct {
 	desc          *discovery.ServiceDescription
 	failures      int
 	isDestination bool
+	lastLookup    time.Time
 }
 
 // InMemoryDistribute is an in-memory implementation of the Distribute interface.
@@ -82,10 +83,7 @@ func (d *InMemoryDistribute) Notify(ctx context.Context, id string, addresses []
 
 	state, exists := d.services[id]
 	if !exists {
-		state = &nodeState{
-			blocks: make(map[string]struct{}),
-		}
-		d.services[id] = state
+		return nil
 	}
 
 	for _, addr := range addresses {
@@ -130,21 +128,31 @@ func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (st
 			d.mu.RUnlock()
 			return addr, true
 		}
+		if time.Since(state.lastLookup) < 2*time.Second {
+			d.mu.RUnlock()
+			return "", false
+		}
 		d.mu.RUnlock()
 	}
 
 	// Fetch from discovery
 	desc, ok := d.discovery.Get(context.Background(), id)
-	if !ok {
-		return "", false
-	}
 
 	d.mu.Lock()
 	// re-check existence in case it was deleted
 	if state, stillExists := d.services[id]; stillExists {
-		state.desc = &desc
+		state.lastLookup = time.Now()
+		if ok {
+			state.desc = &desc
+		} else {
+			state.desc = nil
+		}
 	}
 	d.mu.Unlock()
+
+	if !ok {
+		return "", false
+	}
 
 	return desc.Address, true
 }
@@ -179,116 +187,137 @@ func (d *InMemoryDistribute) Sync() {
 	}
 	d.mu.RUnlock()
 
+	sem := make(chan struct{}, 64)
+	var wg sync.WaitGroup
+
 	for block, locations := range blockLocations {
 		if len(locations) >= d.repFactor {
 			continue // Already replicated enough
 		}
 
-		// Need to replicate this block
-		blockBytes, err := hex.DecodeString(block)
-		if err != nil || len(blockBytes) != 32 {
-			continue // Invalid block ID
-		}
+		wg.Add(1)
+		go func(block string, locations []string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		// Find distance to all registered services
-		type nodeDist struct {
-			id   string
-			dist []byte
-		}
-		var nodes []nodeDist
-		d.mu.RLock()
-		for srvID, state := range d.services {
-			if state.isDestination {
-				continue
+			// Need to replicate this block
+			blockBytes, err := hex.DecodeString(block)
+			if err != nil || len(blockBytes) != 32 {
+				return // Invalid block ID
 			}
-			srvBytes, err := hex.DecodeString(srvID)
-			if err != nil || len(srvBytes) != 32 {
-				continue // Invalid service ID
+
+			// Find distance to all registered services
+			type nodeDist struct {
+				id   string
+				dist []byte
 			}
-			nodes = append(nodes, nodeDist{
-				id:   srvID,
-				dist: Distance(blockBytes, srvBytes),
+			var nodes []nodeDist
+			d.mu.RLock()
+			for srvID, state := range d.services {
+				if state.isDestination {
+					continue
+				}
+				srvBytes, err := hex.DecodeString(srvID)
+				if err != nil || len(srvBytes) != 32 {
+					continue // Invalid service ID
+				}
+				nodes = append(nodes, nodeDist{
+					id:   srvID,
+					dist: Distance(blockBytes, srvBytes),
+				})
+			}
+			d.mu.RUnlock()
+
+			// Sort by distance (closest first)
+			sort.Slice(nodes, func(i, j int) bool {
+				return CmpDistance(nodes[i].dist, nodes[j].dist) < 0
 			})
-		}
-		d.mu.RUnlock()
 
-		// Sort by distance (closest first)
-		sort.Slice(nodes, func(i, j int) bool {
-			return CmpDistance(nodes[i].dist, nodes[j].dist) < 0
-		})
-
-		// Pick destination nodes that don't have the block
-		hasBlock := func(id string) bool {
-			return slices.Contains(locations, id)
-		}
-
-		sourceSrvID := locations[0]
-		sourceAddr, ok := d.getServiceAddress(sourceSrvID, false)
-		if !ok {
-			log.Printf("Failed to resolve address for source node %s", sourceSrvID)
-			continue
-		}
-
-		needed := d.repFactor - len(locations)
-		for _, node := range nodes {
-			if needed <= 0 {
-				break
+			// Pick destination nodes that don't have the block
+			hasBlock := func(id string) bool {
+				return slices.Contains(locations, id)
 			}
-			if !hasBlock(node.id) {
-				destSrvID := node.id
 
-				// Try to replicate to this node, with retries on failure
-				success := false
-				for attempt := range 2 {
-					forceRefresh := attempt > 0 // Force refresh on retry
-					destAddr, ok := d.getServiceAddress(destSrvID, forceRefresh)
-					if !ok {
-						log.Printf("Failed to resolve address for destination node %s", destSrvID)
-						break // Can't resolve, give up on this node for now
-					}
+			var sourceSrvID string
+			var sourceAddr string
+			foundSource := false
+			for _, loc := range locations {
+				addr, ok := d.getServiceAddress(loc, false)
+				if ok {
+					sourceSrvID = loc
+					sourceAddr = addr
+					foundSource = true
+					break
+				}
+			}
 
-					if attempt > 0 {
-						// On retry, we also want to be sure our source address is still good
-						newSourceAddr, ok := d.getServiceAddress(sourceSrvID, true)
-						if ok {
-							sourceAddr = newSourceAddr
-						} else {
-							break // Source vanished
+			if !foundSource {
+				log.Printf("Failed to resolve address for any source node of block %s", block)
+				return
+			}
+
+			needed := d.repFactor - len(locations)
+			for _, node := range nodes {
+				if needed <= 0 {
+					break
+				}
+				if !hasBlock(node.id) {
+					destSrvID := node.id
+
+					// Try to replicate to this node, with retries on failure
+					success := false
+					for attempt := range 2 {
+						forceRefresh := attempt > 0 // Force refresh on retry
+						destAddr, ok := d.getServiceAddress(destSrvID, forceRefresh)
+						if !ok {
+							log.Printf("Failed to resolve address for destination node %s", destSrvID)
+							break // Can't resolve, give up on this node for now
+						}
+
+						if attempt > 0 {
+							// On retry, we also want to be sure our source address is still good
+							newSourceAddr, ok := d.getServiceAddress(sourceSrvID, true)
+							if ok {
+								sourceAddr = newSourceAddr
+							} else {
+								break // Source vanished
+							}
+						}
+
+						// Create store client from destSrv URL
+						// And tell dest to fetch from source via its ID so dest looks it up in discovery
+						c := storage.NewClient(destAddr, nil)
+						err := c.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
+						if err == nil {
+							success = true
+							break // success
 						}
 					}
 
-					// Create store client from destSrv URL
-					// And tell dest to fetch from source via its ID so dest looks it up in discovery
-					c := storage.NewClient(destAddr, nil)
-					err := c.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
-					if err == nil {
-						success = true
-						break // success
-					}
-					log.Printf("Attempt %d failed to sync block %s to %s", attempt+1, block, destAddr)
-				}
-
-				if success {
-					needed--
-					d.mu.Lock()
-					if state, ok := d.services[destSrvID]; ok {
-						state.failures = 0
-					}
-					d.mu.Unlock()
-				} else {
-					d.mu.Lock()
-					if state, ok := d.services[destSrvID]; ok {
-						state.failures++
-						if state.failures >= d.maxAttempts {
-							log.Printf("Removing node %s due to max failures (%d)", destSrvID, state.failures)
-							delete(d.services, destSrvID)
+					if success {
+						needed--
+						d.mu.Lock()
+						if state, ok := d.services[destSrvID]; ok {
+							state.failures = 0
 						}
+						d.mu.Unlock()
+					} else {
+						d.mu.Lock()
+						if state, ok := d.services[destSrvID]; ok {
+							state.failures++
+							if state.failures >= d.maxAttempts {
+								log.Printf("Removing node %s due to max failures (%d)", destSrvID, state.failures)
+								delete(d.services, destSrvID)
+							}
+						}
+						d.mu.Unlock()
 					}
-					d.mu.Unlock()
 				}
 			}
-		}
+		}(block, locations)
 	}
+	wg.Wait()
 
 	if d.destination != "" {
 		d.syncToDestination(blockLocations)

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type StorageServer struct {
 	id        string
 	storage   Storage
 	discovery discovery.Discovery
+	cacheMu   sync.RWMutex
+	devCache  map[string]discovery.ServiceDescription
 }
 
 func NewStorageServer(storage Storage) *StorageServer {
@@ -31,8 +34,9 @@ func NewStorageServer(storage Storage) *StorageServer {
 	}
 
 	return &StorageServer{
-		id:      id,
-		storage: storage,
+		id:       id,
+		storage:  storage,
+		devCache: make(map[string]discovery.ServiceDescription),
 	}
 }
 
@@ -176,11 +180,20 @@ func (s *StorageServer) handleFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lookup the container ID via Discovery to get its HTTP address
-	desc, ok := s.discovery.Get(r.Context(), reqBody.Container)
+	s.cacheMu.RLock()
+	desc, ok := s.devCache[reqBody.Container]
+	s.cacheMu.RUnlock()
+
 	if !ok {
-		http.Error(w, "Bad Gateway: container not found in discovery", http.StatusBadGateway)
-		return
+		// Lookup the container ID via Discovery to get its HTTP address
+		desc, ok = s.discovery.Get(r.Context(), reqBody.Container)
+		if !ok {
+			http.Error(w, "Bad Gateway: container not found in discovery", http.StatusBadGateway)
+			return
+		}
+		s.cacheMu.Lock()
+		s.devCache[reqBody.Container] = desc
+		s.cacheMu.Unlock()
 	}
 
 	// Create a storage client pointing at the remote node

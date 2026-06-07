@@ -49,12 +49,18 @@ type Machine struct {
 	finderNode  finder.Finder
 }
 
+// HandlerRegistry defines an interface for registering HTTP handlers dynamically.
+type HandlerRegistry interface {
+	RegisterHandler(host string, h http.Handler)
+}
+
 // Cluster manages a set of simulated machines and services.
 type Cluster struct {
 	mu                 sync.Mutex
 	tempDir            string
 	machines           map[string]*Machine
 	UseInMemoryStorage bool
+	Registry           HandlerRegistry
 }
 
 // NewCluster creates a new cluster orchestrator using a temporary directory for persisted state.
@@ -112,6 +118,13 @@ func (c *Cluster) Close() {
 // ID returns the machine's configured identifier.
 func (m *Machine) ID() string {
 	return m.id
+}
+
+func (m *Machine) registerHandler(serviceType string, port int, handler http.Handler) {
+	if m.cluster.Registry != nil {
+		host := fmt.Sprintf("127.0.0.1:%d", port)
+		m.cluster.Registry.RegisterHandler(host, handler)
+	}
 }
 
 // StorageID returns the storage ID of the machine if a storage service has been started.
@@ -203,6 +216,7 @@ func (m *Machine) StartDiscovery(ctx context.Context) (string, error) {
 	m.listeners["discovery"] = l
 	m.closers["discovery"] = fsd
 	m.configs["discovery"] = &serviceConfig{serviceType: "discovery"}
+	m.registerHandler("discovery", port, server)
 
 	go func() {
 		_ = srv.Serve(l)
@@ -251,6 +265,7 @@ func (m *Machine) StartNames(ctx context.Context, discoveryURL string) (string, 
 		serviceType:  "names",
 		discoveryURL: discoveryURL,
 	}
+	m.registerHandler("names", port, server)
 
 	if discoveryURL != "" {
 		id := fsn.ID()
@@ -310,6 +325,7 @@ func (m *Machine) StartSlots(ctx context.Context, discoveryURL string) (string, 
 		serviceType:  "slots",
 		discoveryURL: discoveryURL,
 	}
+	m.registerHandler("slots", port, server)
 
 	if discoveryURL != "" {
 		id := fss.ID()
@@ -373,6 +389,7 @@ func (m *Machine) StartDistribute(ctx context.Context, discoveryURL string, repF
 		repFactor:    repFactor,
 		maxAttempts:  maxAttempts,
 	}
+	m.registerHandler("distribute", port, server)
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
@@ -387,10 +404,24 @@ func (m *Machine) StartDistribute(ctx context.Context, discoveryURL string, repF
 		go func() {
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
+			var mu sync.Mutex
+			running := false
 			for {
 				select {
 				case <-ticker.C:
+					mu.Lock()
+					if running {
+						mu.Unlock()
+						continue
+					}
+					running = true
+					mu.Unlock()
+
 					d.Sync()
+
+					mu.Lock()
+					running = false
+					mu.Unlock()
 				case <-srvCtx.Done():
 					return
 				}
@@ -457,6 +488,7 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 		distributeURL:    distributeURL,
 		additionalNotify: additionalNotifyURLs,
 	}
+	m.registerHandler("storage", port, sServer)
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
@@ -545,6 +577,7 @@ func (m *Machine) StartFinder(ctx context.Context, discoveryURL string) (string,
 		serviceType:  "finder",
 		discoveryURL: discoveryURL,
 	}
+	m.registerHandler("finder", port, server)
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
