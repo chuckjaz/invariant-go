@@ -485,7 +485,7 @@ func (s *FileKeyValueStore) Put(ctx context.Context, txID *uint64, key string, v
 // triggerAsyncMerge starts a background B-Tree merge if one isn't already running.
 // MUST be called with s.mu Lock held.
 func (s *FileKeyValueStore) triggerAsyncMerge(ctx context.Context) {
-	if s.isMerging || len(s.pendingRecords) == 0 {
+	if s.isMerging || len(s.pendingRecords) == 0 || len(s.activeTxs) > 0 {
 		return
 	}
 

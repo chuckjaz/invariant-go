@@ -11,11 +11,14 @@ import (
 )
 
 type Server struct {
-	store KeyValueStore
+	store   KeyValueStore
+	handler http.Handler
 }
 
 func NewServer(store KeyValueStore) *Server {
-	return &Server{store: store}
+	s := &Server{store: store}
+	s.handler = s.Handler()
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -37,7 +40,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Handler().ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {

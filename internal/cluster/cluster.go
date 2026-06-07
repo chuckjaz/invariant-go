@@ -13,9 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
 	"invariant/internal/finder"
+	"invariant/internal/kv"
 	"invariant/internal/names"
 	"invariant/internal/notify"
 	"invariant/internal/slots"
@@ -30,6 +32,10 @@ type serviceConfig struct {
 	repFactor        int
 	maxAttempts      int
 	additionalNotify []string
+	slotsURL         string
+	finderURL        string
+	btreeSlotID      string
+	journalSlotID    string
 }
 
 // Machine represents a simulated server running zero or more services.
@@ -595,6 +601,92 @@ func (m *Machine) StartFinder(ctx context.Context, discoveryURL string) (string,
 	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 }
 
+// StartKV boots a key-value service on the machine, optionally registering it.
+func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL string, finderURL string, btreeSlotID, journalSlotID string) (string, error) {
+	port, err := m.allocatePort("kv")
+	if err != nil {
+		return "", err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.servers["kv"]; ok {
+		return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+	}
+
+	disc := discovery.NewClient(discoveryURL, nil)
+	slotsClient := slots.NewClient(slotsURL, nil)
+	finderClient := finder.NewClient(finderURL, nil)
+	storageClient := storage.NewAggregateClient(finderClient, disc, 3, 1000)
+
+	dir := filepath.Join(m.dataDir, "kv-journal")
+	_ = os.MkdirAll(dir, 0755)
+
+	var writerOpts content.WriterOptions // use default options
+
+	store, err := kv.NewFileKeyValueStore(
+		ctx,
+		slotsClient,
+		btreeSlotID,
+		nil,
+		journalSlotID,
+		nil,
+		storageClient,
+		dir,
+		10*1024*1024,
+		1000,
+		100,
+		writerOpts,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create kv store: %w", err)
+	}
+
+	kvServer := kv.NewServer(store)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		store.Close()
+		return "", fmt.Errorf("failed to listen on port %d: %w", port, err)
+	}
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: kvServer,
+	}
+
+	m.servers["kv"] = srv
+	m.listeners["kv"] = l
+	m.closers["kv"] = store
+	m.configs["kv"] = &serviceConfig{
+		serviceType:   "kv",
+		discoveryURL:  discoveryURL,
+		slotsURL:      slotsURL,
+		finderURL:     finderURL,
+		btreeSlotID:   btreeSlotID,
+		journalSlotID: journalSlotID,
+	}
+	m.registerHandler("kv", port, kvServer)
+
+	if discoveryURL != "" {
+		myID := "kv-server-" + m.id
+		err := discovery.AdvertiseAndRegister(ctx, disc, myID, "http://127.0.0.1", port, []string{"kv-v1", "kv-batch-v1"})
+		if err != nil {
+			_ = srv.Close()
+			_ = l.Close()
+			_ = store.Close()
+			return "", fmt.Errorf("failed to register with discovery: %w", err)
+		}
+	}
+
+	go func() {
+		_ = srv.Serve(l)
+	}()
+
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+}
+
 // StopService stops a specific service running on this machine.
 func (m *Machine) StopService(serviceType string) {
 	m.mu.Lock()
@@ -650,6 +742,8 @@ func (m *Machine) StartService(ctx context.Context, serviceType string) (string,
 		return m.StartStorage(ctx, cfg.discoveryURL, cfg.distributeURL, cfg.additionalNotify...)
 	case "finder":
 		return m.StartFinder(ctx, cfg.discoveryURL)
+	case "kv":
+		return m.StartKV(ctx, cfg.discoveryURL, cfg.slotsURL, cfg.finderURL, cfg.btreeSlotID, cfg.journalSlotID)
 	default:
 		return "", fmt.Errorf("unknown service type %q", serviceType)
 	}
@@ -657,6 +751,7 @@ func (m *Machine) StartService(ctx context.Context, serviceType string) (string,
 
 // StopAll stops all services running on this machine.
 func (m *Machine) StopAll() {
+	m.StopService("kv")
 	m.StopService("storage")
 	m.StopService("finder")
 	m.StopService("distribute")
