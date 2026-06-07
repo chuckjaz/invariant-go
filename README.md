@@ -31,7 +31,7 @@ The file system and key-value are built on microservices. Here is a list of the 
 | Distribute | The distribute service is responsible for distributing data among multiple storage devices. |
 | Discovery | The discovery service allows service detection, service registration, and service delegation. |
 | Slots | The slots service is responsible for allocating and managing slots. Slots are updateable addresses that maintain the current address of the root of a file system or the key-value store journal. |
-| Names | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs such as the ID of a device or the ID of a slot. |
+| Names | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs. Examples of mappings are a device ID to a human readable name, or a slot ID to a service name. |
 | Files | A file services that is the backing service for the FUSE file system and the NFS service. |
 | KeyValue | A key-value store service that allows storing and retrieving values for a given key. |
 
