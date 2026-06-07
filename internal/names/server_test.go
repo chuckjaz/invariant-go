@@ -101,3 +101,75 @@ func TestNamesServer_Delete(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestNamesServer_IDAndLookupAndErrors(t *testing.T) {
+	store := names.NewInMemoryNames()
+	server := names.NewNamesServer(store)
+	ts := httptest.NewServer(server) // tests ServeHTTP implementation directly as it implements http.Handler
+	defer ts.Close()
+
+	// 1. GET /id
+	resp, err := http.Get(ts.URL + "/id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %v", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/plain" {
+		t.Errorf("expected Content-Type text/plain, got %v", resp.Header.Get("Content-Type"))
+	}
+
+	// 2. PUT a name and query it via GET /lookup/{id}
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/lookup-name?value=target-val", nil)
+	respPut, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+	respPut.Body.Close()
+
+	respLookup, err := http.Get(ts.URL + "/lookup/target-val")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if respLookup.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %v", respLookup.StatusCode)
+	}
+	var lookupResults []string
+	if err := json.NewDecoder(respLookup.Body).Decode(&lookupResults); err != nil {
+		t.Fatalf("decode lookup results failed: %v", err)
+	}
+	respLookup.Body.Close()
+	if len(lookupResults) != 1 || lookupResults[0] != "lookup-name" {
+		t.Errorf("expected ['lookup-name'], got %v", lookupResults)
+	}
+
+	// 3. PUT with missing value parameter should return 400 Bad Request
+	reqBadPut, _ := http.NewRequest(http.MethodPut, ts.URL+"/bad-name", nil)
+	respBadPut, err := http.DefaultClient.Do(reqBadPut)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer respBadPut.Body.Close()
+	if respBadPut.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for PUT missing value, got %v", respBadPut.StatusCode)
+	}
+
+	// 4. Test Not Implemented for non-identity Names backing store
+	type nonIdentityNames struct {
+		names.Names
+	}
+	serverNonId := names.NewNamesServer(&nonIdentityNames{Names: store})
+	tsNonId := httptest.NewServer(serverNonId.Handler())
+	defer tsNonId.Close()
+
+	respNonId, err := http.Get(tsNonId.URL + "/id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer respNonId.Body.Close()
+	if respNonId.StatusCode != http.StatusNotImplemented {
+		t.Errorf("expected 501 Not Implemented, got %v", respNonId.StatusCode)
+	}
+}

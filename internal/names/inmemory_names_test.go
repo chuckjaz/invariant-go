@@ -107,3 +107,45 @@ func TestInMemoryNames_DataRaceAndTokensCopy(t *testing.T) {
 		t.Errorf("Tokens array in store was mutated by modifying Get result! Expected 'a', got '%s'", entry2.Tokens[0])
 	}
 }
+
+func TestInMemoryNames_IDAndLookup(t *testing.T) {
+	store := names.NewInMemoryNames()
+	id := store.ID()
+	if len(id) != 64 {
+		t.Errorf("expected 64-char ID, got %s", id)
+	}
+
+	ctx := context.Background()
+	store.Put(ctx, "name1", "id-abc", []string{})
+	store.Put(ctx, "name2", "id-xyz", []string{})
+	store.Put(ctx, "name3", "id-abc", []string{})
+
+	results, err := store.Lookup(ctx, "id-abc")
+	if err != nil {
+		t.Fatalf("unexpected lookup error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 lookup results, got %v", results)
+	}
+	hasName1 := false
+	hasName3 := false
+	for _, name := range results {
+		if name == "name1" {
+			hasName1 = true
+		}
+		if name == "name3" {
+			hasName3 = true
+		}
+	}
+	if !hasName1 || !hasName3 {
+		t.Errorf("lookup results did not contain expected names: %v", results)
+	}
+
+	emptyResults, err := store.Lookup(ctx, "id-nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected lookup error: %v", err)
+	}
+	if len(emptyResults) != 0 {
+		t.Errorf("expected empty lookup results, got %v", emptyResults)
+	}
+}

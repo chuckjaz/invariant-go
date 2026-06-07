@@ -166,3 +166,51 @@ func TestFileSystemNames_SnapshotAndRotation(t *testing.T) {
 		t.Errorf("Expected 5678 for service-b")
 	}
 }
+
+func TestFileSystemNames_IDAndLookup(t *testing.T) {
+	dir := t.TempDir()
+	fsn, err := NewFileSystemNames(dir, 0)
+	if err != nil {
+		t.Fatalf("Failed to create FileSystemNames: %v", err)
+	}
+	defer fsn.Close()
+
+	id := fsn.ID()
+	if len(id) != 64 {
+		t.Errorf("expected 64-char ID, got %s", id)
+	}
+
+	ctx := context.Background()
+	fsn.Put(ctx, "name1", "id-abc", []string{})
+	fsn.Put(ctx, "name2", "id-xyz", []string{})
+	fsn.Put(ctx, "name3", "id-abc", []string{})
+
+	results, err := fsn.Lookup(ctx, "id-abc")
+	if err != nil {
+		t.Fatalf("unexpected lookup error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 lookup results, got %v", results)
+	}
+	hasName1 := false
+	hasName3 := false
+	for _, name := range results {
+		if name == "name1" {
+			hasName1 = true
+		}
+		if name == "name3" {
+			hasName3 = true
+		}
+	}
+	if !hasName1 || !hasName3 {
+		t.Errorf("lookup results did not contain expected names: %v", results)
+	}
+
+	emptyResults, err := fsn.Lookup(ctx, "id-nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected lookup error: %v", err)
+	}
+	if len(emptyResults) != 0 {
+		t.Errorf("expected empty lookup results, got %v", emptyResults)
+	}
+}

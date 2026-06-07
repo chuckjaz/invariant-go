@@ -114,3 +114,45 @@ func TestUpstreamNames_PutDeleteIsolation(t *testing.T) {
 		t.Fatalf("Expected local-only to be deleted locally")
 	}
 }
+
+func TestUpstreamNames_Lookup(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. With nil parent
+	localOnly := NewInMemoryNames()
+	localOnly.Put(ctx, "name1", "id-abc", []string{})
+	upstream1 := NewUpstreamNames(localOnly, nil)
+	results, err := upstream1.Lookup(ctx, "id-abc")
+	if err != nil {
+		t.Fatalf("unexpected Lookup error: %v", err)
+	}
+	if len(results) != 1 || results[0] != "name1" {
+		t.Errorf("expected ['name1'], got %v", results)
+	}
+
+	// 2. With both local and parent
+	local := NewInMemoryNames()
+	parent := newMockParent()
+	local.Put(ctx, "local-name", "target-id", []string{})
+	local.Put(ctx, "shared-name", "target-id", []string{})
+	parent.Put(ctx, "shared-name", "target-id", []string{})
+	parent.Put(ctx, "parent-name", "target-id", []string{})
+
+	upstream2 := NewUpstreamNames(local, parent)
+	results, err = upstream2.Lookup(ctx, "target-id")
+	if err != nil {
+		t.Fatalf("unexpected Lookup error: %v", err)
+	}
+
+	// Should contain local-name, shared-name, parent-name once.
+	if len(results) != 3 {
+		t.Errorf("expected 3 combined lookup results, got %v", results)
+	}
+	seen := make(map[string]bool)
+	for _, n := range results {
+		seen[n] = true
+	}
+	if !seen["local-name"] || !seen["shared-name"] || !seen["parent-name"] {
+		t.Errorf("missing expected names in combined lookup results: %v", results)
+	}
+}

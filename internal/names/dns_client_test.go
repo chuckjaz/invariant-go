@@ -133,4 +133,16 @@ func TestDNSClientUnsupportedMethods(t *testing.T) {
 	if err != ErrNotSupported {
 		t.Errorf("expected Delete to return ErrNotSupported, got: %v", err)
 	}
+
+	_, err = client.Lookup(context.Background(), "some-id")
+	if err != ErrNotSupported {
+		t.Errorf("expected Lookup to return ErrNotSupported, got: %v", err)
+	}
+}
+
+func TestDNSClient_DefaultResolver(t *testing.T) {
+	client := NewDNSClient(nil)
+	if client.resolver == nil {
+		t.Error("expected default resolver to be set when passing nil, got nil")
+	}
 }

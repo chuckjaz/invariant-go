@@ -61,4 +61,42 @@ func TestClient(t *testing.T) {
 	if err != names.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
+
+	// 7. Put a new name and test Lookup
+	err = client.Put(context.Background(), "lookup-name-1", "target-id", []string{"tok"})
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+	err = client.Put(context.Background(), "lookup-name-2", "target-id", []string{})
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	results, err := client.Lookup(context.Background(), "target-id")
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 lookup results, got %v", results)
+	}
+	hasName1 := false
+	hasName2 := false
+	for _, n := range results {
+		if n == "lookup-name-1" {
+			hasName1 = true
+		}
+		if n == "lookup-name-2" {
+			hasName2 = true
+		}
+	}
+	if !hasName1 || !hasName2 {
+		t.Errorf("expected names not found in lookup: %v", results)
+	}
+}
+
+func TestClient_DefaultHTTPClient(t *testing.T) {
+	client := names.NewClient("http://localhost:8080", nil)
+	if client == nil {
+		t.Error("expected NewClient to return non-nil Client when http.Client is nil")
+	}
 }
