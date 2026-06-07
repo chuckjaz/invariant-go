@@ -77,3 +77,38 @@ func TestFileSystemDiscovery(t *testing.T) {
 		t.Errorf("expected address %s, got %s", reg1.Address, desc2.Address)
 	}
 }
+
+func TestFileSystemDiscovery_HealthTracking(t *testing.T) {
+	tmpDir := t.TempDir()
+	fsd, err := NewFileSystemDiscovery(tmpDir, time.Hour)
+	if err != nil {
+		t.Fatalf("failed to create FileSystemDiscovery: %v", err)
+	}
+	defer fsd.Close()
+
+	// Enable health tracking with a very short check interval and timeout
+	fsd.WithHealthTracking(10*time.Millisecond, 20*time.Millisecond)
+	if fsd.tracker == nil {
+		t.Fatal("Expected tracker to be initialized")
+	}
+
+	// Re-enable health tracking (tests WithHealthTracking overriding existing tracker)
+	fsd.WithHealthTracking(10*time.Millisecond, 20*time.Millisecond)
+
+	ctx := context.Background()
+	reg := ServiceRegistration{
+		ID:        "healthy-srv",
+		Address:   "http://localhost:9999",
+		Protocols: []string{"http"},
+	}
+	if err := fsd.Register(ctx, reg); err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	// Make sure it doesn't get removed immediately
+	time.Sleep(5 * time.Millisecond)
+	_, ok := fsd.Get(ctx, "healthy-srv")
+	if !ok {
+		t.Error("Expected service to still be registered")
+	}
+}

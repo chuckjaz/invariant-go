@@ -11,7 +11,7 @@ import (
 func TestDiscoveryServer(t *testing.T) {
 	discovery := NewInMemoryDiscovery()
 	server := NewDiscoveryServer(discovery)
-	ts := httptest.NewServer(server.Handler())
+	ts := httptest.NewServer(server)
 	defer ts.Close()
 
 	// 1. GET /id
@@ -95,5 +95,46 @@ func TestDiscoveryServer(t *testing.T) {
 	}
 	if len(emptyDescs) != 0 {
 		t.Fatalf("expected 0 result, got %d", len(emptyDescs))
+	}
+
+	// 6. GET /non-existent-id -> 404
+	res, err = http.Get(ts.URL + "/non-existent-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found, got %d", res.StatusCode)
+	}
+
+	// 7. PUT /id with invalid JSON -> 400
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/test-service-id", bytes.NewReader([]byte("{invalid json")))
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", res.StatusCode)
+	}
+
+	// 8. GET /?protocol=http&count=2
+	res, err = http.Get(ts.URL + "/?protocol=http&count=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", res.StatusCode)
+	}
+
+	// 9. GET /?protocol=http&count=invalid
+	res, err = http.Get(ts.URL + "/?protocol=http&count=invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", res.StatusCode)
 	}
 }
