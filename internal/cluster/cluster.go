@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +15,7 @@ import (
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
+	"invariant/internal/finder"
 	"invariant/internal/names"
 	"invariant/internal/notify"
 	"invariant/internal/slots"
@@ -21,33 +24,37 @@ import (
 
 // serviceConfig persists configuration parameters to allow restarting services.
 type serviceConfig struct {
-	serviceType   string
-	discoveryURL  string
-	distributeURL string
-	repFactor     int
-	maxAttempts   int
+	serviceType      string
+	discoveryURL     string
+	distributeURL    string
+	repFactor        int
+	maxAttempts      int
+	additionalNotify []string
 }
 
 // Machine represents a simulated server running zero or more services.
 type Machine struct {
-	id        string
-	cluster   *Cluster
-	dataDir   string
-	mu        sync.Mutex
-	servers   map[string]*http.Server
-	listeners map[string]net.Listener
-	ports     map[string]int
-	cancels   map[string]context.CancelFunc
-	configs   map[string]*serviceConfig
-	closers   map[string]io.Closer
-	storageID string
+	id          string
+	cluster     *Cluster
+	dataDir     string
+	mu          sync.Mutex
+	servers     map[string]*http.Server
+	listeners   map[string]net.Listener
+	ports       map[string]int
+	cancels     map[string]context.CancelFunc
+	configs     map[string]*serviceConfig
+	closers     map[string]io.Closer
+	storageID   string
+	storageNode storage.Storage
+	finderNode  finder.Finder
 }
 
 // Cluster manages a set of simulated machines and services.
 type Cluster struct {
-	mu       sync.Mutex
-	tempDir  string
-	machines map[string]*Machine
+	mu                 sync.Mutex
+	tempDir            string
+	machines           map[string]*Machine
+	UseInMemoryStorage bool
 }
 
 // NewCluster creates a new cluster orchestrator using a temporary directory for persisted state.
@@ -112,6 +119,20 @@ func (m *Machine) StorageID() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.storageID
+}
+
+// StorageNode returns the active storage node instance if running.
+func (m *Machine) StorageNode() storage.Storage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.storageNode
+}
+
+// FinderNode returns the active finder node instance if running.
+func (m *Machine) FinderNode() finder.Finder {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.finderNode
 }
 
 // ServiceURL returns the HTTP URL of a running service.
@@ -385,7 +406,7 @@ func (m *Machine) StartDistribute(ctx context.Context, discoveryURL string, repF
 }
 
 // StartStorage boots a storage service on the machine, optionally registering it.
-func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distributeURL string) (string, error) {
+func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distributeURL string, additionalNotifyURLs ...string) (string, error) {
 	port, err := m.allocatePort("storage")
 	if err != nil {
 		return "", err
@@ -398,9 +419,15 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 		return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 	}
 
-	dir := filepath.Join(m.dataDir, "storage")
-	s := storage.NewFileSystemStorage(dir)
-	m.storageID = s.ID()
+	var s storage.Storage
+	if m.cluster.UseInMemoryStorage {
+		s = storage.NewInMemoryStorage()
+	} else {
+		dir := filepath.Join(m.dataDir, "storage")
+		s = storage.NewFileSystemStorage(dir)
+	}
+	m.storageID = s.(interface{ ID() string }).ID()
+	m.storageNode = s
 
 	sServer := storage.NewStorageServer(s)
 	if discoveryURL != "" {
@@ -425,9 +452,10 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 	m.listeners["storage"] = l
 	m.cancels["storage"] = cancel
 	m.configs["storage"] = &serviceConfig{
-		serviceType:   "storage",
-		discoveryURL:  discoveryURL,
-		distributeURL: distributeURL,
+		serviceType:      "storage",
+		discoveryURL:     discoveryURL,
+		distributeURL:    distributeURL,
+		additionalNotify: additionalNotifyURLs,
 	}
 
 	if discoveryURL != "" {
@@ -440,6 +468,7 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 		}
 	}
 
+	var notifyClients []storage.NotifyClient
 	if distributeURL != "" {
 		distClient := distribute.NewClient(distributeURL, nil)
 		if err := distClient.Register(m.storageID); err != nil {
@@ -447,9 +476,83 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 			_ = srv.Close()
 			return "", fmt.Errorf("failed to register with distribute: %w", err)
 		}
+		notifyClients = append(notifyClients, notify.NewClient(distributeURL, nil))
+	}
 
-		notifyClients := []storage.NotifyClient{notify.NewClient(distributeURL, nil)}
-		sServer.StartNotification(srvCtx, notifyClients, 1, 10*time.Millisecond)
+	for _, u := range additionalNotifyURLs {
+		if u != "" {
+			notifyClients = append(notifyClients, notify.NewClient(u, nil))
+		}
+	}
+
+	if len(notifyClients) > 0 {
+		// Use batchSize 10000 and 10ms for fast notifications in scale tests.
+		sServer.StartNotification(srvCtx, notifyClients, 10000, 10*time.Millisecond)
+	}
+
+	go func() {
+		_ = srv.Serve(l)
+	}()
+
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+}
+
+// StartFinder boots a finder service on the machine, optionally registering it.
+func (m *Machine) StartFinder(ctx context.Context, discoveryURL string) (string, error) {
+	port, err := m.allocatePort("finder")
+	if err != nil {
+		return "", err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.servers["finder"]; ok {
+		return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+	}
+
+	// Generate a 32-byte hex string node ID for finder
+	idBytes := make([]byte, 32)
+	_, _ = rand.Read(idBytes)
+	idStr := hex.EncodeToString(idBytes)
+
+	f, err := finder.NewMemoryFinder(idStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to create finder: %w", err)
+	}
+	m.finderNode = f
+
+	var disc discovery.Discovery
+	if discoveryURL != "" {
+		disc = discovery.NewClient(discoveryURL, nil)
+	}
+
+	server := finder.NewFinderServer(f, disc)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("failed to listen on port %d: %w", port, err)
+	}
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: server,
+	}
+
+	m.servers["finder"] = srv
+	m.listeners["finder"] = l
+	m.configs["finder"] = &serviceConfig{
+		serviceType:  "finder",
+		discoveryURL: discoveryURL,
+	}
+
+	if discoveryURL != "" {
+		dClient := discovery.NewClient(discoveryURL, nil)
+		err := discovery.AdvertiseAndRegister(ctx, dClient, idStr, "http://127.0.0.1", port, []string{"finder-v1", "notify-v1"})
+		if err != nil {
+			_ = srv.Close()
+			return "", fmt.Errorf("failed to register with discovery: %w", err)
+		}
 	}
 
 	go func() {
@@ -483,6 +586,12 @@ func (m *Machine) StopService(serviceType string) {
 		_ = closer.Close()
 		delete(m.closers, serviceType)
 	}
+
+	if serviceType == "storage" {
+		m.storageNode = nil
+	} else if serviceType == "finder" {
+		m.finderNode = nil
+	}
 }
 
 // StartService restarts a previously configured and stopped service on the machine, binding it to the same port.
@@ -505,7 +614,9 @@ func (m *Machine) StartService(ctx context.Context, serviceType string) (string,
 	case "distribute":
 		return m.StartDistribute(ctx, cfg.discoveryURL, cfg.repFactor, cfg.maxAttempts)
 	case "storage":
-		return m.StartStorage(ctx, cfg.discoveryURL, cfg.distributeURL)
+		return m.StartStorage(ctx, cfg.discoveryURL, cfg.distributeURL, cfg.additionalNotify...)
+	case "finder":
+		return m.StartFinder(ctx, cfg.discoveryURL)
 	default:
 		return "", fmt.Errorf("unknown service type %q", serviceType)
 	}
@@ -514,6 +625,7 @@ func (m *Machine) StartService(ctx context.Context, serviceType string) (string,
 // StopAll stops all services running on this machine.
 func (m *Machine) StopAll() {
 	m.StopService("storage")
+	m.StopService("finder")
 	m.StopService("distribute")
 	m.StopService("slots")
 	m.StopService("names")
