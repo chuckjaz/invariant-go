@@ -14,6 +14,7 @@ import (
 )
 
 type nodeState struct {
+	idBytes       []byte
 	blocks        map[string]struct{}
 	desc          *discovery.ServiceDescription
 	failures      int
@@ -47,7 +48,9 @@ func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts 
 		backupWindowStart:   time.Now(),
 	}
 	if destination != "" {
+		destBytes, _ := hex.DecodeString(destination)
 		d.services[destination] = &nodeState{
+			idBytes:       destBytes,
 			blocks:        make(map[string]struct{}),
 			isDestination: true,
 		}
@@ -61,8 +64,10 @@ func (d *InMemoryDistribute) Register(ctx context.Context, id string) error {
 	defer d.mu.Unlock()
 
 	if _, exists := d.services[id]; !exists {
+		srvBytes, _ := hex.DecodeString(id)
 		d.services[id] = &nodeState{
-			blocks: make(map[string]struct{}),
+			idBytes: srvBytes,
+			blocks:  make(map[string]struct{}),
 		}
 	}
 	return nil
@@ -174,6 +179,12 @@ func (d *InMemoryDistribute) Sync() {
 		return
 	}
 
+	type activeNode struct {
+		id      string
+		idBytes []byte
+	}
+	var activeNodes []activeNode
+
 	// Build map block -> list of service IDs that contain it
 	blockLocations := make(map[string][]string)
 	d.mu.RLock()
@@ -181,6 +192,10 @@ func (d *InMemoryDistribute) Sync() {
 		if state.isDestination {
 			continue
 		}
+		activeNodes = append(activeNodes, activeNode{
+			id:      srvID,
+			idBytes: state.idBytes,
+		})
 		for block := range state.blocks {
 			blockLocations[block] = append(blockLocations[block], srvID)
 		}
@@ -212,22 +227,13 @@ func (d *InMemoryDistribute) Sync() {
 				id   string
 				dist []byte
 			}
-			var nodes []nodeDist
-			d.mu.RLock()
-			for srvID, state := range d.services {
-				if state.isDestination {
-					continue
-				}
-				srvBytes, err := hex.DecodeString(srvID)
-				if err != nil || len(srvBytes) != 32 {
-					continue // Invalid service ID
-				}
+			nodes := make([]nodeDist, 0, len(activeNodes))
+			for _, node := range activeNodes {
 				nodes = append(nodes, nodeDist{
-					id:   srvID,
-					dist: Distance(blockBytes, srvBytes),
+					id:   node.id,
+					dist: Distance(blockBytes, node.idBytes),
 				})
 			}
-			d.mu.RUnlock()
 
 			// Sort by distance (closest first)
 			sort.Slice(nodes, func(i, j int) bool {
