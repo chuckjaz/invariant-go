@@ -55,6 +55,7 @@ type Journal struct {
 	slotID          string
 	slotAuth        []byte
 	currentFile     *os.File
+	currentWriter   *bufio.Writer
 	currentPath     string
 	currentEncoder  *json.Encoder
 	previousJournal *content.ContentLink
@@ -95,12 +96,17 @@ func (j *Journal) openNewFile() error {
 
 	j.currentFile = file
 	j.currentPath = path
-	j.currentEncoder = json.NewEncoder(file)
+	j.currentWriter = bufio.NewWriter(file)
+	j.currentEncoder = json.NewEncoder(j.currentWriter)
 	j.entries = 0
 
 	// Write header
 	header := JournalEntry{Header: &JournalHeader{PreviousJournal: j.previousJournal}}
 	if err := j.currentEncoder.Encode(header); err != nil {
+		file.Close()
+		return err
+	}
+	if err := j.currentWriter.Flush(); err != nil {
 		file.Close()
 		return err
 	}
@@ -121,6 +127,9 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	// ACID Durability Rule: Only sync to disk synchronously for commit or checkpoint records.
 	// This ensures previously buffered updates are safely persisted at commit time.
 	if rec.Type == RecordTypeTxCommit || rec.Type == RecordTypeTxCheckpoint {
+		if err := j.currentWriter.Flush(); err != nil {
+			return false, err
+		}
 		if err := j.currentFile.Sync(); err != nil {
 			return false, err
 		}
@@ -149,6 +158,7 @@ func (j *Journal) flushLocked(ctx context.Context) error {
 	if j.currentFile == nil {
 		return nil
 	}
+	_ = j.currentWriter.Flush()
 	j.currentFile.Close()
 
 	// Read and upload to storage
@@ -197,6 +207,7 @@ func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.currentFile != nil {
+		_ = j.currentWriter.Flush()
 		return j.currentFile.Close()
 	}
 	return nil

@@ -26,33 +26,37 @@ import (
 
 // serviceConfig persists configuration parameters to allow restarting services.
 type serviceConfig struct {
-	serviceType      string
-	discoveryURL     string
-	distributeURL    string
-	repFactor        int
-	maxAttempts      int
-	additionalNotify []string
-	slotsURL         string
-	finderURL        string
-	btreeSlotID      string
-	journalSlotID    string
+	serviceType           string
+	discoveryURL          string
+	distributeURL         string
+	repFactor             int
+	maxAttempts           int
+	additionalNotify      []string
+	slotsURL              string
+	finderURL             string
+	btreeSlotID           string
+	journalSlotID         string
+	btreeMergeThreshold   int
+	journalFlushThreshold int
 }
 
 // Machine represents a simulated server running zero or more services.
 type Machine struct {
-	id          string
-	cluster     *Cluster
-	dataDir     string
-	mu          sync.Mutex
-	servers     map[string]*http.Server
-	listeners   map[string]net.Listener
-	ports       map[string]int
-	cancels     map[string]context.CancelFunc
-	configs     map[string]*serviceConfig
-	closers     map[string]io.Closer
-	storageID   string
-	storageNode storage.Storage
-	finderNode  finder.Finder
+	id                    string
+	cluster               *Cluster
+	dataDir               string
+	mu                    sync.Mutex
+	servers               map[string]*http.Server
+	listeners             map[string]net.Listener
+	ports                 map[string]int
+	cancels               map[string]context.CancelFunc
+	configs               map[string]*serviceConfig
+	closers               map[string]io.Closer
+	storageID             string
+	storageNode           storage.Storage
+	finderNode            finder.Finder
+	BTreeMergeThreshold   int
+	JournalFlushThreshold int
 }
 
 // HandlerRegistry defines an interface for registering HTTP handlers dynamically.
@@ -96,15 +100,17 @@ func (c *Cluster) NewMachine(name string) (*Machine, error) {
 	}
 
 	m := &Machine{
-		id:        name,
-		cluster:   c,
-		dataDir:   dataDir,
-		servers:   make(map[string]*http.Server),
-		listeners: make(map[string]net.Listener),
-		ports:     make(map[string]int),
-		cancels:   make(map[string]context.CancelFunc),
-		configs:   make(map[string]*serviceConfig),
-		closers:   make(map[string]io.Closer),
+		id:                    name,
+		cluster:               c,
+		dataDir:               dataDir,
+		servers:               make(map[string]*http.Server),
+		listeners:             make(map[string]net.Listener),
+		ports:                 make(map[string]int),
+		cancels:               make(map[string]context.CancelFunc),
+		configs:               make(map[string]*serviceConfig),
+		closers:               make(map[string]io.Closer),
+		BTreeMergeThreshold:   1000,
+		JournalFlushThreshold: 100,
 	}
 	c.machines[name] = m
 	return m, nil
@@ -625,6 +631,15 @@ func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL str
 
 	var writerOpts content.WriterOptions // use default options
 
+	btreeThreshold := m.BTreeMergeThreshold
+	if btreeThreshold <= 0 {
+		btreeThreshold = 1000
+	}
+	journalThreshold := m.JournalFlushThreshold
+	if journalThreshold <= 0 {
+		journalThreshold = 100
+	}
+
 	store, err := kv.NewFileKeyValueStore(
 		ctx,
 		slotsClient,
@@ -635,8 +650,8 @@ func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL str
 		storageClient,
 		dir,
 		10*1024*1024,
-		1000,
-		100,
+		btreeThreshold,
+		journalThreshold,
 		writerOpts,
 	)
 	if err != nil {
@@ -660,12 +675,14 @@ func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL str
 	m.listeners["kv"] = l
 	m.closers["kv"] = store
 	m.configs["kv"] = &serviceConfig{
-		serviceType:   "kv",
-		discoveryURL:  discoveryURL,
-		slotsURL:      slotsURL,
-		finderURL:     finderURL,
-		btreeSlotID:   btreeSlotID,
-		journalSlotID: journalSlotID,
+		serviceType:           "kv",
+		discoveryURL:          discoveryURL,
+		slotsURL:              slotsURL,
+		finderURL:             finderURL,
+		btreeSlotID:           btreeSlotID,
+		journalSlotID:         journalSlotID,
+		btreeMergeThreshold:   btreeThreshold,
+		journalFlushThreshold: journalThreshold,
 	}
 	m.registerHandler("kv", port, kvServer)
 
@@ -743,6 +760,8 @@ func (m *Machine) StartService(ctx context.Context, serviceType string) (string,
 	case "finder":
 		return m.StartFinder(ctx, cfg.discoveryURL)
 	case "kv":
+		m.BTreeMergeThreshold = cfg.btreeMergeThreshold
+		m.JournalFlushThreshold = cfg.journalFlushThreshold
 		return m.StartKV(ctx, cfg.discoveryURL, cfg.slotsURL, cfg.finderURL, cfg.btreeSlotID, cfg.journalSlotID)
 	default:
 		return "", fmt.Errorf("unknown service type %q", serviceType)

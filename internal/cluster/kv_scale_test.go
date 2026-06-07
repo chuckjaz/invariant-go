@@ -150,6 +150,8 @@ func TestScale_KeyValueService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create machine-kv: %v", err)
 	}
+	mKV.BTreeMergeThreshold = 50000
+	mKV.JournalFlushThreshold = 5000
 
 	btreeSlotID := "0000000000000000000000000000000000000000000000000000000000000001"
 	journalSlotID := "0000000000000000000000000000000000000000000000000000000000000002"
