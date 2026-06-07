@@ -2,9 +2,11 @@ package distribute
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,5 +82,68 @@ func TestDistributeServer(t *testing.T) {
 	}
 	if !hasAbc || !hasDef {
 		t.Errorf("Missing expected blocks, got %v", blocks)
+	}
+}
+
+type mockErrorDistribute struct{}
+
+func (m *mockErrorDistribute) Register(ctx context.Context, id string) error {
+	return errors.New("register error")
+}
+
+func (m *mockErrorDistribute) Notify(ctx context.Context, id string, addresses []string) error {
+	return errors.New("notify error")
+}
+
+func TestDistributeServer_Errors(t *testing.T) {
+	// 1. Verify custom server ID & ID() method
+	d := NewInMemoryDistribute(nil, 3, 3, "", 0)
+	server := NewDistributeServer("custom-server-id", d)
+	if server.ID() != "custom-server-id" {
+		t.Errorf("Expected ID 'custom-server-id', got %q", server.ID())
+	}
+
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+
+	// 2. PUT /notify/{id} with invalid JSON -> 400 Bad Request
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/notify/node1", bytes.NewBuffer([]byte("{invalid json")))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request, got %d", resp.StatusCode)
+	}
+
+	// 3. Test Register and Notify error handling on the server
+	errDist := &mockErrorDistribute{}
+	errServer := NewDistributeServer("err-srv", errDist)
+	errTs := httptest.NewServer(errServer)
+	defer errTs.Close()
+
+	// PUT /register/node1 with error backend -> 500
+	req, _ = http.NewRequest(http.MethodPut, errTs.URL+"/register/node1", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 Internal Server Error for Register, got %d", resp.StatusCode)
+	}
+
+	// PUT /notify/node1 with error backend -> 500
+	hasReq := notify.NotifyRequest{Addresses: []string{"abc"}}
+	body, _ := json.Marshal(hasReq)
+	req, _ = http.NewRequest(http.MethodPut, errTs.URL+"/notify/node1", bytes.NewBuffer(body))
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500 Internal Server Error for Notify, got %d", resp.StatusCode)
 	}
 }
