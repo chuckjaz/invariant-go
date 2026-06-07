@@ -331,7 +331,9 @@ func (d *InMemoryDistribute) Sync() {
 						// Create store client from destSrv URL
 						// And tell dest to fetch from source via its ID so dest looks it up in discovery
 						c := storage.NewClient(destAddr, nil)
-						err := c.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
+						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+						err := c.Fetch(ctx, block, sourceSrvID, sourceAddr)
+						cancel()
 						if err == nil {
 							success = true
 							break // success
@@ -434,7 +436,9 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 		}
 
 		sourceClient := storage.NewClient(sourceAddr, nil)
-		size, ok := sourceClient.Size(context.Background(), block)
+		ctxSize, cancelSize := context.WithTimeout(context.Background(), 3*time.Second)
+		size, ok := sourceClient.Size(ctxSize, block)
+		cancelSize()
 		if !ok {
 			continue
 		}
@@ -443,7 +447,9 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 			continue // Rate limit exceeded, we can't upload this block right now
 		}
 
-		err := destClient.Fetch(context.Background(), block, sourceSrvID, sourceAddr)
+		ctxFetch, cancelFetch := context.WithTimeout(context.Background(), 3*time.Second)
+		err := destClient.Fetch(ctxFetch, block, sourceSrvID, sourceAddr)
+		cancelFetch()
 		if err == nil {
 			newlyUploadedBytes += size
 			d.mu.Lock()

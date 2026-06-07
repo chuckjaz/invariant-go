@@ -414,3 +414,317 @@ func TestFilesService_StorageDestination(t *testing.T) {
 		t.Errorf("Expected content to be in destStore")
 	}
 }
+
+func TestLayerJSON(t *testing.T) {
+	// 1. Marshal/Unmarshal standard Layer
+	l1 := Layer{
+		RootLink:           content.ContentLink{Address: "addr1"},
+		Includes:           []string{"*.txt"},
+		Excludes:           []string{"*.log"},
+		StorageDestination: "dest1",
+		ReadOnly:           true,
+	}
+
+	data, err := json.Marshal(l1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var l2 Layer
+	err = json.Unmarshal(data, &l2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l1.StorageDestination != l2.StorageDestination || l1.ReadOnly != l2.ReadOnly || l2.RootLink.Address != "addr1" {
+		t.Errorf("Unexpected unmarshal result: %+v", l2)
+	}
+
+	// 2. Marshal/Unmarshal temporary slot RootLink
+	lTemp := Layer{
+		RootLink: content.ContentLink{Slot: true},
+	}
+	data, err = json.Marshal(lTemp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var lTempDecoded Layer
+	err = json.Unmarshal(data, &lTempDecoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lTempDecoded.RootLink.Slot || lTempDecoded.RootLink.Address != "" {
+		t.Errorf("Expected temporary slot RootLink, got %+v", lTempDecoded.RootLink)
+	}
+
+	// 3. UnmarshalJSON errors
+	var l3 Layer
+	err = json.Unmarshal([]byte("123"), &l3)
+	if err == nil {
+		t.Error("Expected error unmarshalling number as Layer")
+	}
+
+	err = json.Unmarshal([]byte(`{"rootLink": 123}`), &l3)
+	if err == nil {
+		t.Error("Expected error unmarshalling number as RootLink")
+	}
+}
+
+func uint64Ptr(v uint64) *uint64 {
+	return &v
+}
+
+func TestFilesService_AllEndpoints(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-id")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	err := memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootLink := content.ContentLink{
+		Address: "test-slot",
+		Slot:    true,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:          store,
+		Slots:            memSlots,
+		RootLink:         rootLink,
+		AutoSyncTimeout:  10 * time.Millisecond,
+		SlotPollInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	server := NewServer(filesService)
+	handler := server.Handler()
+
+	// 1. Create directory 'dir1'
+	req := httptest.NewRequest(http.MethodPut, "/1/dir1?kind=Directory", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 2. Lookup 'dir1'
+	req = httptest.NewRequest(http.MethodGet, "/lookup/1/dir1", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", rr.Code)
+	}
+	var lookupRes ContentInformationCommon
+	if err := json.Unmarshal(rr.Body.Bytes(), &lookupRes); err != nil {
+		t.Fatalf("failed to unmarshal dir1 ID: %v", err)
+	}
+	dir1ID := lookupRes.Node
+
+	// 3. Create a file 'file1' inside 'dir1'
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/%d/file1", dir1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// Lookup 'file1'
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/lookup/%d/file1", dir1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", rr.Code)
+	}
+	var lookupResFile ContentInformationCommon
+	if err := json.Unmarshal(rr.Body.Bytes(), &lookupResFile); err != nil {
+		t.Fatalf("failed to unmarshal file1 ID: %v", err)
+	}
+	file1ID := lookupResFile.Node
+
+	// Post content to 'file1'
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/file/%d", file1ID), bytes.NewReader([]byte("test file content")))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", rr.Code)
+	}
+
+	// 4. GET /directory/{id}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/directory/%d", dir1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleGetDirectory, got %v", rr.Code)
+	}
+
+	// 5. GET /attributes/{id}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/attributes/%d", file1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleGetAttributes, got %v", rr.Code)
+	}
+
+	// 6. POST /attributes/{id}
+	attrs := EntryAttributes{Size: uint64Ptr(10)}
+	attrsBody, _ := json.Marshal(attrs)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/attributes/%d", file1ID), bytes.NewReader(attrsBody))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleSetAttributes, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 7. GET /content/{id}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/content/%d", file1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleGetContent, got %v", rr.Code)
+	}
+
+	// 8. GET /info/{id}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/info/%d", file1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleGetInfo, got %v", rr.Code)
+	}
+
+	// 9. PUT /link/{parent_id}/{name}?node={target_id}
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/link/1/link1?node=%d", file1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Errorf("expected 201 Created for handleLink, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 10. POST /rename/{src_parent_id}/{src_name}?name={newName}&directory={dest_parent_id}
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/rename/%d/file1?name=file1_renamed&directory=%d", dir1ID, dir1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleRename, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 11. PUT /remove/{parent_id}/{name}
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/remove/%d/file1_renamed", dir1ID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleRemove, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 12. PUT /sync
+	req = httptest.NewRequest(http.MethodPut, "/sync", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for handleSync, got %v: %v", rr.Code, rr.Body.String())
+	}
+
+	// 13. Test parseNodeID in InMemoryFiles directly
+	_, errParsed := filesService.parseNodeID("/123")
+	if errParsed != nil {
+		t.Errorf("Unexpected error parsing valid node ID: %v", errParsed)
+	}
+	_, errParsed = filesService.parseNodeID("invalid")
+	if errParsed == nil {
+		t.Error("Expected error parsing invalid node ID, got nil")
+	}
+
+	// 14. Recursive deletion test (covers deleteNodeRecursively)
+	// Create parent dir
+	req = httptest.NewRequest(http.MethodPut, "/1/delete_tree?kind=Directory", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("failed to create delete_tree dir: %v", rr.Code)
+	}
+
+	var deleteTreeRes ContentInformationCommon
+	req = httptest.NewRequest(http.MethodGet, "/lookup/1/delete_tree", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	json.Unmarshal(rr.Body.Bytes(), &deleteTreeRes)
+	deleteTreeID := deleteTreeRes.Node
+
+	// Create subdir
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/%d/sub_dir?kind=Directory", deleteTreeID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("failed to create sub_dir: %v", rr.Code)
+	}
+
+	var subDirRes ContentInformationCommon
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/lookup/%d/sub_dir", deleteTreeID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	json.Unmarshal(rr.Body.Bytes(), &subDirRes)
+	subDirID := subDirRes.Node
+
+	// Create subfile
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/%d/sub_file", subDirID), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("failed to create sub_file: %v", rr.Code)
+	}
+
+	// Delete parent dir
+	req = httptest.NewRequest(http.MethodPut, "/remove/1/delete_tree", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for recursive remove, got %v", rr.Code)
+	}
+
+	// 15. Server error/bad request paths
+	// GET /file/invalid
+	req = httptest.NewRequest(http.MethodGet, "/file/invalid", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid GET file ID, got %d", rr.Code)
+	}
+
+	// PUT /link/1/link2 (missing node param)
+	req = httptest.NewRequest(http.MethodPut, "/link/1/link2", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for link missing node, got %d", rr.Code)
+	}
+
+	// PUT /link/1/link2?node=invalid
+	req = httptest.NewRequest(http.MethodPut, "/link/1/link2?node=invalid", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for link invalid node, got %d", rr.Code)
+	}
+
+	// POST /rename/1/dir1 (missing name param)
+	req = httptest.NewRequest(http.MethodPost, "/rename/1/dir1", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for rename missing name, got %d", rr.Code)
+	}
+
+	// POST /rename/1/dir1?name=newname&directory=invalid
+	req = httptest.NewRequest(http.MethodPost, "/rename/1/dir1?name=newname&directory=invalid", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for rename invalid directory, got %d", rr.Code)
+	}
+}
