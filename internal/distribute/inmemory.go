@@ -24,21 +24,24 @@ type nodeState struct {
 
 // InMemoryDistribute is an in-memory implementation of the Distribute interface.
 type InMemoryDistribute struct {
-	mu                  sync.RWMutex
-	services            map[string]*nodeState // storage service ID -> state
-	discovery           discovery.Discovery
-	repFactor           int
-	maxAttempts         int
-	destination         string
-	backupRateMBPerHour float64
-	destinationBlocks   map[string]struct{}
-	backupWindowStart   time.Time
-	backupBytesUploaded int64
+	mu                   sync.RWMutex
+	services             map[string]*nodeState // storage service ID -> state
+	blockLocations       map[string][]string   // block -> list of storage service IDs
+	lastActiveNodesCount int
+	discovery            discovery.Discovery
+	repFactor            int
+	maxAttempts          int
+	destination          string
+	backupRateMBPerHour  float64
+	destinationBlocks    map[string]struct{}
+	backupWindowStart    time.Time
+	backupBytesUploaded  int64
 }
 
 func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts int, destination string, backupRate float64) *InMemoryDistribute {
 	d := &InMemoryDistribute{
 		services:            make(map[string]*nodeState),
+		blockLocations:      make(map[string][]string),
 		discovery:           disc,
 		repFactor:           repFactor,
 		maxAttempts:         maxAttempts,
@@ -92,7 +95,13 @@ func (d *InMemoryDistribute) Notify(ctx context.Context, id string, addresses []
 	}
 
 	for _, addr := range addresses {
-		state.blocks[addr] = struct{}{}
+		if _, hasBlock := state.blocks[addr]; !hasBlock {
+			state.blocks[addr] = struct{}{}
+			locs := d.blockLocations[addr]
+			if !slices.Contains(locs, id) {
+				d.blockLocations[addr] = append(locs, id)
+			}
+		}
 	}
 
 	return nil
@@ -117,13 +126,14 @@ func (d *InMemoryDistribute) GetBlocks(id string) []string {
 
 // getServiceAddress attempts to get the service address for an ID, using cache if
 // available, or making a fresh request to the discovery service if required.
-func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (string, bool) {
+// Returns (address, success, skipped)
+func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (string, bool, bool) {
 	d.mu.RLock()
 	state, exists := d.services[id]
 	d.mu.RUnlock()
 
 	if !exists {
-		return "", false
+		return "", false, false
 	}
 
 	if !forceRefresh {
@@ -131,11 +141,11 @@ func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (st
 		if state.desc != nil {
 			addr := state.desc.Address
 			d.mu.RUnlock()
-			return addr, true
+			return addr, true, false
 		}
-		if time.Since(state.lastLookup) < 2*time.Second {
+		if time.Since(state.lastLookup) < 250*time.Millisecond {
 			d.mu.RUnlock()
-			return "", false
+			return "", false, true
 		}
 		d.mu.RUnlock()
 	}
@@ -156,10 +166,10 @@ func (d *InMemoryDistribute) getServiceAddress(id string, forceRefresh bool) (st
 	d.mu.Unlock()
 
 	if !ok {
-		return "", false
+		return "", false, false
 	}
 
-	return desc.Address, true
+	return desc.Address, true, false
 }
 
 // StartSync starts the background synchronization loop.
@@ -179,15 +189,35 @@ func (d *InMemoryDistribute) Sync() {
 		return
 	}
 
+	d.mu.Lock()
+	// Clean up blockLocations if nodes count has changed
+	if len(d.services) != d.lastActiveNodesCount {
+		activeSet := make(map[string]struct{}, len(d.services))
+		for srvID := range d.services {
+			activeSet[srvID] = struct{}{}
+		}
+		for block, locs := range d.blockLocations {
+			n := 0
+			for _, loc := range locs {
+				if _, active := activeSet[loc]; active {
+					locs[n] = loc
+					n++
+				}
+			}
+			if n == 0 {
+				delete(d.blockLocations, block)
+			} else if n < len(locs) {
+				d.blockLocations[block] = locs[:n]
+			}
+		}
+		d.lastActiveNodesCount = len(d.services)
+	}
+
 	type activeNode struct {
 		id      string
 		idBytes []byte
 	}
 	var activeNodes []activeNode
-
-	// Build map block -> list of service IDs that contain it
-	blockLocations := make(map[string][]string)
-	d.mu.RLock()
 	for srvID, state := range d.services {
 		if state.isDestination {
 			continue
@@ -196,16 +226,19 @@ func (d *InMemoryDistribute) Sync() {
 			id:      srvID,
 			idBytes: state.idBytes,
 		})
-		for block := range state.blocks {
-			blockLocations[block] = append(blockLocations[block], srvID)
-		}
 	}
-	d.mu.RUnlock()
+
+	// Copy blockLocations map so we can release lock during parallel replication
+	blockLocationsCopy := make(map[string][]string, len(d.blockLocations))
+	for block, locs := range d.blockLocations {
+		blockLocationsCopy[block] = locs
+	}
+	d.mu.Unlock()
 
 	sem := make(chan struct{}, 64)
 	var wg sync.WaitGroup
 
-	for block, locations := range blockLocations {
+	for block, locations := range blockLocationsCopy {
 		if len(locations) >= d.repFactor {
 			continue // Already replicated enough
 		}
@@ -249,7 +282,7 @@ func (d *InMemoryDistribute) Sync() {
 			var sourceAddr string
 			foundSource := false
 			for _, loc := range locations {
-				addr, ok := d.getServiceAddress(loc, false)
+				addr, ok, _ := d.getServiceAddress(loc, false)
 				if ok {
 					sourceSrvID = loc
 					sourceAddr = addr
@@ -273,17 +306,21 @@ func (d *InMemoryDistribute) Sync() {
 
 					// Try to replicate to this node, with retries on failure
 					success := false
+					skipped := false
 					for attempt := range 2 {
 						forceRefresh := attempt > 0 // Force refresh on retry
-						destAddr, ok := d.getServiceAddress(destSrvID, forceRefresh)
+						destAddr, ok, skip := d.getServiceAddress(destSrvID, forceRefresh)
 						if !ok {
-							log.Printf("Failed to resolve address for destination node %s", destSrvID)
+							if skip {
+								skipped = true
+							}
+							log.Printf("Failed to resolve address for destination node %s (skip=%v)", destSrvID, skip)
 							break // Can't resolve, give up on this node for now
 						}
 
 						if attempt > 0 {
 							// On retry, we also want to be sure our source address is still good
-							newSourceAddr, ok := d.getServiceAddress(sourceSrvID, true)
+							newSourceAddr, ok, _ := d.getServiceAddress(sourceSrvID, true)
 							if ok {
 								sourceAddr = newSourceAddr
 							} else {
@@ -306,15 +343,39 @@ func (d *InMemoryDistribute) Sync() {
 						d.mu.Lock()
 						if state, ok := d.services[destSrvID]; ok {
 							state.failures = 0
+							if _, hasBlock := state.blocks[block]; !hasBlock {
+								state.blocks[block] = struct{}{}
+								locs := d.blockLocations[block]
+								if !slices.Contains(locs, destSrvID) {
+									d.blockLocations[block] = append(locs, destSrvID)
+								}
+							}
 						}
 						d.mu.Unlock()
-					} else {
+					} else if !skipped {
 						d.mu.Lock()
 						if state, ok := d.services[destSrvID]; ok {
 							state.failures++
 							if state.failures >= d.maxAttempts {
 								log.Printf("Removing node %s due to max failures (%d)", destSrvID, state.failures)
-								delete(d.services, destSrvID)
+								// Evict node and clean up its blocks
+								state, exists := d.services[destSrvID]
+								if exists {
+									delete(d.services, destSrvID)
+									for b := range state.blocks {
+										l := d.blockLocations[b]
+										idx := slices.Index(l, destSrvID)
+										if idx != -1 {
+											l = slices.Delete(l, idx, idx+1)
+											if len(l) == 0 {
+												delete(d.blockLocations, b)
+											} else {
+												d.blockLocations[b] = l
+											}
+										}
+									}
+									d.lastActiveNodesCount = len(d.services)
+								}
 							}
 						}
 						d.mu.Unlock()
@@ -326,12 +387,12 @@ func (d *InMemoryDistribute) Sync() {
 	wg.Wait()
 
 	if d.destination != "" {
-		d.syncToDestination(blockLocations)
+		d.syncToDestination(blockLocationsCopy)
 	}
 }
 
 func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]string) {
-	destAddr, ok := d.getServiceAddress(d.destination, false)
+	destAddr, ok, _ := d.getServiceAddress(d.destination, false)
 	if !ok {
 		return // Can't resolve destination
 	}
@@ -367,7 +428,7 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 
 		// Need to upload this block to destination
 		sourceSrvID := locations[0]
-		sourceAddr, ok := d.getServiceAddress(sourceSrvID, false)
+		sourceAddr, ok, _ := d.getServiceAddress(sourceSrvID, false)
 		if !ok {
 			continue
 		}

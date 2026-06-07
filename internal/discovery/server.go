@@ -11,6 +11,7 @@ import (
 type DiscoveryServer struct {
 	id        string
 	discovery Discovery
+	handler   http.Handler
 }
 
 func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
@@ -18,10 +19,12 @@ func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
 	rand.Read(idBytes)
 	id := hex.EncodeToString(idBytes)
 
-	return &DiscoveryServer{
+	s := &DiscoveryServer{
 		id:        id,
 		discovery: discovery,
 	}
+	s.handler = s.Handler()
+	return s
 }
 
 func (s *DiscoveryServer) Handler() http.Handler {
@@ -36,7 +39,7 @@ func (s *DiscoveryServer) Handler() http.Handler {
 }
 
 func (s *DiscoveryServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Handler().ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *DiscoveryServer) handleGetID(w http.ResponseWriter, r *http.Request) {

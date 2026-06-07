@@ -21,6 +21,7 @@ type StorageServer struct {
 	discovery discovery.Discovery
 	cacheMu   sync.RWMutex
 	devCache  map[string]discovery.ServiceDescription
+	handler   http.Handler
 }
 
 func NewStorageServer(storage Storage) *StorageServer {
@@ -33,11 +34,13 @@ func NewStorageServer(storage Storage) *StorageServer {
 		id = hex.EncodeToString(idBytes)
 	}
 
-	return &StorageServer{
+	s := &StorageServer{
 		id:       id,
 		storage:  storage,
 		devCache: make(map[string]discovery.ServiceDescription),
 	}
+	s.handler = s.Handler()
+	return s
 }
 
 // NotifyClient represents a client that can notify a service about known blocks.
@@ -138,7 +141,7 @@ func (s *StorageServer) Handler() http.Handler {
 }
 
 func (s *StorageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Handler().ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *StorageServer) handleGetID(w http.ResponseWriter, r *http.Request) {

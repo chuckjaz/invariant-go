@@ -13,14 +13,17 @@ import (
 type FinderServer struct {
 	finder    Finder
 	discovery discovery.Discovery
+	handler   http.Handler
 }
 
 // NewFinderServer creates a new Finder HTTP server.
 func NewFinderServer(finder Finder, disc discovery.Discovery) *FinderServer {
-	return &FinderServer{
+	s := &FinderServer{
 		finder:    finder,
 		discovery: disc,
 	}
+	s.handler = s.Handler()
+	return s
 }
 
 func (s *FinderServer) Handler() http.Handler {
@@ -35,7 +38,7 @@ func (s *FinderServer) Handler() http.Handler {
 }
 
 func (s *FinderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Handler().ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *FinderServer) handleGetID(w http.ResponseWriter, r *http.Request) {
