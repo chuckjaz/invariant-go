@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/klauspost/compress/zstd"
+
 	"invariant/internal/storage"
 )
 
@@ -196,6 +198,13 @@ func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKe
 			w.Close()
 		case "gzip":
 			w := gzip.NewWriter(&b)
+			w.Write(currentData)
+			w.Close()
+		case "zstd":
+			w, err := zstd.NewWriter(&b)
+			if err != nil {
+				return link, err
+			}
 			w.Write(currentData)
 			w.Close()
 		default:

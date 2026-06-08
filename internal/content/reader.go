@@ -16,6 +16,8 @@ import (
 	"io"
 	"sync"
 
+	"github.com/klauspost/compress/zstd"
+
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -80,6 +82,12 @@ func applyTransform(rc io.ReadCloser, t ContentTransform, expected string, store
 				return nil, err
 			}
 			return &wrappedReadCloser{Reader: gzrc, underlying: rc}, nil
+		case "zstd":
+			zrc, err := zstd.NewReader(rc)
+			if err != nil {
+				return nil, err
+			}
+			return &wrappedReadCloser{Reader: zrc, underlying: rc}, nil
 		default:
 			return nil, fmt.Errorf("%w: Decompress %s", ErrUnsupportedAlg, t.Algorithm)
 		}

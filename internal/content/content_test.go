@@ -161,3 +161,40 @@ func TestReadWriteSuppliedKey(t *testing.T) {
 		t.Errorf("Expected %q, got %q", data, readData)
 	}
 }
+
+func TestReadWriteZstd(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+
+	data := []byte("hello world compressed with zstandard algorithm")
+	for range 20 {
+		data = append(data, []byte("some repetitive zstd test data goes here...")...)
+	}
+
+	opts := content.WriterOptions{
+		CompressAlgorithm: "zstd",
+	}
+
+	link, err := content.Write(bytes.NewReader(data), store, opts)
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if len(link.Transforms) != 1 || link.Transforms[0].Kind != "Decompress" || link.Transforms[0].Algorithm != "zstd" {
+		t.Errorf("Expected 1 Decompress zstd transform, got %v", link.Transforms)
+	}
+
+	rc, err := content.Read(link, store, nil)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	defer rc.Close()
+
+	readData, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+
+	if !bytes.Equal(data, readData) {
+		t.Errorf("Read data does not match original")
+	}
+}

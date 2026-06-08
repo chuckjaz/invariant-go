@@ -14,7 +14,7 @@ type ContentLink struct {
 // ContentTransform defines a transformation to apply to content during retrieval.
 type ContentTransform struct {
 	Kind      string `json:"kind"`                // "Blocks", "Decipher", or "Decompress"
-	Algorithm string `json:"algorithm,omitempty"` // For Decipher ("aes-256-cbc") or Decompress ("inflate", "gzip")
+	Algorithm string `json:"algorithm,omitempty"` // For Decipher ("aes-256-cbc") or Decompress ("inflate", "gzip", "zstd")
 	Key       string `json:"key,omitempty"`       // Hex string, base64, or raw? The spec says "string", typically hex or base64. Let's assume hex since it's common.
 	IV        string `json:"iv,omitempty"`        // Usually hex or base64. Let's assume hex.
 }
