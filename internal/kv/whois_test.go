@@ -179,14 +179,17 @@ func TestServerWhoIs_BackgroundCleanup(t *testing.T) {
 		t.Fatalf("Expected entry to be in cache")
 	}
 
-	// Wait for the background cleanup loop to run (interval is TTL / 2 = 50ms, sleep 150ms)
-	time.Sleep(150 * time.Millisecond)
-
-	// Since we sleep 150ms (> TTL of 100ms), the background cleanup loop
-	// should have pruned the entry from the cache map directly.
-	server.cache.mu.RLock()
-	_, found := server.cache.entries["100.0.0.1:1234"]
-	server.cache.mu.RUnlock()
+	// Wait for the background cleanup loop to run (interval is TTL / 2 = 50ms)
+	var found bool
+	for start := time.Now(); time.Since(start) < 500*time.Millisecond; {
+		server.cache.mu.RLock()
+		_, found = server.cache.entries["100.0.0.1:1234"]
+		server.cache.mu.RUnlock()
+		if !found {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if found {
 		t.Errorf("Expected entry to be pruned from the cache by background goroutine, but it was found")

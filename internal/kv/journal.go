@@ -36,6 +36,7 @@ type Record struct {
 	TransactionID uint64     `json:"tx"`
 	Value         []byte     `json:"v,omitempty"`
 	Sequential    bool       `json:"seq,omitempty"`
+	UserID        string     `json:"u,omitempty"`
 }
 
 type JournalEntry struct {
@@ -119,6 +120,10 @@ func (j *Journal) openNewFile() error {
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+
+	if whois, ok := WhoIsFromContext(ctx); ok && whois.UserProfile != nil {
+		rec.UserID = whois.UserProfile.ID.String()
+	}
 
 	entry := JournalEntry{Record: &rec}
 	if err := j.currentEncoder.Encode(entry); err != nil {

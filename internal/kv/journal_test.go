@@ -7,6 +7,9 @@ import (
 	"invariant/internal/content"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
+
+	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/tailcfg"
 )
 
 func TestJournal_GettersAndSetters(t *testing.T) {
@@ -134,5 +137,50 @@ func TestJournal_CloseMultipleTimes(t *testing.T) {
 	j.currentFile = nil
 	if err := j.Close(); err != nil {
 		t.Errorf("Close on nil currentFile failed: %v", err)
+	}
+}
+
+func TestJournal_AppendWithUserInfo(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	tempDir := t.TempDir()
+
+	j, err := NewJournal(tempDir, store, slotClient, "j-slot", nil, nil, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create journal: %v", err)
+	}
+	defer j.Close()
+
+	// 1. Prepare WhoIsResponse with UserProfile
+	whois := &apitype.WhoIsResponse{
+		UserProfile: &tailcfg.UserProfile{
+			ID: 98765,
+		},
+	}
+	ctx = ContextWithWhoIs(ctx, whois)
+
+	rec := Record{Type: RecordTypePut, Key: "k1", Value: []byte("v1"), TransactionID: 42}
+	_, err = j.Append(ctx, rec)
+	if err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	if err := j.Close(); err != nil {
+		t.Fatalf("Failed to close journal: %v", err)
+	}
+
+	// 2. Load the journal records and check if UserID is populated
+	records, err := j.LoadLocalJournals()
+	if err != nil {
+		t.Fatalf("Failed to load local journals: %v", err)
+	}
+
+	if len(records) != 1 {
+		t.Fatalf("Expected 1 record, got %d", len(records))
+	}
+
+	if records[0].UserID != "userid:98765" {
+		t.Errorf("Expected UserID to be 'userid:98765', got %q", records[0].UserID)
 	}
 }
