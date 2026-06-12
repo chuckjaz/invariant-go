@@ -26,10 +26,18 @@ func NewServer(store KeyValueStore) *Server {
 	s := &Server{
 		store:    store,
 		WhoIsTTL: 1 * time.Minute,
-		cache:    newWhoIsCache(),
 	}
+	s.cache = newWhoIsCache(func() time.Duration {
+		return s.WhoIsTTL
+	})
 	s.handler = s.Handler()
 	return s
+}
+
+func (s *Server) Close() {
+	if s.cache != nil {
+		s.cache.Close()
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -72,7 +80,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !cached {
 		whois, err = tsClient.WhoIs(r.Context(), r.RemoteAddr)
 		if s.cache != nil {
-			s.cache.Set(r.RemoteAddr, whois, err, ttl)
+			s.cache.Set(r.RemoteAddr, whois, err)
 		}
 	}
 

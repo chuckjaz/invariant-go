@@ -35,13 +35,59 @@ type cacheEntry struct {
 }
 
 type whoIsCache struct {
-	mu      sync.RWMutex
-	entries map[string]cacheEntry
+	mu       sync.RWMutex
+	entries  map[string]cacheEntry
+	stopChan chan struct{}
 }
 
-func newWhoIsCache() *whoIsCache {
-	return &whoIsCache{
-		entries: make(map[string]cacheEntry),
+func newWhoIsCache(getTTL func() time.Duration) *whoIsCache {
+	c := &whoIsCache{
+		entries:  make(map[string]cacheEntry),
+		stopChan: make(chan struct{}),
+	}
+	go c.cleanupLoop(getTTL)
+	return c
+}
+
+func (c *whoIsCache) Close() {
+	close(c.stopChan)
+}
+
+func (c *whoIsCache) cleanupLoop(getTTL func() time.Duration) {
+	lastTTL := getTTL()
+	if lastTTL <= 0 {
+		lastTTL = 1 * time.Minute
+	}
+	ticker := time.NewTicker(lastTTL / 2)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			ttl := getTTL()
+			if ttl <= 0 {
+				ttl = 1 * time.Minute
+			}
+			c.prune(ttl)
+
+			if ttl != lastTTL {
+				ticker.Reset(ttl / 2)
+				lastTTL = ttl
+			}
+		case <-c.stopChan:
+			return
+		}
+	}
+}
+
+func (c *whoIsCache) prune(ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	for addr, entry := range c.entries {
+		if now.Sub(entry.createdAt) > ttl {
+			delete(c.entries, addr)
+		}
 	}
 }
 
@@ -55,21 +101,12 @@ func (c *whoIsCache) Get(remoteAddr string, ttl time.Duration) (*apitype.WhoIsRe
 	return entry.whois, entry.err, true
 }
 
-func (c *whoIsCache) Set(remoteAddr string, whois *apitype.WhoIsResponse, err error, ttl time.Duration) {
+func (c *whoIsCache) Set(remoteAddr string, whois *apitype.WhoIsResponse, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	// Prune expired entries
-	now := time.Now()
-	for addr, entry := range c.entries {
-		if now.Sub(entry.createdAt) > ttl {
-			delete(c.entries, addr)
-		}
-	}
-
 	c.entries[remoteAddr] = cacheEntry{
 		whois:     whois,
 		err:       err,
-		createdAt: now,
+		createdAt: time.Now(),
 	}
 }

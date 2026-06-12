@@ -32,6 +32,7 @@ func TestServerWhoIs(t *testing.T) {
 	}
 
 	server := NewServer(nil)
+	defer server.Close()
 	server.tsClient = mockTS
 
 	var receivedWhoIs *apitype.WhoIsResponse
@@ -62,6 +63,7 @@ func TestServerWhoIs_Error(t *testing.T) {
 	}
 
 	server := NewServer(nil)
+	defer server.Close()
 	server.tsClient = mockTS
 
 	var receivedOk bool
@@ -95,6 +97,7 @@ func TestServerWhoIs_Cached(t *testing.T) {
 	}
 
 	server := NewServer(nil)
+	defer server.Close()
 	server.tsClient = mockTS
 	server.WhoIsTTL = 100 * time.Millisecond
 
@@ -144,5 +147,48 @@ func TestServerWhoIs_Cached(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Errorf("Expected 2 calls to WhoIs after expiration, got %d", callCount)
+	}
+}
+
+func TestServerWhoIs_BackgroundCleanup(t *testing.T) {
+	mockTS := &mockTailscaleClient{
+		whoIsFunc: func(ctx context.Context, remoteAddr string) (*apitype.WhoIsResponse, error) {
+			return &apitype.WhoIsResponse{}, nil
+		},
+	}
+
+	server := NewServer(nil)
+	defer server.Close()
+	server.tsClient = mockTS
+	server.WhoIsTTL = 100 * time.Millisecond
+
+	// Create request to populate the cache
+	req := httptest.NewRequest("GET", "/get?key=foo", nil)
+	req.RemoteAddr = "100.0.0.1:1234"
+	w := httptest.NewRecorder()
+
+	server.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	server.ServeHTTP(w, req)
+
+	// Verify it's in the cache
+	_, _, ok := server.cache.Get("100.0.0.1:1234", 100*time.Millisecond)
+	if !ok {
+		t.Fatalf("Expected entry to be in cache")
+	}
+
+	// Wait for the background cleanup loop to run (interval is TTL / 2 = 50ms, sleep 150ms)
+	time.Sleep(150 * time.Millisecond)
+
+	// Since we sleep 150ms (> TTL of 100ms), the background cleanup loop
+	// should have pruned the entry from the cache map directly.
+	server.cache.mu.RLock()
+	_, found := server.cache.entries["100.0.0.1:1234"]
+	server.cache.mu.RUnlock()
+
+	if found {
+		t.Errorf("Expected entry to be pruned from the cache by background goroutine, but it was found")
 	}
 }
