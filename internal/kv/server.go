@@ -8,18 +8,26 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"time"
 
 	"tailscale.com/client/local"
+	"tailscale.com/client/tailscale/apitype"
 )
 
 type Server struct {
 	store    KeyValueStore
 	handler  http.Handler
 	tsClient TailscaleClient
+	WhoIsTTL time.Duration
+	cache    *whoIsCache
 }
 
 func NewServer(store KeyValueStore) *Server {
-	s := &Server{store: store}
+	s := &Server{
+		store:    store,
+		WhoIsTTL: 1 * time.Minute,
+		cache:    newWhoIsCache(),
+	}
 	s.handler = s.Handler()
 	return s
 }
@@ -47,7 +55,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if tsClient == nil {
 		tsClient = &local.Client{}
 	}
-	if whois, err := tsClient.WhoIs(r.Context(), r.RemoteAddr); err == nil {
+
+	ttl := s.WhoIsTTL
+	if ttl <= 0 {
+		ttl = 1 * time.Minute
+	}
+
+	var whois *apitype.WhoIsResponse
+	var err error
+	var cached bool
+
+	if s.cache != nil {
+		whois, err, cached = s.cache.Get(r.RemoteAddr, ttl)
+	}
+
+	if !cached {
+		whois, err = tsClient.WhoIs(r.Context(), r.RemoteAddr)
+		if s.cache != nil {
+			s.cache.Set(r.RemoteAddr, whois, err, ttl)
+		}
+	}
+
+	if err == nil {
 		r = r.WithContext(ContextWithWhoIs(r.Context(), whois))
 	}
 	s.handler.ServeHTTP(w, r)
