@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+
+	"tailscale.com/client/local"
 )
 
 type Server struct {
-	store   KeyValueStore
-	handler http.Handler
+	store    KeyValueStore
+	handler  http.Handler
+	tsClient TailscaleClient
 }
 
 func NewServer(store KeyValueStore) *Server {
@@ -40,6 +43,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	tsClient := s.tsClient
+	if tsClient == nil {
+		tsClient = &local.Client{}
+	}
+	if whois, err := tsClient.WhoIs(r.Context(), r.RemoteAddr); err == nil {
+		r = r.WithContext(ContextWithWhoIs(r.Context(), whois))
+	}
 	s.handler.ServeHTTP(w, r)
 }
 
