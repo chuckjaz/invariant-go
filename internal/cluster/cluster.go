@@ -555,10 +555,19 @@ func (m *Machine) StartFinder(ctx context.Context, discoveryURL string) (string,
 		return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 	}
 
-	// Generate a 32-byte hex string node ID for finder
-	idBytes := make([]byte, 32)
-	_, _ = rand.Read(idBytes)
-	idStr := hex.EncodeToString(idBytes)
+	// Generate or load the 32-byte hex string node ID for finder
+	dir := filepath.Join(m.dataDir, "finder")
+	_ = os.MkdirAll(dir, 0755)
+	idPath := filepath.Join(dir, "id")
+	var idStr string
+	if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+		idStr = string(data)
+	} else {
+		idBytes := make([]byte, 32)
+		_, _ = rand.Read(idBytes)
+		idStr = hex.EncodeToString(idBytes)
+		_ = os.WriteFile(idPath, []byte(idStr), 0644)
+	}
 
 	f, err := finder.NewMemoryFinder(idStr)
 	if err != nil {

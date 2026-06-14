@@ -155,3 +155,51 @@ func TestIntegration_ClusterResilience(t *testing.T) {
 
 	t.Logf("Integration test completed successfully - service resilient to machine failure!")
 }
+
+func TestIntegration_FinderIDPersistence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cl, err := NewCluster()
+	if err != nil {
+		t.Fatalf("failed to create cluster: %v", err)
+	}
+	defer cl.Close()
+
+	mDiscovery, err := cl.NewMachine("machine-discovery")
+	if err != nil {
+		t.Fatalf("failed to create machine-discovery: %v", err)
+	}
+	discURL, err := mDiscovery.StartDiscovery(ctx)
+	if err != nil {
+		t.Fatalf("failed to start discovery: %v", err)
+	}
+
+	mFinder, err := cl.NewMachine("machine-finder")
+	if err != nil {
+		t.Fatalf("failed to create machine-finder: %v", err)
+	}
+
+	_, err = mFinder.StartFinder(ctx, discURL)
+	if err != nil {
+		t.Fatalf("failed to start finder: %v", err)
+	}
+
+	id1 := mFinder.FinderNode().ID()
+	if len(id1) != 64 {
+		t.Errorf("Expected 64-char hex ID, got: %s", id1)
+	}
+
+	mFinder.StopService("finder")
+
+	// Restart finder
+	_, err = mFinder.StartService(ctx, "finder")
+	if err != nil {
+		t.Fatalf("failed to restart finder: %v", err)
+	}
+
+	id2 := mFinder.FinderNode().ID()
+	if id1 != id2 {
+		t.Errorf("Finder ID changed after restart: expected %s, got %s", id1, id2)
+	}
+}

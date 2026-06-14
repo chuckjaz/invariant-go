@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
@@ -22,6 +24,8 @@ func generateID() string {
 func main() {
 	var id string
 	flag.StringVar(&id, "id", "", "ID of the finder service (32-byte hex). Ramdomly generated if not provided.")
+	var dir string
+	flag.StringVar(&dir, "dir", "", "Directory for persisting finder state (e.g. ID)")
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
@@ -33,7 +37,20 @@ func main() {
 	flag.Parse()
 
 	if id == "" {
-		id = generateID()
+		if dir != "" {
+			os.MkdirAll(dir, 0755)
+			idPath := filepath.Join(dir, "id")
+			if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+				id = string(data)
+			} else {
+				id = generateID()
+				if err := os.WriteFile(idPath, []byte(id), 0644); err != nil {
+					log.Printf("Failed to write ID file: %v", err)
+				}
+			}
+		} else {
+			id = generateID()
+		}
 	}
 
 	f, err := finder.NewMemoryFinder(id)
