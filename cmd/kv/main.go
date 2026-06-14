@@ -52,10 +52,6 @@ func main() {
 	flag.IntVar(&journalThreshold, "journal-threshold", 100, "Number of records before flushing journal to storage")
 	var maxCacheSize int
 	flag.IntVar(&maxCacheSize, "max-cache-size", 10*1024*1024, "Maximum cache size in bytes")
-	var finderName string
-	flag.StringVar(&finderName, "finder", "finder", "Name of the finder service")
-	var slotsName string
-	flag.StringVar(&slotsName, "slots", "slots", "Name of the slots service")
 
 	var compress bool
 	flag.BoolVar(&compress, "compress", false, "Compress the written content")
@@ -99,39 +95,24 @@ func main() {
 
 	disc := discovery.NewClient(discoveryURL, nil)
 
-	finderAddr := ""
-	if finderName != "" {
-		finderID, err := discovery.ResolveName(context.Background(), disc, finderName)
+	findService := func(kind string) string {
+		id, err := disc.Find(context.Background(), kind, 1)
 		if err != nil {
-			log.Fatalf("Failed to resolve finder name %q: %v", finderName, err)
+			log.Fatalf("Could not find %s service: %v", kind, err)
 		}
-		desc, ok := disc.Get(context.Background(), finderID)
-		if !ok {
-			log.Fatalf("Could not find address for Finder service %s", finderID)
+		if len(id) == 0 {
+			log.Fatalf("Could not find %s service", kind)
 		}
-		finderAddr = desc.Address
-	} else {
-		log.Fatalf("A finder service name is required")
+		return id[0].Address
 	}
+
+	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, nil)
 
 	// Create storage client
 	storageClient := storage.NewAggregateClient(finderClient, disc, 3, 1000)
 
-	slotsAddr := ""
-	if slotsName != "" {
-		slotsID, err := discovery.ResolveName(context.Background(), disc, slotsName)
-		if err != nil {
-			log.Fatalf("Failed to resolve slots name %q: %v", slotsName, err)
-		}
-		desc, ok := disc.Get(context.Background(), slotsID)
-		if !ok {
-			log.Fatalf("Could not find address for Slots service %s", slotsID)
-		}
-		slotsAddr = desc.Address
-	} else {
-		log.Fatalf("A slots service name is required")
-	}
+	slotsAddr := findService("slots-v1")
 
 	// Create slots client
 	slotsClient := slots.NewClient(slotsAddr, nil)

@@ -297,8 +297,7 @@ func (m *mockNotifyClient) Notify(id string, batch []string) error {
 }
 
 func TestStorageServer_StartNotification(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	memStore := NewInMemoryStorage()
 	server := NewStorageServer(memStore)

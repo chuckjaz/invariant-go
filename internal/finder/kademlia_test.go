@@ -172,7 +172,7 @@ func TestRoutingTable_BucketLRUAndDuplicates(t *testing.T) {
 	}
 
 	// Add first BucketSize nodes
-	for i := 0; i < BucketSize; i++ {
+	for i := range BucketSize {
 		rt.Add(nodes[i])
 	}
 

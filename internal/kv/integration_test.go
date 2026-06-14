@@ -154,7 +154,7 @@ func TestIntegration_ClientServerAll(t *testing.T) {
 	// --- 9. Test History and Batch History ---
 	// Update k1 multiple times to create history (since threshold is 1000, these stay in pending)
 	for i := 2; i <= 5; i++ {
-		_, err = client.Put(ctx, nil, "k1", []byte(fmt.Sprintf("v1-%d", i)))
+		_, err = client.Put(ctx, nil, "k1", fmt.Appendf(nil, "v1-%d", i))
 		if err != nil {
 			t.Fatalf("Put update failed: %v", err)
 		}

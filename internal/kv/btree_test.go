@@ -153,7 +153,7 @@ func TestBTree_SplitsAndTraversals(t *testing.T) {
 	for i := range 20 {
 		key := fmt.Sprintf("k-%02d", i)
 		recs := []Record{
-			{Key: key, TransactionID: uint64(100 + i), Value: []byte(fmt.Sprintf("v-%02d", i))},
+			{Key: key, TransactionID: uint64(100 + i), Value: fmt.Appendf(nil, "v-%02d", i)},
 		}
 		newRoot, err := btree.InsertBatch(ctx, root, recs, nil, uint64(100+i))
 		if err != nil {

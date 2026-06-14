@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"log"
+	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -230,9 +231,7 @@ func (d *InMemoryDistribute) Sync() {
 
 	// Copy blockLocations map so we can release lock during parallel replication
 	blockLocationsCopy := make(map[string][]string, len(d.blockLocations))
-	for block, locs := range d.blockLocations {
-		blockLocationsCopy[block] = locs
-	}
+	maps.Copy(blockLocationsCopy, d.blockLocations)
 	d.mu.Unlock()
 
 	sem := make(chan struct{}, 64)

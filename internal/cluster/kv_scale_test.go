@@ -115,7 +115,7 @@ func TestScale_KeyValueService(t *testing.T) {
 	storageMachines := make([]*Machine, numStorage)
 	var wg sync.WaitGroup
 	errs := make(chan error, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -178,9 +178,9 @@ func TestScale_KeyValueService(t *testing.T) {
 			defer func() { <-sem }()
 
 			kvs := make(map[string][]byte)
-			for j := 0; j < batchSize; j++ {
+			for j := range batchSize {
 				key := fmt.Sprintf("k-%d", start+j)
-				val := []byte(fmt.Sprintf("v-%d", start+j))
+				val := fmt.Appendf(nil, "v-%d", start+j)
 				kvs[key] = val
 			}
 
@@ -228,7 +228,7 @@ func TestScale_KeyValueService(t *testing.T) {
 			defer func() { <-getSem }()
 
 			keys := make([]string, batchSize)
-			for j := 0; j < batchSize; j++ {
+			for j := range batchSize {
 				keys[j] = fmt.Sprintf("k-%d", start+j)
 			}
 
@@ -238,7 +238,7 @@ func TestScale_KeyValueService(t *testing.T) {
 				return
 			}
 
-			for j := 0; j < batchSize; j++ {
+			for j := range batchSize {
 				key := keys[j]
 				expectedVal := fmt.Sprintf("v-%d", start+j)
 				res, ok := results[key]

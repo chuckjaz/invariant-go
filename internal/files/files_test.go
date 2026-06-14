@@ -471,8 +471,9 @@ func TestLayerJSON(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func uint64Ptr(v uint64) *uint64 {
-	return &v
+	return new(v)
 }
 
 func TestFilesService_AllEndpoints(t *testing.T) {

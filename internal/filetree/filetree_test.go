@@ -7,8 +7,9 @@ import (
 	"invariant/internal/content"
 )
 
+//go:fix inline
 func ptr[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 func TestEntryValidation(t *testing.T) {
@@ -23,9 +24,9 @@ func TestEntryValidation(t *testing.T) {
 				BaseEntry: BaseEntry{
 					Kind:       FileKind,
 					Name:       "test.txt",
-					CreateTime: ptr(uint64(1000)),
-					ModifyTime: ptr(uint64(1000)),
-					Mode:       ptr("0644"),
+					CreateTime: new(uint64(1000)),
+					ModifyTime: new(uint64(1000)),
+					Mode:       new("0644"),
 				},
 				Content: content.ContentLink{Address: "hash123"},
 				Size:    1024,
@@ -76,7 +77,7 @@ func TestEntryValidation(t *testing.T) {
 		{
 			name: "invalid mode",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "test", Mode: ptr("888")},
+				BaseEntry: BaseEntry{Kind: FileKind, Name: "test", Mode: new("888")},
 				Content:   content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
@@ -131,8 +132,8 @@ func TestDirectoryMarshalUnmarshal(t *testing.T) {
 			BaseEntry: BaseEntry{
 				Kind:       FileKind,
 				Name:       "file.txt",
-				CreateTime: ptr(uint64(12345)),
-				Mode:       ptr("0644"),
+				CreateTime: new(uint64(12345)),
+				Mode:       new("0644"),
 			},
 			Content: content.ContentLink{Address: "addr1"},
 			Size:    100,

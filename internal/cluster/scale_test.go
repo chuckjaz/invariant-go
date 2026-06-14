@@ -182,7 +182,7 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 	storageMachines := make([]*Machine, numStorage)
 	var wg sync.WaitGroup
 	errs := make(chan error, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -215,7 +215,7 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 	t.Log("Creating and storing 100,000 random blocks...")
 	const numBlocks = 100000
 	blockAddrs := make([]string, numBlocks)
-	for i := 0; i < numBlocks; i++ {
+	for i := range numBlocks {
 		if i%10 == 0 {
 			time.Sleep(10 * time.Microsecond)
 		}
@@ -291,7 +291,7 @@ func TestScale_StorageDistributeFinder(t *testing.T) {
 
 		// Start 10 new storage servers
 		var newMachines []*Machine
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			name := fmt.Sprintf("machine-storage-new-%d", newMachineIdx)
 			newMachineIdx++
 			m, err := cl.NewMachine(name)

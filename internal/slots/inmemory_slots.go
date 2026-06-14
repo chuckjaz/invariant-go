@@ -110,10 +110,7 @@ func (m *MemorySlots) List(ctx context.Context, chunkSize int) <-chan []string {
 		m.mu.RUnlock()
 
 		for i := 0; i < len(ids); i += chunkSize {
-			end := i + chunkSize
-			if end > len(ids) {
-				end = len(ids)
-			}
+			end := min(i+chunkSize, len(ids))
 			select {
 			case ch <- ids[i:end]:
 			case <-ctx.Done():

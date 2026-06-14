@@ -404,7 +404,7 @@ func TestSlots_Extra(t *testing.T) {
 
 	// Should notify about the existing slots immediately (s1 and eccID, in any order)
 	existing := make(map[string]bool)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case batch := <-notifyCl.notified:
 			if len(batch) != 1 {

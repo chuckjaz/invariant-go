@@ -108,10 +108,7 @@ func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []stri
 		})
 
 		for i := 0; i < len(ids); i += chunkSize {
-			end := i + chunkSize
-			if end > len(ids) {
-				end = len(ids)
-			}
+			end := min(i+chunkSize, len(ids))
 			select {
 			case ch <- ids[i:end]:
 			case <-ctx.Done():
