@@ -687,7 +687,7 @@ func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL str
 	m.registerHandler("kv", port, kvServer)
 
 	if discoveryURL != "" {
-		myID := "kv-server-" + m.id
+		myID := kvServer.ID()
 		err := discovery.AdvertiseAndRegister(ctx, disc, myID, "http://127.0.0.1", port, []string{"kv-v1", "kv-batch-v1"})
 		if err != nil {
 			_ = srv.Close()

@@ -169,6 +169,8 @@ func main() {
 	}
 	defer store.Close()
 
+	server := kv.NewServer(store)
+
 	addr := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -176,7 +178,7 @@ func main() {
 	}
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
-	myID := generateID()
+	myID := server.ID()
 	err = discovery.AdvertiseAndRegister(context.Background(), disc, myID, advertiseAddr, actualPort, []string{"kv-v1", "kv-batch-v1"})
 	if err != nil {
 		log.Fatalf("Failed to register with discovery service: %v", err)
@@ -194,7 +196,6 @@ func main() {
 		}()
 	}
 
-	server := kv.NewServer(store)
 	log.Printf("KV service listening on :%d (BTree Slot ID: %s, Journal Slot ID: %s)...", actualPort, btreeSlotID, journalSlotID)
 	log.Fatal(http.Serve(listener, server))
 }

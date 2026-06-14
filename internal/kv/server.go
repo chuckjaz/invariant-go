@@ -1,8 +1,11 @@
 package kv
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"invariant/internal/identity"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -16,6 +19,7 @@ import (
 )
 
 type Server struct {
+	id        string
 	store     KeyValueStore
 	handler   http.Handler
 	tsClient  TailscaleClient
@@ -25,12 +29,27 @@ type Server struct {
 }
 
 func NewServer(store KeyValueStore) *Server {
+	var id string
+	if idStore, ok := store.(identity.Identity); ok {
+		id = idStore.ID()
+	} else {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+	}
+
 	s := &Server{
+		id:       id,
 		store:    store,
 		WhoIsTTL: 1 * time.Minute,
 	}
 	s.handler = s.Handler()
 	return s
+}
+
+// ID returns the server's ID.
+func (s *Server) ID() string {
+	return s.id
 }
 
 func (s *Server) Close() {
@@ -41,6 +60,8 @@ func (s *Server) Close() {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /id", s.handleGetID)
 
 	mux.HandleFunc("POST /tx/start", s.handleTxStart)
 	mux.HandleFunc("POST /tx/commit", s.handleTxCommit)
@@ -55,6 +76,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /batch_history", s.handleBatchGetHistory)
 
 	return mux
+}
+
+func (s *Server) handleGetID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(s.id))
 }
 
 func (s *Server) initCache() {

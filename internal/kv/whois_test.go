@@ -195,3 +195,23 @@ func TestServerWhoIs_BackgroundCleanup(t *testing.T) {
 		t.Errorf("Expected entry to be pruned from the cache by background goroutine, but it was found")
 	}
 }
+
+func TestServerIdentity(t *testing.T) {
+	server := NewServer(nil)
+	defer server.Close()
+
+	req := httptest.NewRequest("GET", "/id", nil)
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status OK, got %v", w.Code)
+	}
+	body := w.Body.String()
+	if body != server.ID() {
+		t.Errorf("Expected ID %q, got %q", server.ID(), body)
+	}
+	if len(body) != 64 {
+		t.Errorf("Expected 64-char hex ID, got len %d", len(body))
+	}
+}

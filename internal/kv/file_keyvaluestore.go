@@ -2,8 +2,13 @@ package kv
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"invariant/internal/content"
@@ -30,6 +35,7 @@ type Transaction struct {
 
 // FileKeyValueStore represents the Key-Value service orchestration layer.
 type FileKeyValueStore struct {
+	id              string
 	mu              sync.RWMutex
 	slotClient      slots.Slots
 	btreeSlotID     string
@@ -70,7 +76,23 @@ func NewFileKeyValueStore(
 	journalFlushThreshold int,
 	opts content.WriterOptions,
 ) (*FileKeyValueStore, error) {
+	os.MkdirAll(journalDir, 0755)
+
+	idPath := filepath.Join(journalDir, "id")
+	var id string
+	if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+		id = string(data)
+	} else {
+		idBytes := make([]byte, 32)
+		rand.Read(idBytes)
+		id = hex.EncodeToString(idBytes)
+		if err := os.WriteFile(idPath, []byte(id), 0644); err != nil {
+			log.Printf("Failed to write ID file: %v", err)
+		}
+	}
+
 	s := &FileKeyValueStore{
+		id:                  id,
 		slotClient:          slotClient,
 		btreeSlotID:         btreeSlotID,
 		btreeSlotAuth:       btreeSlotAuth,
@@ -836,4 +858,9 @@ func (s *FileKeyValueStore) BatchGetHistory(ctx context.Context, txID *uint64, k
 		}
 	}
 	return results, nil
+}
+
+// ID returns the persistent ID of the KV store.
+func (s *FileKeyValueStore) ID() string {
+	return s.id
 }
