@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"sync"
 	"time"
 
 	"tailscale.com/client/local"
@@ -15,11 +16,12 @@ import (
 )
 
 type Server struct {
-	store    KeyValueStore
-	handler  http.Handler
-	tsClient TailscaleClient
-	WhoIsTTL time.Duration
-	cache    *whoIsCache
+	store     KeyValueStore
+	handler   http.Handler
+	tsClient  TailscaleClient
+	WhoIsTTL  time.Duration
+	cache     *whoIsCache
+	cacheOnce sync.Once
 }
 
 func NewServer(store KeyValueStore) *Server {
@@ -27,9 +29,6 @@ func NewServer(store KeyValueStore) *Server {
 		store:    store,
 		WhoIsTTL: 1 * time.Minute,
 	}
-	s.cache = newWhoIsCache(func() time.Duration {
-		return s.WhoIsTTL
-	})
 	s.handler = s.Handler()
 	return s
 }
@@ -58,7 +57,17 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+func (s *Server) initCache() {
+	s.cacheOnce.Do(func() {
+		s.cache = newWhoIsCache(func() time.Duration {
+			return s.WhoIsTTL
+		})
+	})
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.initCache()
+
 	tsClient := s.tsClient
 	if tsClient == nil {
 		tsClient = &local.Client{}

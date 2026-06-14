@@ -574,7 +574,7 @@ func TestFilesService_AllEndpoints(t *testing.T) {
 	}
 
 	// 6. POST /attributes/{id}
-	attrs := EntryAttributes{Size: uint64Ptr(10)}
+	attrs := EntryAttributes{Size: new(uint64(10))}
 	attrsBody, _ := json.Marshal(attrs)
 	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/attributes/%d", file1ID), bytes.NewReader(attrsBody))
 	rr = httptest.NewRecorder()
