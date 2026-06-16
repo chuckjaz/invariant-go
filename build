@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if command -v ninja >/dev/null 2>&1; then
+    echo "Running ninja build..."
+    exec ninja
+fi
+
+echo "ninja not found, falling back to manual go build..."
 # Define the output directory
 OUTPUT_DIR="bin"
 mkdir -p $OUTPUT_DIR
