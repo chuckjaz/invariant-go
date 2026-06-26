@@ -2,111 +2,71 @@ rule go_build
   command = go build -o $out $pkg
   description = GO BUILD $out
 
-build internal_srcs: phony $
-  internal/nfs/file.go $
-  internal/nfs/server.go $
-  internal/nfs/fs.go $
-  internal/finder/finder.go $
-  internal/finder/server.go $
-  internal/finder/kademlia.go $
-  internal/finder/client.go $
-  internal/discovery/register.go $
-  internal/discovery/health.go $
-  internal/discovery/inmemory_discovery.go $
-  internal/discovery/resolve.go $
-  internal/discovery/fs_discovery.go $
-  internal/discovery/server.go $
-  internal/discovery/upstream.go $
-  internal/discovery/discovery.go $
-  internal/discovery/client.go $
-  internal/files/files.go $
-  internal/files/server.go $
-  internal/files/inmemory_files.go $
-  internal/slots/server.go $
-  internal/slots/fs_slots.go $
-  internal/slots/slots.go $
-  internal/slots/client.go $
-  internal/slots/inmemory_slots.go $
-  internal/filetree/ignore.go $
-  internal/filetree/filetree.go $
-  internal/httputil/client.go $
-  internal/start/runner.go $
-  internal/start/config.go $
-  internal/fuse/fuse.go $
-  internal/storage/caching_storage.go $
-  internal/storage/joined_storage.go $
-  internal/storage/hashing_storage.go $
-  internal/storage/inmemory_storage.go $
-  internal/storage/s3_storage.go $
-  internal/storage/server.go $
-  internal/storage/aggregate_client.go $
-  internal/storage/fs_storage.go $
-  internal/storage/storage.go $
-  internal/storage/client.go $
-  internal/storage/dryrun_storage.go $
-  internal/workspace/workspace.go $
-  internal/kv/journal.go $
-  internal/kv/whois.go $
-  internal/kv/keyvaluestore.go $
-  internal/kv/cache.go $
-  internal/kv/server.go $
-  internal/kv/file_keyvaluestore.go $
-  internal/kv/client.go $
-  internal/kv/btree.go $
-  internal/content/zip_splitter.go $
-  internal/content/rep_max_splitter.go $
-  internal/content/peeker.go $
-  internal/content/writer.go $
-  internal/content/reader.go $
-  internal/content/rep_max_content_defined_chunker.go $
-  internal/content/buzhash.go $
-  internal/content/types.go $
-  internal/content/buzhash_splitter.go $
-  internal/content/content_defined_chunker.go $
-  internal/container/container.go $
-  internal/cluster/cluster.go $
-  internal/journal/journal.go $
-  internal/names/server.go $
-  internal/names/inmemory_names.go $
-  internal/names/upstream.go $
-  internal/names/names.go $
-  internal/names/client.go $
-  internal/names/fs_names.go $
-  internal/names/dns_client.go $
-  internal/notify/client.go $
-  internal/distribute/server.go $
-  internal/distribute/inmemory.go $
-  internal/distribute/client.go $
-  internal/distribute/distribute.go $
-  internal/identity/client.go $
-  internal/identity/identity.go $
-  internal/config/config.go
+rule gen_dyndep
+  command = go run utils/build_dd.go $pkg $out
+  description = GEN_DYNDEP $out
 
-build bin/discovery: go_build cmd/discovery/main.go | internal_srcs
+build bin/discovery.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/discovery
 
-build bin/distribute: go_build cmd/distribute/main.go | internal_srcs
+build bin/discovery: go_build cmd/discovery/main.go || bin/discovery.dd
+  pkg = ./cmd/discovery
+  dyndep = bin/discovery.dd
+
+build bin/distribute.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/distribute
 
-build bin/files: go_build cmd/files/main.go | internal_srcs
+build bin/distribute: go_build cmd/distribute/main.go || bin/distribute.dd
+  pkg = ./cmd/distribute
+  dyndep = bin/distribute.dd
+
+build bin/files.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/files
 
-build bin/finder: go_build cmd/finder/main.go | internal_srcs
+build bin/files: go_build cmd/files/main.go || bin/files.dd
+  pkg = ./cmd/files
+  dyndep = bin/files.dd
+
+build bin/finder.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/finder
 
-build bin/invariant: go_build cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go | internal_srcs
+build bin/finder: go_build cmd/finder/main.go || bin/finder.dd
+  pkg = ./cmd/finder
+  dyndep = bin/finder.dd
+
+build bin/invariant.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/invariant
 
-build bin/kv: go_build cmd/kv/main.go | internal_srcs
+build bin/invariant: go_build cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/invariant.dd
+  pkg = ./cmd/invariant
+  dyndep = bin/invariant.dd
+
+build bin/kv.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/kv
 
-build bin/names: go_build cmd/names/main.go | internal_srcs
+build bin/kv: go_build cmd/kv/main.go || bin/kv.dd
+  pkg = ./cmd/kv
+  dyndep = bin/kv.dd
+
+build bin/names.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/names
 
-build bin/slots: go_build cmd/slots/main.go | internal_srcs
+build bin/names: go_build cmd/names/main.go || bin/names.dd
+  pkg = ./cmd/names
+  dyndep = bin/names.dd
+
+build bin/slots.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/slots
 
-build bin/storage: go_build cmd/storage/main.go | internal_srcs
+build bin/slots: go_build cmd/slots/main.go || bin/slots.dd
+  pkg = ./cmd/slots
+  dyndep = bin/slots.dd
+
+build bin/storage.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/storage
+
+build bin/storage: go_build cmd/storage/main.go || bin/storage.dd
+  pkg = ./cmd/storage
+  dyndep = bin/storage.dd
 
 default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage
