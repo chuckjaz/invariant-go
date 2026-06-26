@@ -1,0 +1,271 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+
+	"invariant/internal/config"
+	"invariant/internal/discovery"
+	"invariant/internal/kv"
+)
+
+type GitHubCommit struct {
+	SHA  string `json:"sha"`
+	Tree struct {
+		SHA string `json:"sha"`
+	} `json:"tree"`
+	Parents []struct {
+		SHA string `json:"sha"`
+	} `json:"parents"`
+}
+
+type GitHubTreeEntry struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+	Size int64  `json:"size"`
+}
+
+type GitHubTree struct {
+	SHA  string            `json:"sha"`
+	Tree []GitHubTreeEntry `json:"tree"`
+}
+
+func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("scan-repo", flag.ExitOnError)
+	var owner string
+	var repo string
+	var token string
+	var commit string
+	var depth int
+	var kvURL string
+	var discoveryURL string
+
+	fs.StringVar(&owner, "owner", "", "GitHub owner/org name (required)")
+	fs.StringVar(&repo, "repo", "", "GitHub repository name (required)")
+	fs.StringVar(&token, "token", "", "GitHub personal access token (optional)")
+	fs.StringVar(&commit, "commit", "", "Git commit SHA1 to start scanning from (required)")
+	fs.IntVar(&depth, "depth", 1, "Ancestery depth limit for scanning commits (use -1 for unlimited)")
+	fs.StringVar(&kvURL, "kv", "", "URL of the KV service")
+	fs.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: invariant scan-repo --owner <owner> --repo <repo> --commit <commit-sha> [options]\n")
+		fmt.Fprintf(os.Stderr, "Scans the GitHub repository starting from a commit SHA1 and indexes Git SHA1 to SHA256 blob mappings in the KV service.\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+
+	if owner == "" || repo == "" || commit == "" {
+		fmt.Fprintf(os.Stderr, "Error: --owner, --repo, and --commit are required parameters.\n\n")
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	// 1. Resolve KV service URL
+	if kvURL == "" {
+		if discoveryURL == "" && globalCfg != nil {
+			discoveryURL = globalCfg.Discovery
+		}
+		if discoveryURL == "" {
+			fmt.Fprintf(os.Stderr, "Error: Discovery service URL not configured. Provide via --discovery or configuration file.\n")
+			os.Exit(1)
+		}
+
+		dClient := discovery.NewClient(discoveryURL, nil)
+		svcs, err := dClient.Find(ctx, "kv-v1", 1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error querying discovery service: %v\n", err)
+			os.Exit(1)
+		}
+		if len(svcs) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: no kv-v1 service found in discovery\n")
+			os.Exit(1)
+		}
+		kvURL = svcs[0].Address
+	}
+
+	kvClient := kv.NewClient(kvURL, nil)
+	httpClient := http.DefaultClient
+
+	// 2. Commit Traversal BFS/DFS
+	fmt.Printf("Traversing commit history starting from commit %s (depth limit: %d)...\n", commit, depth)
+
+	type QueueItem struct {
+		sha   string
+		depth int
+	}
+
+	queue := []QueueItem{{sha: commit, depth: 1}}
+	visited := make(map[string]bool)
+	var rootTrees []string
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+
+		if visited[item.sha] {
+			continue
+		}
+		visited[item.sha] = true
+
+		// Fetch commit JSON
+		commitURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/commits/%s", owner, repo, item.sha)
+		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", commitURL, "application/vnd.github.v3+json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching commit %s: %v\n", item.sha, err)
+			os.Exit(1)
+		}
+
+		var ghCommit GitHubCommit
+		if err := json.NewDecoder(resp.Body).Decode(&ghCommit); err != nil {
+			resp.Body.Close()
+			fmt.Fprintf(os.Stderr, "Error decoding commit JSON for %s: %v\n", item.sha, err)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+
+		rootTrees = append(rootTrees, ghCommit.Tree.SHA)
+
+		// Queue parents if under depth limit
+		if depth == -1 || item.depth < depth {
+			for _, p := range ghCommit.Parents {
+				queue = append(queue, QueueItem{sha: p.SHA, depth: item.depth + 1})
+			}
+		}
+	}
+
+	fmt.Printf("Found %d tree(s) across %d commits.\n", len(rootTrees), len(visited))
+
+	// 3. Scan trees for blobs
+	uniqueBlobs := make(map[string]bool)
+	for _, treeSHA := range rootTrees {
+		treeURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=true", owner, repo, treeSHA)
+		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", treeURL, "application/vnd.github.v3+json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching recursive tree %s: %v\n", treeSHA, err)
+			os.Exit(1)
+		}
+
+		var ghTree GitHubTree
+		if err := json.NewDecoder(resp.Body).Decode(&ghTree); err != nil {
+			resp.Body.Close()
+			fmt.Fprintf(os.Stderr, "Error decoding tree JSON for %s: %v\n", treeSHA, err)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+
+		for _, entry := range ghTree.Tree {
+			if entry.Type == "blob" {
+				uniqueBlobs[entry.SHA] = true
+			}
+		}
+	}
+
+	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
+
+	// 4. Download blobs, compute SHA256 and store mappings
+	mappings := make(map[string][]byte)
+	count := 0
+
+	for sha1Hex := range uniqueBlobs {
+		count++
+		fmt.Printf("[%d/%d] Fetching and hashing blob %s...\n", count, len(uniqueBlobs), sha1Hex)
+
+		sha1Bytes, err := hex.DecodeString(sha1Hex)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error decoding hex for blob %s: %v\n", sha1Hex, err)
+			os.Exit(1)
+		}
+
+		blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, sha1Hex)
+		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", blobURL, "application/vnd.github.v3.raw")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading blob content %s: %v\n", sha1Hex, err)
+			os.Exit(1)
+		}
+
+		hasher := sha256.New()
+		if _, err := io.Copy(hasher, resp.Body); err != nil {
+			resp.Body.Close()
+			fmt.Fprintf(os.Stderr, "Error hashing blob content %s: %v\n", sha1Hex, err)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+
+		sha256Bytes := hasher.Sum(nil)
+		sha256Hex := hex.EncodeToString(sha256Bytes)
+
+		// Key 1: SHA1:<sha1Bytes> -> sha256Hex
+		key1 := "SHA1:" + string(sha1Bytes)
+		mappings[key1] = []byte(sha256Hex)
+
+		// Key 2: SHA256:<sha256Bytes> -> sha1Bytes
+		key2 := "SHA256:" + string(sha256Bytes)
+		mappings[key2] = sha1Bytes
+
+		// Flush mappings in chunks to avoid large payloads / request timeouts
+		if len(mappings) >= 200 {
+			if err := uploadMappings(ctx, kvClient, mappings); err != nil {
+				fmt.Fprintf(os.Stderr, "Error uploading mappings chunk: %v\n", err)
+				os.Exit(1)
+			}
+			mappings = make(map[string][]byte)
+		}
+	}
+
+	// Flush any remaining mappings
+	if len(mappings) > 0 {
+		if err := uploadMappings(ctx, kvClient, mappings); err != nil {
+			fmt.Fprintf(os.Stderr, "Error uploading final mappings chunk: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Successfully scanned repository and indexed mappings in KV service.\n")
+}
+
+func sendGitHubRequest(ctx context.Context, httpClient *http.Client, token, method, url, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	} else {
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("GitHub API returned 403 Forbidden (you might have hit rate limits). Body: %s", string(body))
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("GitHub API returned status %d. Body: %s", resp.StatusCode, string(body))
+	}
+	return resp, nil
+}
+
+func uploadMappings(ctx context.Context, kvClient *kv.Client, mappings map[string][]byte) error {
+	_, err := kvClient.BatchPut(ctx, nil, mappings)
+	return err
+}
