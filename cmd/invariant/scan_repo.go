@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 
 	"invariant/internal/config"
 	"invariant/internal/discovery"
@@ -48,6 +49,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	var depth int
 	var kvURL string
 	var discoveryURL string
+	var concurrency int
 
 	fs.StringVar(&owner, "owner", "", "GitHub owner/org name (required)")
 	fs.StringVar(&repo, "repo", "", "GitHub repository name (required)")
@@ -56,6 +58,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	fs.IntVar(&depth, "depth", 1, "Ancestery depth limit for scanning commits (use -1 for unlimited)")
 	fs.StringVar(&kvURL, "kv", "", "URL of the KV service")
 	fs.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	fs.IntVar(&concurrency, "concurrency", 20, "Number of concurrent requests to GitHub")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant scan-repo --owner <owner> --repo <repo> --commit <commit-sha> [options]\n")
@@ -211,48 +214,98 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
+	if concurrency <= 0 {
+		concurrency = 20
+	}
+
 	toProcess := len(checkKeys) - len(existingKeys)
-	fmt.Printf("Found %d blobs already indexed. Processing remaining %d blobs...\n", len(existingKeys), toProcess)
+	fmt.Printf("Found %d blobs already indexed. Processing remaining %d blobs with concurrency=%d...\n", len(existingKeys), toProcess, concurrency)
 
 	// 4. Download blobs, compute SHA256 and store mappings
-	mappings := make(map[string][]byte)
-	count := 0
+	type task struct {
+		key     string
+		sha1Hex string
+	}
 
+	type result struct {
+		key         string
+		sha256Hex   string
+		sha256Bytes []byte
+		sha1Bytes   []byte
+		err         error
+	}
+
+	taskCh := make(chan task, toProcess)
+	resultCh := make(chan result, toProcess)
+
+	var workerWg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for t := range taskCh {
+				sha1Bytes := []byte(t.key[5:])
+				blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, t.sha1Hex)
+				resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", blobURL, "application/vnd.github.v3.raw")
+				if err != nil {
+					resultCh <- result{err: fmt.Errorf("error downloading blob content %s: %w", t.sha1Hex, err)}
+					continue
+				}
+
+				hasher := sha256.New()
+				if _, err := io.Copy(hasher, resp.Body); err != nil {
+					resp.Body.Close()
+					resultCh <- result{err: fmt.Errorf("error hashing blob content %s: %w", t.sha1Hex, err)}
+					continue
+				}
+				resp.Body.Close()
+
+				sha256Bytes := hasher.Sum(nil)
+				sha256Hex := hex.EncodeToString(sha256Bytes)
+
+				resultCh <- result{
+					key:         t.key,
+					sha256Hex:   sha256Hex,
+					sha256Bytes: sha256Bytes,
+					sha1Bytes:   sha1Bytes,
+				}
+			}
+		}()
+	}
+
+	// Send tasks
 	for _, key := range checkKeys {
 		if existingKeys[key] {
 			continue
 		}
+		taskCh <- task{key: key, sha1Hex: keyToSHA1Hex[key]}
+	}
+	close(taskCh)
 
-		sha1Hex := keyToSHA1Hex[key]
+	// Close resultCh when workers are done
+	go func() {
+		workerWg.Wait()
+		close(resultCh)
+	}()
+
+	mappings := make(map[string][]byte)
+	count := 0
+
+	for res := range resultCh {
+		if res.err != nil {
+			fmt.Fprintf(os.Stderr, "Worker error: %v\n", res.err)
+			os.Exit(1)
+		}
+
 		count++
-		fmt.Printf("[%d/%d] Fetching and hashing blob %s...\n", count, toProcess, sha1Hex)
-
-		sha1Bytes := []byte(key[5:]) // Extract raw SHA1 bytes from "SHA1:<rawBytes>"
-
-		blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, sha1Hex)
-		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", blobURL, "application/vnd.github.v3.raw")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error downloading blob content %s: %v\n", sha1Hex, err)
-			os.Exit(1)
-		}
-
-		hasher := sha256.New()
-		if _, err := io.Copy(hasher, resp.Body); err != nil {
-			resp.Body.Close()
-			fmt.Fprintf(os.Stderr, "Error hashing blob content %s: %v\n", sha1Hex, err)
-			os.Exit(1)
-		}
-		resp.Body.Close()
-
-		sha256Bytes := hasher.Sum(nil)
-		sha256Hex := hex.EncodeToString(sha256Bytes)
+		fmt.Printf("[%d/%d] Hashed blob %s\n", count, toProcess, keyToSHA1Hex[res.key])
 
 		// Key 1: SHA1:<sha1Bytes> -> sha256Hex
-		mappings[key] = []byte(sha256Hex)
+		mappings[res.key] = []byte(res.sha256Hex)
 
 		// Key 2: SHA256:<sha256Bytes> -> sha1Bytes
-		key2 := "SHA256:" + string(sha256Bytes)
-		mappings[key2] = sha1Bytes
+		key2 := "SHA256:" + string(res.sha256Bytes)
+		mappings[key2] = res.sha1Bytes
 
 		// Flush mappings in chunks to avoid large payloads / request timeouts
 		if len(mappings) >= 200 {
