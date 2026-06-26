@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -154,16 +153,11 @@ func (s *GitHubStorage) Size(ctx context.Context, address string) (int64, bool) 
 
 // getBlobSHA1 looks up the Git SHA1 mapping from the KV client.
 func (s *GitHubStorage) getBlobSHA1(ctx context.Context, address string) (string, bool) {
-	sha256Bytes, err := hex.DecodeString(address)
-	if err != nil {
-		return "", false
-	}
-
-	key := "SHA256:" + string(sha256Bytes)
+	key := "SHA256:" + address
 	val, _, err := s.kvClient.Get(ctx, nil, key)
 	if err != nil {
 		return "", false
 	}
 
-	return hex.EncodeToString(val), true
+	return string(val), true
 }

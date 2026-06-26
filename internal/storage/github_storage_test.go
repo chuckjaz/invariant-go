@@ -35,9 +35,9 @@ func TestGitHubStorage(t *testing.T) {
 	// Mock KV client in memory
 	mockKVClient := &mockKV{
 		getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
-			expectedKey := "SHA256:" + string(contentSHA256[:])
+			expectedKey := "SHA256:" + contentSHA256Hex
 			if key == expectedKey {
-				return gitSHA1Bytes, 123, nil
+				return []byte(gitSHA1Hex), 123, nil
 			}
 			return nil, 0, fmt.Errorf("key not found: %s", key)
 		},

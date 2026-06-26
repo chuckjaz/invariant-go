@@ -181,12 +181,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	var checkKeys []string
 	keyToSHA1Hex := make(map[string]string)
 	for sha1Hex := range uniqueBlobs {
-		sha1Bytes, err := hex.DecodeString(sha1Hex)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error decoding hex for blob %s: %v\n", sha1Hex, err)
-			os.Exit(1)
-		}
-		key := "SHA1:" + string(sha1Bytes)
+		key := "SHA1:" + sha1Hex
 		checkKeys = append(checkKeys, key)
 		keyToSHA1Hex[key] = sha1Hex
 	}
@@ -228,11 +223,10 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	type result struct {
-		key         string
-		sha256Hex   string
-		sha256Bytes []byte
-		sha1Bytes   []byte
-		err         error
+		key       string
+		sha1Hex   string
+		sha256Hex string
+		err       error
 	}
 
 	taskCh := make(chan task, toProcess)
@@ -244,18 +238,18 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		go func() {
 			defer workerWg.Done()
 			for t := range taskCh {
-				sha1Bytes := []byte(t.key[5:])
-				blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, t.sha1Hex)
+				sha1Hex := t.key[5:]
+				blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, sha1Hex)
 				resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", blobURL, "application/vnd.github.v3.raw")
 				if err != nil {
-					resultCh <- result{err: fmt.Errorf("error downloading blob content %s: %w", t.sha1Hex, err)}
+					resultCh <- result{err: fmt.Errorf("error downloading blob content %s: %w", sha1Hex, err)}
 					continue
 				}
 
 				hasher := sha256.New()
 				if _, err := io.Copy(hasher, resp.Body); err != nil {
 					resp.Body.Close()
-					resultCh <- result{err: fmt.Errorf("error hashing blob content %s: %w", t.sha1Hex, err)}
+					resultCh <- result{err: fmt.Errorf("error hashing blob content %s: %w", sha1Hex, err)}
 					continue
 				}
 				resp.Body.Close()
@@ -264,10 +258,9 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 				sha256Hex := hex.EncodeToString(sha256Bytes)
 
 				resultCh <- result{
-					key:         t.key,
-					sha256Hex:   sha256Hex,
-					sha256Bytes: sha256Bytes,
-					sha1Bytes:   sha1Bytes,
+					key:       t.key,
+					sha1Hex:   sha1Hex,
+					sha256Hex: sha256Hex,
 				}
 			}
 		}()
@@ -298,14 +291,14 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		}
 
 		count++
-		fmt.Printf("[%d/%d] Hashed blob %s\n", count, toProcess, keyToSHA1Hex[res.key])
+		fmt.Printf("[%d/%d] Hashed blob %s\n", count, toProcess, res.sha1Hex)
 
-		// Key 1: SHA1:<sha1Bytes> -> sha256Hex
+		// Key 1: SHA1:<sha1Hex> -> sha256Hex
 		mappings[res.key] = []byte(res.sha256Hex)
 
-		// Key 2: SHA256:<sha256Bytes> -> sha1Bytes
-		key2 := "SHA256:" + string(res.sha256Bytes)
-		mappings[key2] = res.sha1Bytes
+		// Key 2: SHA256:<sha256Hex> -> sha1Hex
+		key2 := "SHA256:" + res.sha256Hex
+		mappings[key2] = []byte(res.sha1Hex)
 
 		// Flush mappings in chunks to avoid large payloads / request timeouts
 		if len(mappings) >= 200 {
