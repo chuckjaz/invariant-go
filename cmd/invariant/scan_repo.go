@@ -174,19 +174,60 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 
 	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
 
-	// 4. Download blobs, compute SHA256 and store mappings
-	mappings := make(map[string][]byte)
-	count := 0
-
+	// Build list of keys to check in KV
+	var checkKeys []string
+	keyToSHA1Hex := make(map[string]string)
 	for sha1Hex := range uniqueBlobs {
-		count++
-		fmt.Printf("[%d/%d] Fetching and hashing blob %s...\n", count, len(uniqueBlobs), sha1Hex)
-
 		sha1Bytes, err := hex.DecodeString(sha1Hex)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error decoding hex for blob %s: %v\n", sha1Hex, err)
 			os.Exit(1)
 		}
+		key := "SHA1:" + string(sha1Bytes)
+		checkKeys = append(checkKeys, key)
+		keyToSHA1Hex[key] = sha1Hex
+	}
+
+	fmt.Printf("Checking which of the %d blobs are already indexed in KV...\n", len(checkKeys))
+
+	// Batch get from KV
+	existingKeys := make(map[string]bool)
+	const batchSize = 200
+	for i := 0; i < len(checkKeys); i += batchSize {
+		end := i + batchSize
+		if end > len(checkKeys) {
+			end = len(checkKeys)
+		}
+		chunk := checkKeys[i:end]
+
+		results, err := kvClient.BatchGet(ctx, nil, chunk)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error batch getting keys from KV service: %v\n", err)
+			os.Exit(1)
+		}
+
+		for k := range results {
+			existingKeys[k] = true
+		}
+	}
+
+	toProcess := len(checkKeys) - len(existingKeys)
+	fmt.Printf("Found %d blobs already indexed. Processing remaining %d blobs...\n", len(existingKeys), toProcess)
+
+	// 4. Download blobs, compute SHA256 and store mappings
+	mappings := make(map[string][]byte)
+	count := 0
+
+	for _, key := range checkKeys {
+		if existingKeys[key] {
+			continue
+		}
+
+		sha1Hex := keyToSHA1Hex[key]
+		count++
+		fmt.Printf("[%d/%d] Fetching and hashing blob %s...\n", count, toProcess, sha1Hex)
+
+		sha1Bytes := []byte(key[5:]) // Extract raw SHA1 bytes from "SHA1:<rawBytes>"
 
 		blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, sha1Hex)
 		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", blobURL, "application/vnd.github.v3.raw")
@@ -207,8 +248,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		sha256Hex := hex.EncodeToString(sha256Bytes)
 
 		// Key 1: SHA1:<sha1Bytes> -> sha256Hex
-		key1 := "SHA1:" + string(sha1Bytes)
-		mappings[key1] = []byte(sha256Hex)
+		mappings[key] = []byte(sha256Hex)
 
 		// Key 2: SHA256:<sha256Bytes> -> sha1Bytes
 		key2 := "SHA256:" + string(sha256Bytes)
