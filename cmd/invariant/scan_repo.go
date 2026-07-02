@@ -15,6 +15,10 @@ import (
 	"invariant/internal/config"
 	"invariant/internal/discovery"
 	"invariant/internal/kv"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 type GitHubCommit struct {
@@ -50,25 +54,28 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	var kvURL string
 	var discoveryURL string
 	var concurrency int
+	var localPath string
 
-	fs.StringVar(&owner, "owner", "", "GitHub owner/org name (required)")
-	fs.StringVar(&repo, "repo", "", "GitHub repository name (required)")
+	fs.StringVar(&owner, "owner", "", "GitHub owner/org name (required for remote scan)")
+	fs.StringVar(&repo, "repo", "", "GitHub repository name (required for remote scan)")
 	fs.StringVar(&token, "token", "", "GitHub personal access token (optional)")
 	fs.StringVar(&commit, "commit", "", "Git commit SHA1 to start scanning from (required)")
-	fs.IntVar(&depth, "depth", 1, "Ancestery depth limit for scanning commits (use -1 for unlimited)")
+	fs.IntVar(&depth, "depth", 1, "Ancestry depth limit for scanning commits (use -1 for unlimited)")
 	fs.StringVar(&kvURL, "kv", "", "URL of the KV service")
 	fs.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
-	fs.IntVar(&concurrency, "concurrency", 20, "Number of concurrent requests to GitHub")
+	fs.IntVar(&concurrency, "concurrency", 20, "Number of concurrent requests to GitHub/local processing")
+	fs.StringVar(&localPath, "local", "", "Local repository path (optional, if specified scans locally instead of GitHub)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant scan-repo --owner <owner> --repo <repo> --commit <commit-sha> [options]\n")
-		fmt.Fprintf(os.Stderr, "Scans the GitHub repository starting from a commit SHA1 and indexes Git SHA1 to SHA256 blob mappings in the KV service.\n\n")
+		fmt.Fprintf(os.Stderr, "       invariant scan-repo --local <path> --commit <commit-sha> [options]\n")
+		fmt.Fprintf(os.Stderr, "Scans the Git repository starting from a commit SHA1 and indexes Git SHA1 to SHA256 blob mappings in the KV service.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
 
-	if owner == "" || repo == "" || commit == "" {
-		fmt.Fprintf(os.Stderr, "Error: --owner, --repo, and --commit are required parameters.\n\n")
+	if (localPath == "" && (owner == "" || repo == "")) || commit == "" {
+		fmt.Fprintf(os.Stderr, "Error: either --local or both --owner and --repo are required, and --commit is required.\n\n")
 		fs.Usage()
 		os.Exit(1)
 	}
@@ -99,6 +106,236 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	kvClient := kv.NewClient(kvURL, nil)
+
+	if localPath != "" {
+		runLocalScan(ctx, kvClient, localPath, commit, depth, concurrency)
+	} else {
+		runRemoteScan(ctx, kvClient, owner, repo, token, commit, depth, concurrency)
+	}
+}
+
+func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit string, depth, concurrency int) {
+	fmt.Printf("Opening local git repository at %s...\n", localPath)
+	r, err := git.PlainOpen(localPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening git repository: %v\n", err)
+		os.Exit(1)
+	}
+
+	hash, err := r.ResolveRevision(plumbing.Revision(commit))
+	if err != nil {
+		// Fallback to direct parsing
+		h := plumbing.NewHash(commit)
+		hash = &h
+	}
+
+	fmt.Printf("Traversing local commit history starting from commit %s (depth limit: %d)...\n", hash, depth)
+
+	type QueueItem struct {
+		hash  plumbing.Hash
+		depth int
+	}
+
+	queue := []QueueItem{{hash: *hash, depth: 1}}
+	visited := make(map[plumbing.Hash]bool)
+	var rootTrees []*object.Tree
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+
+		if visited[item.hash] {
+			continue
+		}
+		visited[item.hash] = true
+
+		commitObj, err := r.CommitObject(item.hash)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching commit %s: %v\n", item.hash, err)
+			os.Exit(1)
+		}
+
+		tree, err := commitObj.Tree()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting tree for commit %s: %v\n", item.hash, err)
+			os.Exit(1)
+		}
+		rootTrees = append(rootTrees, tree)
+
+		// Queue parents if under depth limit
+		if depth == -1 || item.depth < depth {
+			for _, parentHash := range commitObj.ParentHashes {
+				queue = append(queue, QueueItem{hash: parentHash, depth: item.depth + 1})
+			}
+		}
+	}
+
+	fmt.Printf("Found %d tree(s) across %d commits.\n", len(rootTrees), len(visited))
+
+	// 3. Scan trees for blobs
+	uniqueBlobs := make(map[string]*object.File)
+	for _, tree := range rootTrees {
+		filesIter := tree.Files()
+		err := filesIter.ForEach(func(f *object.File) error {
+			sha1Hex := f.Hash.String()
+			uniqueBlobs[sha1Hex] = f
+			return nil
+		})
+		filesIter.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error iterating files in tree %s: %v\n", tree.Hash, err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
+
+	// Build list of keys to check in KV
+	var checkKeys []string
+	keyToSHA1Hex := make(map[string]string)
+	for sha1Hex := range uniqueBlobs {
+		key := "SHA1:" + sha1Hex
+		checkKeys = append(checkKeys, key)
+		keyToSHA1Hex[key] = sha1Hex
+	}
+
+	fmt.Printf("Checking which of the %d blobs are already indexed in KV...\n", len(checkKeys))
+
+	// Batch get from KV
+	existingKeys := make(map[string]bool)
+	const batchSize = 200
+	for i := 0; i < len(checkKeys); i += batchSize {
+		end := i + batchSize
+		if end > len(checkKeys) {
+			end = len(checkKeys)
+		}
+		chunk := checkKeys[i:end]
+
+		results, err := kvClient.BatchGet(ctx, nil, chunk)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error batch getting keys from KV service: %v\n", err)
+			os.Exit(1)
+		}
+
+		for k := range results {
+			existingKeys[k] = true
+		}
+	}
+
+	if concurrency <= 0 {
+		concurrency = 20
+	}
+
+	toProcess := len(checkKeys) - len(existingKeys)
+	fmt.Printf("Found %d blobs already indexed. Processing remaining %d blobs with concurrency=%d...\n", len(existingKeys), toProcess, concurrency)
+
+	// 4. Download/read blobs, compute SHA256 and store mappings
+	type task struct {
+		key     string
+		sha1Hex string
+	}
+
+	type result struct {
+		key       string
+		sha1Hex   string
+		sha256Hex string
+		err       error
+	}
+
+	taskCh := make(chan task, toProcess)
+	resultCh := make(chan result, toProcess)
+
+	var workerWg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for t := range taskCh {
+				sha1Hex := t.key[5:]
+				fileObj := uniqueBlobs[sha1Hex]
+
+				reader, err := fileObj.Reader()
+				if err != nil {
+					resultCh <- result{err: fmt.Errorf("error reading local blob content %s: %w", sha1Hex, err)}
+					continue
+				}
+
+				hasher := sha256.New()
+				if _, err := io.Copy(hasher, reader); err != nil {
+					reader.Close()
+					resultCh <- result{err: fmt.Errorf("error hashing local blob content %s: %w", sha1Hex, err)}
+					continue
+				}
+				reader.Close()
+
+				sha256Bytes := hasher.Sum(nil)
+				sha256Hex := hex.EncodeToString(sha256Bytes)
+
+				resultCh <- result{
+					key:       t.key,
+					sha1Hex:   sha1Hex,
+					sha256Hex: sha256Hex,
+				}
+			}
+		}()
+	}
+
+	// Send tasks
+	for _, key := range checkKeys {
+		if existingKeys[key] {
+			continue
+		}
+		taskCh <- task{key: key, sha1Hex: keyToSHA1Hex[key]}
+	}
+	close(taskCh)
+
+	// Close resultCh when workers are done
+	go func() {
+		workerWg.Wait()
+		close(resultCh)
+	}()
+
+	mappings := make(map[string][]byte)
+	count := 0
+
+	for res := range resultCh {
+		if res.err != nil {
+			fmt.Fprintf(os.Stderr, "Worker error: %v\n", res.err)
+			os.Exit(1)
+		}
+
+		count++
+		fmt.Printf("[%d/%d] Hashed blob %s\n", count, toProcess, res.sha1Hex)
+
+		// Key 1: SHA1:<sha1Hex> -> sha256Hex
+		mappings[res.key] = []byte(res.sha256Hex)
+
+		// Key 2: SHA256:<sha256Hex> -> sha1Hex
+		key2 := "SHA256:" + res.sha256Hex
+		mappings[key2] = []byte(res.sha1Hex)
+
+		// Flush mappings in chunks to avoid large payloads / request timeouts
+		if len(mappings) >= 200 {
+			if err := uploadMappings(ctx, kvClient, mappings); err != nil {
+				fmt.Fprintf(os.Stderr, "Error uploading mappings chunk: %v\n", err)
+				os.Exit(1)
+			}
+			mappings = make(map[string][]byte)
+		}
+	}
+
+	// Flush any remaining mappings
+	if len(mappings) > 0 {
+		if err := uploadMappings(ctx, kvClient, mappings); err != nil {
+			fmt.Fprintf(os.Stderr, "Error uploading final mappings chunk: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Successfully scanned repository and indexed mappings in KV service.\n")
+}
+
+func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token, commit string, depth, concurrency int) {
 	httpClient := http.DefaultClient
 
 	// 2. Commit Traversal BFS/DFS
