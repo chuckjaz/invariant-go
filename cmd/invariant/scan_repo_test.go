@@ -347,3 +347,174 @@ func TestLocalScanWithDepth(t *testing.T) {
 		t.Errorf("Expected hello.txt from Commit 2 to be indexed")
 	}
 }
+
+func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
+	// 1. Create a temporary local git repository
+	repoDir := t.TempDir()
+	r, err := git.PlainInit(repoDir, false)
+	if err != nil {
+		t.Fatalf("Failed to initialize git repository: %v", err)
+	}
+
+	wt, err := r.Worktree()
+	if err != nil {
+		t.Fatalf("Failed to get worktree: %v", err)
+	}
+
+	// Create hello.txt
+	helloPath := filepath.Join(repoDir, "hello.txt")
+	if err := os.WriteFile(helloPath, []byte("hello world\n"), 0644); err != nil {
+		t.Fatalf("Failed to write hello.txt: %v", err)
+	}
+	if _, err = wt.Add("hello.txt"); err != nil {
+		t.Fatalf("Failed to add hello.txt: %v", err)
+	}
+
+	// Create subdir/nested.txt
+	nestedDir := filepath.Join(repoDir, "subdir")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("Failed to create subdir: %v", err)
+	}
+	nestedPath := filepath.Join(nestedDir, "nested.txt")
+	if err := os.WriteFile(nestedPath, []byte("nested file content\n"), 0644); err != nil {
+		t.Fatalf("Failed to write nested.txt: %v", err)
+	}
+	if _, err = wt.Add("subdir/nested.txt"); err != nil {
+		t.Fatalf("Failed to add nested.txt: %v", err)
+	}
+
+	commitHash, err := wt.Commit("Commit", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Test User",
+			Email: "test@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	commitObj, _ := r.CommitObject(commitHash)
+	treeObj, _ := commitObj.Tree()
+	rootTreeSHA := treeObj.Hash.String()
+
+	entry, err := treeObj.FindEntry("subdir")
+	if err != nil {
+		t.Fatalf("Failed to find entry subdir: %v", err)
+	}
+	subdirSHA := entry.Hash.String()
+
+	nestedFile, err := treeObj.File("subdir/nested.txt")
+	if err != nil {
+		t.Fatalf("Failed to find nested.txt: %v", err)
+	}
+	nestedSHA1 := nestedFile.Hash.String()
+
+	helloFile, err := treeObj.File("hello.txt")
+	if err != nil {
+		t.Fatalf("Failed to find hello.txt: %v", err)
+	}
+	helloSHA1 := helloFile.Hash.String()
+
+	// Helper to set up httptest server with a given store
+	setupServer := func(store map[string][]byte) *httptest.Server {
+		var mu sync.Mutex
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+
+			if req.URL.Path == "/batch_get" {
+				var keys []string
+				json.NewDecoder(req.Body).Decode(&keys)
+
+				mw := multipart.NewWriter(w)
+				w.Header().Set("Content-Type", mw.FormDataContentType())
+
+				for _, k := range keys {
+					val, ok := store[k]
+					if ok {
+						h := make(textproto.MIMEHeader)
+						h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, k))
+						part, err := mw.CreatePart(h)
+						if err != nil {
+							continue
+						}
+						part.Write(val)
+					}
+				}
+				mw.Close()
+				return
+			}
+
+			if req.URL.Path == "/batch_put" {
+				_, params, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
+				mr := multipart.NewReader(req.Body, params["boundary"])
+
+				for {
+					part, err := mr.NextPart()
+					if err == io.EOF {
+						break
+					}
+					key := part.FormName()
+					val, _ := io.ReadAll(part)
+					store[key] = val
+				}
+
+				w.Header().Set("X-Transaction-ID", "1")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}))
+	}
+
+	t.Run("records tree status keys in KV", func(t *testing.T) {
+		store := make(map[string][]byte)
+		ts := setupServer(store)
+		defer ts.Close()
+
+		kvClient := kv.NewClient(ts.URL, nil)
+		runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+
+		// Verify hello.txt and nested.txt are indexed
+		if _, ok := store["SHA1:"+helloSHA1]; !ok {
+			t.Errorf("hello.txt was not indexed")
+		}
+		if _, ok := store["SHA1:"+nestedSHA1]; !ok {
+			t.Errorf("nested.txt was not indexed")
+		}
+
+		// Verify tree keys are recorded as scanned
+		if val, ok := store["tree:sha1:"+rootTreeSHA]; !ok || string(val) != "scanned" {
+			t.Errorf("Root tree was not marked as scanned")
+		}
+		if val, ok := store["tree:sha1:"+subdirSHA]; !ok || string(val) != "scanned" {
+			t.Errorf("Subdir tree was not marked as scanned")
+		}
+	})
+
+	t.Run("skips already scanned directory", func(t *testing.T) {
+		store := make(map[string][]byte)
+		// Pre-mark subdir as scanned
+		store["tree:sha1:"+subdirSHA] = []byte("scanned")
+		ts := setupServer(store)
+		defer ts.Close()
+
+		kvClient := kv.NewClient(ts.URL, nil)
+		runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+
+		// Verify hello.txt IS scanned
+		if _, ok := store["SHA1:"+helloSHA1]; !ok {
+			t.Errorf("hello.txt should have been scanned")
+		}
+
+		// Verify nested.txt was SKIPPED (not scanned/indexed)
+		if _, ok := store["SHA1:"+nestedSHA1]; ok {
+			t.Errorf("nested.txt should have been skipped because subdir was already scanned")
+		}
+
+		// Root tree should still be marked as scanned after this scan
+		if val, ok := store["tree:sha1:"+rootTreeSHA]; !ok || string(val) != "scanned" {
+			t.Errorf("Root tree should be marked as scanned")
+		}
+	})
+}

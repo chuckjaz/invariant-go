@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"invariant/internal/config"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -172,18 +174,50 @@ func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit st
 
 	fmt.Printf("Found %d tree(s) across %d commits.\n", len(rootTrees), len(visited))
 
-	// 3. Scan trees for blobs
+	// 3. Scan trees for blobs recursively, skipping already scanned directories.
 	uniqueBlobs := make(map[string]*object.File)
-	for _, tree := range rootTrees {
-		filesIter := tree.Files()
-		err := filesIter.ForEach(func(f *object.File) error {
-			sha1Hex := f.Hash.String()
-			uniqueBlobs[sha1Hex] = f
-			return nil
-		})
-		filesIter.Close()
+	traversedTrees := make(map[string]bool)
+	scannedTreeCache := make(map[string]bool)
+
+	var walkTree func(t *object.Tree) error
+	walkTree = func(t *object.Tree) error {
+		sha1Hex := t.Hash.String()
+		scanned, err := isTreeScanned(ctx, kvClient, sha1Hex, scannedTreeCache)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error iterating files in tree %s: %v\n", tree.Hash, err)
+			return err
+		}
+		if scanned {
+			return nil
+		}
+
+		traversedTrees[sha1Hex] = true
+
+		for _, entry := range t.Entries {
+			if entry.Mode == filemode.Dir {
+				subtree, err := r.TreeObject(entry.Hash)
+				if err != nil {
+					return fmt.Errorf("error getting tree object %s: %w", entry.Hash, err)
+				}
+				if err := walkTree(subtree); err != nil {
+					return err
+				}
+			} else if entry.Mode.IsFile() {
+				fSha1Hex := entry.Hash.String()
+				if _, exists := uniqueBlobs[fSha1Hex]; !exists {
+					blob, err := r.BlobObject(entry.Hash)
+					if err != nil {
+						return fmt.Errorf("error getting blob object %s: %w", entry.Hash, err)
+					}
+					uniqueBlobs[fSha1Hex] = object.NewFile(entry.Name, entry.Mode, blob)
+				}
+			}
+		}
+		return nil
+	}
+
+	for _, tree := range rootTrees {
+		if err := walkTree(tree); err != nil {
+			fmt.Fprintf(os.Stderr, "Error traversing tree %s: %v\n", tree.Hash, err)
 			os.Exit(1)
 		}
 	}
@@ -332,6 +366,33 @@ func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit st
 		}
 	}
 
+	// Upload tree status mappings
+	treeMappings := make(map[string][]byte)
+	for tHash := range traversedTrees {
+		treeMappings["tree:sha1:"+tHash] = []byte("scanned")
+	}
+
+	if len(treeMappings) > 0 {
+		const treeBatchSize = 200
+		chunk := make(map[string][]byte)
+		for k, v := range treeMappings {
+			chunk[k] = v
+			if len(chunk) >= treeBatchSize {
+				if err := uploadMappings(ctx, kvClient, chunk); err != nil {
+					fmt.Fprintf(os.Stderr, "Error uploading tree status mappings: %v\n", err)
+					os.Exit(1)
+				}
+				chunk = make(map[string][]byte)
+			}
+		}
+		if len(chunk) > 0 {
+			if err := uploadMappings(ctx, kvClient, chunk); err != nil {
+				fmt.Fprintf(os.Stderr, "Error uploading final tree status mappings: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 	fmt.Printf("Successfully scanned repository and indexed mappings in KV service.\n")
 }
 
@@ -387,9 +448,35 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 
 	fmt.Printf("Found %d tree(s) across %d commits.\n", len(rootTrees), len(visited))
 
-	// 3. Scan trees for blobs
+	// 3. Scan trees for blobs recursively, skipping already scanned directories.
 	uniqueBlobs := make(map[string]bool)
+	traversedTrees := make(map[string]bool)
+	scannedTreeCache := make(map[string]bool)
+
+	// Batch get all rootTrees statuses
+	if len(rootTrees) > 0 {
+		var checkKeys []string
+		for _, tSHA := range rootTrees {
+			checkKeys = append(checkKeys, "tree:sha1:"+tSHA)
+		}
+		results, err := kvClient.BatchGet(ctx, nil, checkKeys)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error batch getting root trees: %v\n", err)
+			os.Exit(1)
+		}
+		for k, val := range results {
+			tSHA := k[10:] // remove "tree:sha1:"
+			if string(val.Value) == "scanned" {
+				scannedTreeCache[tSHA] = true
+			}
+		}
+	}
+
 	for _, treeSHA := range rootTrees {
+		if scannedTreeCache[treeSHA] {
+			continue
+		}
+
 		treeURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=true", owner, repo, treeSHA)
 		resp, err := sendGitHubRequest(ctx, httpClient, token, "GET", treeURL, "application/vnd.github.v3+json")
 		if err != nil {
@@ -405,11 +492,78 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 		}
 		resp.Body.Close()
 
+		var subTreeSHAs []string
+		pathToSHA := make(map[string]string)
+		pathToSHA[""] = treeSHA
+
 		for _, entry := range ghTree.Tree {
-			if entry.Type == "blob" {
+			if entry.Type == "tree" {
+				pathToSHA[entry.Path] = entry.SHA
+				if !scannedTreeCache[entry.SHA] {
+					subTreeSHAs = append(subTreeSHAs, entry.SHA)
+				}
+			}
+		}
+
+		if len(subTreeSHAs) > 0 {
+			var checkKeys []string
+			for _, sha := range subTreeSHAs {
+				checkKeys = append(checkKeys, "tree:sha1:"+sha)
+			}
+			for i := 0; i < len(checkKeys); i += 200 {
+				end := i + 200
+				if end > len(checkKeys) {
+					end = len(checkKeys)
+				}
+				chunk := checkKeys[i:end]
+				results, err := kvClient.BatchGet(ctx, nil, chunk)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error batch getting subtree statuses: %v\n", err)
+					os.Exit(1)
+				}
+				for k, val := range results {
+					sha := k[10:]
+					if string(val.Value) == "scanned" {
+						scannedTreeCache[sha] = true
+					}
+				}
+			}
+		}
+
+		isSkipped := func(path string) bool {
+			cur := path
+			for {
+				if sha, exists := pathToSHA[cur]; exists {
+					if scannedTreeCache[sha] {
+						return true
+					}
+				}
+				if cur == "" {
+					break
+				}
+				idx := strings.LastIndex(cur, "/")
+				if idx == -1 {
+					cur = ""
+				} else {
+					cur = cur[:idx]
+				}
+			}
+			return false
+		}
+
+		for _, entry := range ghTree.Tree {
+			if isSkipped(entry.Path) {
+				continue
+			}
+
+			if entry.Type == "tree" {
+				traversedTrees[entry.SHA] = true
+			} else if entry.Type == "blob" {
 				uniqueBlobs[entry.SHA] = true
 			}
 		}
+
+		traversedTrees[treeSHA] = true
 	}
 
 	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
@@ -555,6 +709,33 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 		}
 	}
 
+	// Upload tree status mappings
+	treeMappings := make(map[string][]byte)
+	for tHash := range traversedTrees {
+		treeMappings["tree:sha1:"+tHash] = []byte("scanned")
+	}
+
+	if len(treeMappings) > 0 {
+		const treeBatchSize = 200
+		chunk := make(map[string][]byte)
+		for k, v := range treeMappings {
+			chunk[k] = v
+			if len(chunk) >= treeBatchSize {
+				if err := uploadMappings(ctx, kvClient, chunk); err != nil {
+					fmt.Fprintf(os.Stderr, "Error uploading tree status mappings: %v\n", err)
+					os.Exit(1)
+				}
+				chunk = make(map[string][]byte)
+			}
+		}
+		if len(chunk) > 0 {
+			if err := uploadMappings(ctx, kvClient, chunk); err != nil {
+				fmt.Fprintf(os.Stderr, "Error uploading final tree status mappings: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 	fmt.Printf("Successfully scanned repository and indexed mappings in KV service.\n")
 }
 
@@ -591,4 +772,18 @@ func sendGitHubRequest(ctx context.Context, httpClient *http.Client, token, meth
 func uploadMappings(ctx context.Context, kvClient *kv.Client, mappings map[string][]byte) error {
 	_, err := kvClient.BatchPut(ctx, nil, mappings)
 	return err
+}
+
+func isTreeScanned(ctx context.Context, kvClient *kv.Client, sha1Hex string, cache map[string]bool) (bool, error) {
+	if scanned, ok := cache[sha1Hex]; ok {
+		return scanned, nil
+	}
+	results, err := kvClient.BatchGet(ctx, nil, []string{"tree:sha1:" + sha1Hex})
+	if err != nil {
+		return false, err
+	}
+	val, ok := results["tree:sha1:"+sha1Hex]
+	scanned := ok && string(val.Value) == "scanned"
+	cache[sha1Hex] = scanned
+	return scanned, nil
 }
