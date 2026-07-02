@@ -14,6 +14,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -473,7 +474,14 @@ func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
 		defer ts.Close()
 
 		kvClient := kv.NewClient(ts.URL, nil)
-		runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+		var output string
+		output = captureStdout(func() {
+			runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+		})
+
+		if !strings.Contains(output, "Detected 0 tree(s) that were already scanned.") {
+			t.Errorf("Expected output to report 0 already scanned trees, got:\n%s", output)
+		}
 
 		// Verify hello.txt and nested.txt are indexed
 		if _, ok := store["SHA1:"+helloSHA1]; !ok {
@@ -500,7 +508,14 @@ func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
 		defer ts.Close()
 
 		kvClient := kv.NewClient(ts.URL, nil)
-		runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+		var output string
+		output = captureStdout(func() {
+			runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+		})
+
+		if !strings.Contains(output, "Detected 1 tree(s) that were already scanned.") {
+			t.Errorf("Expected output to report 1 already scanned tree, got:\n%s", output)
+		}
 
 		// Verify hello.txt IS scanned
 		if _, ok := store["SHA1:"+helloSHA1]; !ok {
@@ -517,4 +532,22 @@ func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
 			t.Errorf("Root tree should be marked as scanned")
 		}
 	})
+}
+
+func captureStdout(f func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	outChan := make(chan string)
+	go func() {
+		var buf strings.Builder
+		io.Copy(&buf, r)
+		outChan <- buf.String()
+	}()
+
+	f()
+	w.Close()
+	os.Stdout = old
+	return <-outChan
 }

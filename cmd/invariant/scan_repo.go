@@ -178,6 +178,7 @@ func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit st
 	uniqueBlobs := make(map[string]*object.File)
 	traversedTrees := make(map[string]bool)
 	scannedTreeCache := make(map[string]bool)
+	alreadyScannedTrees := make(map[string]bool)
 
 	var walkTree func(t *object.Tree) error
 	walkTree = func(t *object.Tree) error {
@@ -187,6 +188,7 @@ func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit st
 			return err
 		}
 		if scanned {
+			alreadyScannedTrees[sha1Hex] = true
 			return nil
 		}
 
@@ -221,6 +223,8 @@ func runLocalScan(ctx context.Context, kvClient *kv.Client, localPath, commit st
 			os.Exit(1)
 		}
 	}
+
+	fmt.Printf("Detected %d tree(s) that were already scanned.\n", len(alreadyScannedTrees))
 
 	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
 
@@ -452,6 +456,7 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 	uniqueBlobs := make(map[string]bool)
 	traversedTrees := make(map[string]bool)
 	scannedTreeCache := make(map[string]bool)
+	alreadyScannedTrees := make(map[string]bool)
 
 	// Batch get all rootTrees statuses
 	if len(rootTrees) > 0 {
@@ -474,6 +479,7 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 
 	for _, treeSHA := range rootTrees {
 		if scannedTreeCache[treeSHA] {
+			alreadyScannedTrees[treeSHA] = true
 			continue
 		}
 
@@ -552,6 +558,20 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 		}
 
 		for _, entry := range ghTree.Tree {
+			if entry.Type == "tree" {
+				if scannedTreeCache[entry.SHA] {
+					// Check if parent directory is skipped
+					parentPath := ""
+					idx := strings.LastIndex(entry.Path, "/")
+					if idx != -1 {
+						parentPath = entry.Path[:idx]
+					}
+					if !isSkipped(parentPath) {
+						alreadyScannedTrees[entry.SHA] = true
+					}
+				}
+			}
+
 			if isSkipped(entry.Path) {
 				continue
 			}
@@ -565,6 +585,8 @@ func runRemoteScan(ctx context.Context, kvClient *kv.Client, owner, repo, token,
 
 		traversedTrees[treeSHA] = true
 	}
+
+	fmt.Printf("Detected %d tree(s) that were already scanned.\n", len(alreadyScannedTrees))
 
 	fmt.Printf("Discovered %d unique Git blob SHA1s to index.\n", len(uniqueBlobs))
 
