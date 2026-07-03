@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"invariant/internal/gitscan"
 	"invariant/internal/kv"
 
 	"github.com/go-git/go-git/v5"
@@ -174,7 +175,7 @@ func TestLocalScan(t *testing.T) {
 	kvClient := kv.NewClient(ts.URL, nil)
 
 	// Scan starting from commit2 (depth 1 -> only files in commit2 tree)
-	runLocalScan(context.Background(), kvClient, repoDir, commit2Hash.String(), 1, 2)
+	gitscan.ScanLocal(context.Background(), scannerAdapter{client: kvClient}, repoDir, commit2Hash.String(), 1, 2, nil)
 
 	// Verify mappings in kvStore
 	mu.Lock()
@@ -335,7 +336,7 @@ func TestLocalScanWithDepth(t *testing.T) {
 	kvClient := kv.NewClient(ts.URL, nil)
 
 	// Scan starting from commit2 (depth 2 -> should traverse parent commit1 as well)
-	runLocalScan(context.Background(), kvClient, repoDir, commit2Hash.String(), 2, 2)
+	gitscan.ScanLocal(context.Background(), scannerAdapter{client: kvClient}, repoDir, commit2Hash.String(), 2, 2, nil)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -476,7 +477,7 @@ func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
 		kvClient := kv.NewClient(ts.URL, nil)
 		var output string
 		output = captureStdout(func() {
-			runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+			gitscan.ScanLocal(context.Background(), scannerAdapter{client: kvClient}, repoDir, commitHash.String(), 1, 2, os.Stdout)
 		})
 
 		if !strings.Contains(output, "Detected 0 tree(s) that were already scanned.") {
@@ -510,7 +511,7 @@ func TestLocalScanTreeScannedAndSkipped(t *testing.T) {
 		kvClient := kv.NewClient(ts.URL, nil)
 		var output string
 		output = captureStdout(func() {
-			runLocalScan(context.Background(), kvClient, repoDir, commitHash.String(), 1, 2)
+			gitscan.ScanLocal(context.Background(), scannerAdapter{client: kvClient}, repoDir, commitHash.String(), 1, 2, os.Stdout)
 		})
 
 		if !strings.Contains(output, "Detected 1 tree(s) that were already scanned.") {

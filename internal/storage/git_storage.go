@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
+
+	"invariant/internal/gitscan"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -67,6 +70,15 @@ func (c *shaCache) put(key, value string) {
 	c.cacheMap[key] = elem
 }
 
+// GitStorageOptions defines configuration options for GitStorage.
+type GitStorageOptions struct {
+	CacheCapacity   int
+	ScanCommit      string
+	ScanDepth       int
+	ScanConcurrency int
+	ScanLogWriter   io.Writer
+}
+
 // GitStorage implements the Storage interface by reading blobs from a local Git repository.
 type GitStorage struct {
 	gitDir   string
@@ -79,9 +91,10 @@ type GitStorage struct {
 var _ Storage = (*GitStorage)(nil)
 
 // NewGitStorage creates a new GitStorage instance.
-// If cacheCapacity is 0, the default capacity of 10,000 is used.
-// If cacheCapacity is negative, caching is disabled.
-func NewGitStorage(gitDir string, kvClient KVGetter, cacheCapacity int) (*GitStorage, error) {
+// If opts.CacheCapacity is 0, the default capacity of 10,000 is used.
+// If opts.CacheCapacity is negative, caching is disabled.
+// If opts.ScanCommit is non-empty, a local repository scan is performed on startup.
+func NewGitStorage(gitDir string, kvClient KVGetter, opts GitStorageOptions) (*GitStorage, error) {
 	repo, err := git.PlainOpen(gitDir)
 	if err != nil {
 		var err2 error
@@ -91,10 +104,37 @@ func NewGitStorage(gitDir string, kvClient KVGetter, cacheCapacity int) (*GitSto
 		}
 	}
 
+	if opts.ScanCommit != "" {
+		var scannerClient gitscan.KVScannerClient
+		if sc, ok := kvClient.(gitscan.KVScannerClient); ok {
+			scannerClient = sc
+		} else {
+			v := reflect.ValueOf(kvClient)
+			if !v.MethodByName("BatchGet").IsValid() || !v.MethodByName("BatchPut").IsValid() {
+				return nil, fmt.Errorf("kvClient does not support scanning (must implement BatchGet and BatchPut)")
+			}
+			scannerClient = kvScannerAdapter{client: kvClient}
+		}
+
+		concurrency := opts.ScanConcurrency
+		if concurrency <= 0 {
+			concurrency = 20
+		}
+		depth := opts.ScanDepth
+		if depth == 0 {
+			depth = 1
+		}
+
+		err = gitscan.ScanLocal(context.Background(), scannerClient, gitDir, opts.ScanCommit, depth, concurrency, opts.ScanLogWriter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan repository on startup: %w", err)
+		}
+	}
+
 	var cache *shaCache
-	if cacheCapacity > 0 {
-		cache = newSHACache(cacheCapacity)
-	} else if cacheCapacity == 0 {
+	if opts.CacheCapacity > 0 {
+		cache = newSHACache(opts.CacheCapacity)
+	} else if opts.CacheCapacity == 0 {
 		cache = newSHACache(10000)
 	}
 
@@ -189,4 +229,42 @@ func (s *GitStorage) getBlobSHA1(ctx context.Context, address string) (string, b
 		s.cache.put(address, sha1Hex)
 	}
 	return sha1Hex, true
+}
+
+type kvScannerAdapter struct {
+	client KVGetter
+}
+
+func (a kvScannerAdapter) BatchGet(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
+	method := reflect.ValueOf(a.client).MethodByName("BatchGet")
+	if !method.IsValid() {
+		return nil, errors.New("underlying kv client does not support BatchGet")
+	}
+	args := []reflect.Value{
+		reflect.ValueOf(ctx),
+		reflect.ValueOf(txID),
+		reflect.ValueOf(keys),
+	}
+	res := method.Call(args)
+	if !res[1].IsNil() {
+		return nil, res[1].Interface().(error)
+	}
+	return res[0].Interface(), nil
+}
+
+func (a kvScannerAdapter) BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
+	method := reflect.ValueOf(a.client).MethodByName("BatchPut")
+	if !method.IsValid() {
+		return 0, errors.New("underlying kv client does not support BatchPut")
+	}
+	args := []reflect.Value{
+		reflect.ValueOf(ctx),
+		reflect.ValueOf(txID),
+		reflect.ValueOf(kvs),
+	}
+	res := method.Call(args)
+	if !res[1].IsNil() {
+		return 0, res[1].Interface().(error)
+	}
+	return res[0].Uint(), nil
 }

@@ -1,4 +1,4 @@
-package storage
+package storage_test
 
 import (
 	"context"
@@ -9,12 +9,43 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"invariant/internal/kv"
+	"invariant/internal/storage"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+type mockKV struct {
+	getFunc      func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error)
+	batchGetFunc func(ctx context.Context, txID *uint64, keys []string) (interface{}, error)
+	batchPutFunc func(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error)
+}
+
+func (m *mockKV) Get(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, txID, key)
+	}
+	return nil, 0, fmt.Errorf("Get not implemented")
+}
+
+func (m *mockKV) BatchGet(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
+	if m.batchGetFunc != nil {
+		return m.batchGetFunc(ctx, txID, keys)
+	}
+	return nil, fmt.Errorf("BatchGet not implemented")
+}
+
+func (m *mockKV) BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
+	if m.batchPutFunc != nil {
+		return m.batchPutFunc(ctx, txID, kvs)
+	}
+	return 0, fmt.Errorf("BatchPut not implemented")
+}
 
 func TestGitStorage(t *testing.T) {
 	ctx := context.Background()
@@ -82,8 +113,10 @@ func TestGitStorage(t *testing.T) {
 		},
 	}
 
-	// 2. Initialize GitStorage (using default cache capacity 0)
-	gitStorage, err := NewGitStorage(repoDir, mockKVClient, 0)
+	// 2. Initialize GitStorage (using default cache capacity 0 via options)
+	gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+		CacheCapacity: 0,
+	})
 	if err != nil {
 		t.Fatalf("Failed to create GitStorage: %v", err)
 	}
@@ -217,7 +250,9 @@ func TestGitStorage_Caching(t *testing.T) {
 			},
 		}
 
-		gitStorage, err := NewGitStorage(repoDir, mockKVClient, 0)
+		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+			CacheCapacity: 0,
+		})
 		if err != nil {
 			t.Fatalf("Failed to create GitStorage: %v", err)
 		}
@@ -249,7 +284,9 @@ func TestGitStorage_Caching(t *testing.T) {
 		}
 
 		// Create cache with capacity of 2
-		gitStorage, err := NewGitStorage(repoDir, mockKVClient, 2)
+		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+			CacheCapacity: 2,
+		})
 		if err != nil {
 			t.Fatalf("Failed to create GitStorage: %v", err)
 		}
@@ -295,7 +332,9 @@ func TestGitStorage_Caching(t *testing.T) {
 		}
 
 		// -1 disables caching
-		gitStorage, err := NewGitStorage(repoDir, mockKVClient, -1)
+		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+			CacheCapacity: -1,
+		})
 		if err != nil {
 			t.Fatalf("Failed to create GitStorage: %v", err)
 		}
@@ -307,4 +346,103 @@ func TestGitStorage_Caching(t *testing.T) {
 			t.Fatalf("Expected 2 KV calls (caching disabled), got %d", kvCallCount)
 		}
 	})
+}
+
+func TestGitStorage_ScanOnStartup(t *testing.T) {
+	repoDir := t.TempDir()
+	r, err := git.PlainInit(repoDir, false)
+	if err != nil {
+		t.Fatalf("Failed to initialize git repository: %v", err)
+	}
+
+	wt, err := r.Worktree()
+	if err != nil {
+		t.Fatalf("Failed to get worktree: %v", err)
+	}
+
+	testContent := []byte("scanning on startup file content")
+	testPath := filepath.Join(repoDir, "startup.txt")
+	if err := os.WriteFile(testPath, testContent, 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	_, err = wt.Add("startup.txt")
+	if err != nil {
+		t.Fatalf("Failed to add startup.txt: %v", err)
+	}
+
+	commitHash, err := wt.Commit("Commit startup file", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Tester",
+			Email: "test@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	commitObj, _ := r.CommitObject(commitHash)
+	tree, _ := commitObj.Tree()
+	file, _ := tree.File("startup.txt")
+	gitSHA1Hex := file.Hash.String()
+
+	hasher := sha256.New()
+	hasher.Write(testContent)
+	sha256Hex := hex.EncodeToString(hasher.Sum(nil))
+
+	store := make(map[string][]byte)
+	var mu sync.Mutex
+
+	mockKVClient := &mockKV{
+		getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			val, ok := store[key]
+			if !ok {
+				return nil, 0, fmt.Errorf("key not found: %s", key)
+			}
+			return val, 1, nil
+		},
+		batchGetFunc: func(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			results := make(map[string]kv.ValueWithTransaction)
+			for _, k := range keys {
+				if val, ok := store[k]; ok {
+					results[k] = kv.ValueWithTransaction{Value: val, TransactionID: 1}
+				}
+			}
+			return results, nil
+		},
+		batchPutFunc: func(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			for k, v := range kvs {
+				store[k] = v
+			}
+			return 1, nil
+		},
+	}
+
+	// Initialize GitStorage and tell it to scan starting from the commitHash
+	_, err = storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+		ScanCommit: commitHash.String(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create GitStorage with scanning: %v", err)
+	}
+
+	// Verify that the file's mapping is now present in the mock store
+	mu.Lock()
+	mappedSHA1Bytes, ok1 := store["SHA256:"+sha256Hex]
+	mappedSHA256Bytes, ok2 := store["SHA1:"+gitSHA1Hex]
+	mu.Unlock()
+
+	if !ok1 || string(mappedSHA1Bytes) != gitSHA1Hex {
+		t.Errorf("Expected SHA256:%s to map to SHA1:%s, got %s", sha256Hex, gitSHA1Hex, string(mappedSHA1Bytes))
+	}
+	if !ok2 || string(mappedSHA256Bytes) != sha256Hex {
+		t.Errorf("Expected SHA1:%s to map to SHA256:%s, got %s", gitSHA1Hex, sha256Hex, string(mappedSHA256Bytes))
+	}
 }
