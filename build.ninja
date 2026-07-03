@@ -6,6 +6,14 @@ rule gen_dyndep
   command = go run utils/build_dd.go $pkg $out
   description = GEN_DYNDEP $out
 
+rule go_test
+  command = go test $pkg && touch $out
+  description = GO TEST $pkg
+
+rule gen_dyndep_test
+  command = go run utils/build_dd.go -test $pkg $out
+  description = GEN_DYNDEP_TEST $out
+
 build bin/discovery.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/discovery
 
@@ -68,5 +76,114 @@ build bin/storage.dd: gen_dyndep | utils/build_dd.go
 build bin/storage: go_build cmd/storage/main.go || bin/storage.dd
   pkg = ./cmd/storage
   dyndep = bin/storage.dd
+build bin/test_cmd_invariant.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./cmd/invariant
 
-default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage
+build bin/test_cmd_invariant.passed: go_test || bin/test_cmd_invariant.dd
+  pkg = ./cmd/invariant
+  dyndep = bin/test_cmd_invariant.dd
+
+build bin/test_internal_cluster.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/cluster
+
+build bin/test_internal_cluster.passed: go_test || bin/test_internal_cluster.dd
+  pkg = ./internal/cluster
+  dyndep = bin/test_internal_cluster.dd
+
+build bin/test_internal_content.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/content
+
+build bin/test_internal_content.passed: go_test || bin/test_internal_content.dd
+  pkg = ./internal/content
+  dyndep = bin/test_internal_content.dd
+
+build bin/test_internal_discovery.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/discovery
+
+build bin/test_internal_discovery.passed: go_test || bin/test_internal_discovery.dd
+  pkg = ./internal/discovery
+  dyndep = bin/test_internal_discovery.dd
+
+build bin/test_internal_distribute.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/distribute
+
+build bin/test_internal_distribute.passed: go_test || bin/test_internal_distribute.dd
+  pkg = ./internal/distribute
+  dyndep = bin/test_internal_distribute.dd
+
+build bin/test_internal_files.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/files
+
+build bin/test_internal_files.passed: go_test || bin/test_internal_files.dd
+  pkg = ./internal/files
+  dyndep = bin/test_internal_files.dd
+
+build bin/test_internal_filetree.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/filetree
+
+build bin/test_internal_filetree.passed: go_test || bin/test_internal_filetree.dd
+  pkg = ./internal/filetree
+  dyndep = bin/test_internal_filetree.dd
+
+build bin/test_internal_finder.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/finder
+
+build bin/test_internal_finder.passed: go_test || bin/test_internal_finder.dd
+  pkg = ./internal/finder
+  dyndep = bin/test_internal_finder.dd
+
+build bin/test_internal_fuse.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/fuse
+
+build bin/test_internal_fuse.passed: go_test || bin/test_internal_fuse.dd
+  pkg = ./internal/fuse
+  dyndep = bin/test_internal_fuse.dd
+
+build bin/test_internal_kv.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/kv
+
+build bin/test_internal_kv.passed: go_test || bin/test_internal_kv.dd
+  pkg = ./internal/kv
+  dyndep = bin/test_internal_kv.dd
+
+build bin/test_internal_names.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/names
+
+build bin/test_internal_names.passed: go_test || bin/test_internal_names.dd
+  pkg = ./internal/names
+  dyndep = bin/test_internal_names.dd
+
+build bin/test_internal_nfs.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/nfs
+
+build bin/test_internal_nfs.passed: go_test || bin/test_internal_nfs.dd
+  pkg = ./internal/nfs
+  dyndep = bin/test_internal_nfs.dd
+
+build bin/test_internal_slots.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/slots
+
+build bin/test_internal_slots.passed: go_test || bin/test_internal_slots.dd
+  pkg = ./internal/slots
+  dyndep = bin/test_internal_slots.dd
+
+build bin/test_internal_start.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/start
+
+build bin/test_internal_start.passed: go_test || bin/test_internal_start.dd
+  pkg = ./internal/start
+  dyndep = bin/test_internal_start.dd
+
+build bin/test_internal_storage.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/storage
+
+build bin/test_internal_storage.passed: go_test || bin/test_internal_storage.dd
+  pkg = ./internal/storage
+  dyndep = bin/test_internal_storage.dd
+
+default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage $
+  bin/test_cmd_invariant.passed bin/test_internal_cluster.passed bin/test_internal_content.passed $
+  bin/test_internal_discovery.passed bin/test_internal_distribute.passed bin/test_internal_files.passed $
+  bin/test_internal_filetree.passed bin/test_internal_finder.passed bin/test_internal_fuse.passed $
+  bin/test_internal_kv.passed bin/test_internal_names.passed bin/test_internal_nfs.passed $
+  bin/test_internal_slots.passed bin/test_internal_start.passed bin/test_internal_storage.passed

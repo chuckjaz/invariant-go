@@ -29,14 +29,35 @@ type Package struct {
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <go-target> <output-file>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-test] <go-target> <output-file>\n", os.Args[0])
 		os.Exit(1)
 	}
-	targetPkg := os.Args[1]
-	outputFile := os.Args[2]
+
+	isTest := false
+	var targetPkg string
+	var outputFile string
+
+	if os.Args[1] == "-test" {
+		isTest = true
+		if len(os.Args) < 4 {
+			fmt.Fprintf(os.Stderr, "Usage: %s [-test] <go-target> <output-file>\n", os.Args[0])
+			os.Exit(1)
+		}
+		targetPkg = os.Args[2]
+		outputFile = os.Args[3]
+	} else {
+		targetPkg = os.Args[1]
+		outputFile = os.Args[2]
+	}
 
 	// 1. Run 'go list' with dependencies
-	cmd := exec.Command("go", "list", "-json", "-deps", targetPkg)
+	goArgs := []string{"list", "-json"}
+	if isTest {
+		goArgs = append(goArgs, "-test")
+	}
+	goArgs = append(goArgs, "-deps", targetPkg)
+
+	cmd := exec.Command("go", goArgs...)
 	stdout, err := cmd.Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running go list: %v\n", err)
@@ -77,32 +98,43 @@ func main() {
 	// Typically, go binaries built with ninja are target path bin/<import-path-base>.
 	// If it is a main package, use bin/<base-name>. Otherwise, use target name from outputFile.
 	var targetName string
-	if mainPkg.Name == "main" {
+	if isTest {
+		targetName = strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + ".passed"
+	} else if mainPkg.Name == "main" {
 		targetName = "bin/" + filepath.Base(mainPkg.ImportPath)
 	} else {
 		targetName = strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
 	}
 
 	// Collect and resolve paths for all local dependency source files
-	var deps []string
+	depMap := make(map[string]bool)
 	for _, pkg := range pkgs {
 		// Only include local packages that belong to the main module
 		if pkg.Standard || pkg.Module == nil || !pkg.Module.Main {
 			continue
 		}
 
-		relDir, err := filepath.Rel(pkg.Module.Dir, pkg.Dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error resolving path for package %s: %v\n", pkg.ImportPath, err)
-			os.Exit(1)
-		}
-
 		for _, f := range pkg.GoFiles {
-			deps = append(deps, filepath.Join(relDir, f))
+			absFile := f
+			if !filepath.IsAbs(absFile) {
+				absFile = filepath.Join(pkg.Dir, f)
+			}
+			relFile, err := filepath.Rel(pkg.Module.Dir, absFile)
+			if err != nil {
+				continue
+			}
+			if strings.HasPrefix(relFile, "..") {
+				continue
+			}
+			depMap[relFile] = true
 		}
 	}
 
-	// Sort the dependencies for deterministic output
+	// Extract unique dependencies from the map and sort them for deterministic output
+	var deps []string
+	for dep := range depMap {
+		deps = append(deps, dep)
+	}
 	sort.Strings(deps)
 
 	// 2. Generate the Ninja dyndep file
