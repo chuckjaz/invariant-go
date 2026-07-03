@@ -7,19 +7,16 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-)
 
-// KVGetter specifies the subset of the KV client needed by GitHubStorage.
-type KVGetter interface {
-	Get(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error)
-}
+	"invariant/internal/kv"
+)
 
 // GitHubStorage implements the Storage interface by reading blobs from GitHub.
 type GitHubStorage struct {
 	owner      string
 	repo       string
 	token      string
-	kvClient   KVGetter
+	kvClient   kv.KeyValueStoreReader
 	httpClient *http.Client
 	apiURL     string
 }
@@ -28,7 +25,7 @@ type GitHubStorage struct {
 var _ Storage = (*GitHubStorage)(nil)
 
 // NewGitHubStorage creates a new GitHubStorage instance.
-func NewGitHubStorage(owner, repo, token string, kvClient KVGetter, httpClient *http.Client) *GitHubStorage {
+func NewGitHubStorage(owner, repo, token string, kvClient kv.KeyValueStoreReader, httpClient *http.Client) *GitHubStorage {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}

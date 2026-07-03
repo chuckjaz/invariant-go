@@ -8,7 +8,6 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 func TestBTree_CompareKeys(t *testing.T) {
@@ -40,7 +39,7 @@ func TestBTree_DeserializeError(t *testing.T) {
 
 func TestBTree_NilRoot(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	btree := NewBTree(store, slotClient, 2, content.WriterOptions{}) // maxKeys < 3 -> defaults to 3
 
@@ -59,7 +58,7 @@ func TestBTree_NilRoot(t *testing.T) {
 
 func TestBTree_CacheHits(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	btree := NewBTree(store, slotClient, 3, content.WriterOptions{})
 
@@ -101,7 +100,7 @@ func TestBTree_CacheHits(t *testing.T) {
 
 func TestBTree_OutofLineValues(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	btree := NewBTree(store, slotClient, 3, content.WriterOptions{})
 
@@ -143,7 +142,7 @@ func TestBTree_OutofLineValues(t *testing.T) {
 
 func TestBTree_SplitsAndTraversals(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	// Use small maxKeys = 3 to trigger splits quickly
 	btree := NewBTree(store, slotClient, 3, content.WriterOptions{})
@@ -208,7 +207,7 @@ func TestBTree_SplitsAndTraversals(t *testing.T) {
 
 func TestBTree_NodeReadError(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	btree := NewBTree(store, slotClient, 3, content.WriterOptions{})
 

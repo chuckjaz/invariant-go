@@ -76,26 +76,13 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 	kvClient := kv.NewClient(kvURL, nil)
 
 	var err error
-	adapter := scannerAdapter{client: kvClient}
 	if localPath != "" {
-		err = gitscan.ScanLocal(ctx, adapter, localPath, commit, depth, concurrency, os.Stdout)
+		err = gitscan.ScanLocal(ctx, kvClient, localPath, commit, depth, concurrency, os.Stdout)
 	} else {
-		err = gitscan.ScanRemote(ctx, adapter, owner, repo, token, commit, depth, concurrency, os.Stdout)
+		err = gitscan.ScanRemote(ctx, kvClient, owner, repo, token, commit, depth, concurrency, os.Stdout)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error scanning repository: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-type scannerAdapter struct {
-	client *kv.Client
-}
-
-func (a scannerAdapter) BatchGet(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
-	return a.client.BatchGet(ctx, txID, keys)
-}
-
-func (a scannerAdapter) BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
-	return a.client.BatchPut(ctx, txID, kvs)
 }

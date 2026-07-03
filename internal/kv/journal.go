@@ -13,7 +13,6 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 type JournalHeader struct {
@@ -51,7 +50,7 @@ type JournalEntry struct {
 type Journal struct {
 	mu              sync.Mutex
 	baseDir         string
-	storage         storage.Storage
+	storage         content.Storage
 	slotClient      slots.Slots
 	slotID          string
 	slotAuth        []byte
@@ -66,7 +65,7 @@ type Journal struct {
 	lastRecordType  RecordType
 }
 
-func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
+func NewJournal(baseDir string, store content.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}

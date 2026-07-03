@@ -11,7 +11,6 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 // ValueThreshold is the size limit for storing values inline in the B-Tree node.
@@ -68,14 +67,14 @@ func DeserializeBTreeNode(data []byte) (*BTreeNode, error) {
 }
 
 type BTree struct {
-	store      storage.Storage
+	store      content.Storage
 	slotClient slots.Slots
 	maxKeys    int
 	opts       content.WriterOptions
 	nodeCache  sync.Map
 }
 
-func NewBTree(store storage.Storage, slotClient slots.Slots, maxKeys int, opts content.WriterOptions) *BTree {
+func NewBTree(store content.Storage, slotClient slots.Slots, maxKeys int, opts content.WriterOptions) *BTree {
 	if maxKeys < 3 {
 		maxKeys = 3
 	}

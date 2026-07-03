@@ -10,12 +10,11 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 func TestIntegration_ClientServerAll(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// 1. Create concrete KeyValueStore (use large merge threshold to make history checks synchronous)
@@ -233,7 +232,7 @@ func TestIntegration_ClientServerAll(t *testing.T) {
 
 func TestIntegration_ServerBadRequests(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-slot-err", nil, "journal-slot-err", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -420,7 +419,7 @@ func TestIntegration_FallbackAndErrors(t *testing.T) {
 	}
 
 	// Test 5: client commit/abort non-existent transaction
-	concreteStoreClient := storage.NewInMemoryStorage()
+	concreteStoreClient := newInMemoryStorage()
 	concreteSlotClient := slots.NewMemorySlots("test-slot")
 	concreteStore, err := NewFileKeyValueStore(ctx, concreteSlotClient, "btree-slot-err2", nil, "journal-slot-err2", nil, concreteStoreClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
 	if err != nil {

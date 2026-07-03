@@ -1,4 +1,4 @@
-package storage_test
+package storage
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"invariant/internal/kv"
-	"invariant/internal/storage"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -22,7 +21,7 @@ import (
 
 type mockKV struct {
 	getFunc      func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error)
-	batchGetFunc func(ctx context.Context, txID *uint64, keys []string) (interface{}, error)
+	batchGetFunc func(ctx context.Context, txID *uint64, keys []string) (map[string]kv.ValueWithTransaction, error)
 	batchPutFunc func(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error)
 }
 
@@ -33,11 +32,39 @@ func (m *mockKV) Get(ctx context.Context, txID *uint64, key string) ([]byte, uin
 	return nil, 0, fmt.Errorf("Get not implemented")
 }
 
-func (m *mockKV) BatchGet(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
+func (m *mockKV) GetHistory(ctx context.Context, txID *uint64, key string, minTxID uint64, maxTxID uint64, pageSize int) (kv.HistoryPage, error) {
+	return kv.HistoryPage{}, fmt.Errorf("GetHistory not implemented")
+}
+
+func (m *mockKV) BatchGet(ctx context.Context, txID *uint64, keys []string) (map[string]kv.ValueWithTransaction, error) {
 	if m.batchGetFunc != nil {
 		return m.batchGetFunc(ctx, txID, keys)
 	}
 	return nil, fmt.Errorf("BatchGet not implemented")
+}
+
+func (m *mockKV) BatchGetHistory(ctx context.Context, txID *uint64, keys []string, minTxID uint64, maxTxID uint64, pageSize int) (map[string]kv.HistoryPage, error) {
+	return nil, fmt.Errorf("BatchGetHistory not implemented")
+}
+
+func (m *mockKV) StartTransaction(ctx context.Context, sequential bool) (uint64, error) {
+	return 0, fmt.Errorf("StartTransaction not implemented")
+}
+
+func (m *mockKV) CommitTransaction(ctx context.Context, txID uint64) error {
+	return fmt.Errorf("CommitTransaction not implemented")
+}
+
+func (m *mockKV) AbortTransaction(ctx context.Context, txID uint64) error {
+	return fmt.Errorf("AbortTransaction not implemented")
+}
+
+func (m *mockKV) CreateCheckpoint(ctx context.Context) (uint64, error) {
+	return 0, fmt.Errorf("CreateCheckpoint not implemented")
+}
+
+func (m *mockKV) Put(ctx context.Context, txID *uint64, key string, value []byte) (uint64, error) {
+	return 0, fmt.Errorf("Put not implemented")
 }
 
 func (m *mockKV) BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
@@ -114,7 +141,7 @@ func TestGitStorage(t *testing.T) {
 	}
 
 	// 2. Initialize GitStorage (using default cache capacity 0 via options)
-	gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+	gitStorage, err := NewGitStorage(repoDir, mockKVClient, GitStorageOptions{
 		CacheCapacity: 0,
 	})
 	if err != nil {
@@ -250,7 +277,7 @@ func TestGitStorage_Caching(t *testing.T) {
 			},
 		}
 
-		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, GitStorageOptions{
 			CacheCapacity: 0,
 		})
 		if err != nil {
@@ -284,7 +311,7 @@ func TestGitStorage_Caching(t *testing.T) {
 		}
 
 		// Create cache with capacity of 2
-		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, GitStorageOptions{
 			CacheCapacity: 2,
 		})
 		if err != nil {
@@ -332,7 +359,7 @@ func TestGitStorage_Caching(t *testing.T) {
 		}
 
 		// -1 disables caching
-		gitStorage, err := storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, GitStorageOptions{
 			CacheCapacity: -1,
 		})
 		if err != nil {
@@ -404,7 +431,7 @@ func TestGitStorage_ScanOnStartup(t *testing.T) {
 			}
 			return val, 1, nil
 		},
-		batchGetFunc: func(ctx context.Context, txID *uint64, keys []string) (interface{}, error) {
+		batchGetFunc: func(ctx context.Context, txID *uint64, keys []string) (map[string]kv.ValueWithTransaction, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			results := make(map[string]kv.ValueWithTransaction)
@@ -426,7 +453,7 @@ func TestGitStorage_ScanOnStartup(t *testing.T) {
 	}
 
 	// Initialize GitStorage and tell it to scan starting from the commitHash
-	_, err = storage.NewGitStorage(repoDir, mockKVClient, storage.GitStorageOptions{
+	_, err = NewGitStorage(repoDir, mockKVClient, GitStorageOptions{
 		ScanCommit: commitHash.String(),
 	})
 	if err != nil {

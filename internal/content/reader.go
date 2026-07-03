@@ -19,7 +19,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 var (
@@ -32,7 +31,7 @@ var (
 
 // Read returns an io.ReadCloser for the given ContentLink.
 // The caller is responsible for closing the reader.
-func Read(link ContentLink, store storage.Storage, slotService slots.Slots) (io.ReadCloser, error) {
+func Read(link ContentLink, store Storage, slotService slots.Slots) (io.ReadCloser, error) {
 	address := link.Address
 	if link.Slot {
 		if slotService == nil {
@@ -70,7 +69,7 @@ func Read(link ContentLink, store storage.Storage, slotService slots.Slots) (io.
 	return rc, nil
 }
 
-func applyTransform(rc io.ReadCloser, t ContentTransform, expected string, store storage.Storage, slotService slots.Slots) (io.ReadCloser, error) {
+func applyTransform(rc io.ReadCloser, t ContentTransform, expected string, store Storage, slotService slots.Slots) (io.ReadCloser, error) {
 	switch t.Kind {
 	case "Decompress":
 		switch t.Algorithm {
@@ -188,7 +187,7 @@ func (w *wrappedReadCloser) Close() error {
 
 type blockListReader struct {
 	blocks      []BlockListItem
-	store       storage.Storage
+	store       Storage
 	slotService slots.Slots
 
 	mu        sync.Mutex

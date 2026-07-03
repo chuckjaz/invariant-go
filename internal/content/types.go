@@ -1,6 +1,9 @@
 package content
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 // ContentLink defines the location and retrieval parameters of content or a block.
 type ContentLink struct {
@@ -34,4 +37,13 @@ type BlockList struct {
 type Splitter interface {
 	Match(head []byte, filename, contentType string) bool
 	Split(r io.Reader, opts WriterOptions, writeChunk func([]byte) (ContentLink, error), writeStream func(io.Reader, WriterOptions) (ContentLink, error)) ([]BlockListItem, error)
+}
+
+// Storage dictates the necessary requirements for standard invariant byte chunk blocks mapping.
+type Storage interface {
+	Has(ctx context.Context, address string) bool
+	Get(ctx context.Context, address string) (io.ReadCloser, bool)
+	Store(ctx context.Context, r io.Reader) (string, error)
+	StoreAt(ctx context.Context, address string, r io.Reader) (bool, error)
+	Size(ctx context.Context, address string) (int64, bool)
 }

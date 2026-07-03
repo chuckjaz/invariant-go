@@ -1,25 +1,22 @@
-package content_test
+package content
 
 import (
 	"bytes"
 	"crypto/rand"
 	"io"
 	"testing"
-
-	"invariant/internal/content"
-	"invariant/internal/storage"
 )
 
 func TestReadWriteBasic(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 
 	data := []byte("hello world")
-	link, err := content.Write(bytes.NewReader(data), store, content.WriterOptions{})
+	link, err := Write(bytes.NewReader(data), store, WriterOptions{})
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	rc, err := content.Read(link, store, nil)
+	rc, err := Read(link, store, nil)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -36,7 +33,7 @@ func TestReadWriteBasic(t *testing.T) {
 }
 
 func TestReadWriteEncryptedCompressed(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 
 	data := []byte("hello world with compression and encryption")
 
@@ -44,13 +41,13 @@ func TestReadWriteEncryptedCompressed(t *testing.T) {
 		data = append(data, []byte("hello world with compression and encryption ")...)
 	}
 
-	opts := content.WriterOptions{
+	opts := WriterOptions{
 		CompressAlgorithm: "gzip",
 		EncryptAlgorithm:  "aes-256-cbc",
-		KeyPolicy:         content.Deterministic,
+		KeyPolicy:         Deterministic,
 	}
 
-	link, err := content.Write(bytes.NewReader(data), store, opts)
+	link, err := Write(bytes.NewReader(data), store, opts)
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
@@ -66,7 +63,7 @@ func TestReadWriteEncryptedCompressed(t *testing.T) {
 		}
 	}
 
-	rc, err := content.Read(link, store, nil)
+	rc, err := Read(link, store, nil)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -83,20 +80,20 @@ func TestReadWriteEncryptedCompressed(t *testing.T) {
 }
 
 func TestReadWriteLarge(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 
 	data := make([]byte, 5*1024*1024)
 	if _, err := rand.Read(data); err != nil {
 		t.Fatal(err)
 	}
 
-	opts := content.WriterOptions{
+	opts := WriterOptions{
 		CompressAlgorithm: "inflate",
 		EncryptAlgorithm:  "aes-256-cbc",
-		KeyPolicy:         content.RandomAllKey,
+		KeyPolicy:         RandomAllKey,
 	}
 
-	link, err := content.Write(bytes.NewReader(data), store, opts)
+	link, err := Write(bytes.NewReader(data), store, opts)
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
@@ -105,7 +102,7 @@ func TestReadWriteLarge(t *testing.T) {
 		t.Errorf("Expected last transform to be Blocks, got %v", link.Transforms)
 	}
 
-	rc, err := content.Read(link, store, nil)
+	rc, err := Read(link, store, nil)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -122,7 +119,7 @@ func TestReadWriteLarge(t *testing.T) {
 }
 
 func TestReadWriteSuppliedKey(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 
 	data := []byte("hello world with supplied key")
 
@@ -131,13 +128,13 @@ func TestReadWriteSuppliedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts := content.WriterOptions{
+	opts := WriterOptions{
 		EncryptAlgorithm: "aes-256-cbc",
-		KeyPolicy:        content.SuppliedAllKey,
+		KeyPolicy:        SuppliedAllKey,
 		SuppliedKey:      suppliedKey,
 	}
 
-	link, err := content.Write(bytes.NewReader(data), store, opts)
+	link, err := Write(bytes.NewReader(data), store, opts)
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
@@ -146,7 +143,7 @@ func TestReadWriteSuppliedKey(t *testing.T) {
 		t.Errorf("Expected Decipher transform")
 	}
 
-	rc, err := content.Read(link, store, nil)
+	rc, err := Read(link, store, nil)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -163,18 +160,18 @@ func TestReadWriteSuppliedKey(t *testing.T) {
 }
 
 func TestReadWriteZstd(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 
 	data := []byte("hello world compressed with zstandard algorithm")
 	for range 20 {
 		data = append(data, []byte("some repetitive zstd test data goes here...")...)
 	}
 
-	opts := content.WriterOptions{
+	opts := WriterOptions{
 		CompressAlgorithm: "zstd",
 	}
 
-	link, err := content.Write(bytes.NewReader(data), store, opts)
+	link, err := Write(bytes.NewReader(data), store, opts)
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
@@ -183,7 +180,7 @@ func TestReadWriteZstd(t *testing.T) {
 		t.Errorf("Expected 1 Decompress zstd transform, got %v", link.Transforms)
 	}
 
-	rc, err := content.Read(link, store, nil)
+	rc, err := Read(link, store, nil)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}

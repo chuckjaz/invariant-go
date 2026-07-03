@@ -8,22 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
+
+	"invariant/internal/kv"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
-
-// KVScannerClient specifies the interface needed to interact with the KV service during scans.
-// BatchGet returns an interface{} containing the map of results to prevent import cycle with the kv package.
-type KVScannerClient interface {
-	BatchGet(ctx context.Context, txID *uint64, keys []string) (interface{}, error)
-	BatchPut(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error)
-}
 
 type GitHubCommit struct {
 	SHA  string `json:"sha"`
@@ -54,28 +48,8 @@ func logf(w io.Writer, format string, args ...interface{}) {
 	}
 }
 
-// extractBatchGetResults extracts the string-to-byte-slice map from the BatchGet results via reflection.
-func extractBatchGetResults(results interface{}) map[string][]byte {
-	out := make(map[string][]byte)
-	v := reflect.ValueOf(results)
-	if v.Kind() != reflect.Map {
-		return out
-	}
-	for _, keyVal := range v.MapKeys() {
-		keyStr := keyVal.String()
-		mapVal := v.MapIndex(keyVal)
-		if mapVal.Kind() == reflect.Struct {
-			valField := mapVal.FieldByName("Value")
-			if valField.IsValid() && valField.Kind() == reflect.Slice {
-				out[keyStr] = valField.Bytes()
-			}
-		}
-	}
-	return out
-}
-
 // ScanLocal scans a local repository starting from commit, indexing Git SHA1 to SHA256 mappings in the KV service.
-func ScanLocal(ctx context.Context, kvClient KVScannerClient, localPath, commit string, depth, concurrency int, logWriter io.Writer) error {
+func ScanLocal(ctx context.Context, kvClient kv.BatchKeyValueStore, localPath, commit string, depth, concurrency int, logWriter io.Writer) error {
 	logf(logWriter, "Opening local git repository at %s...\n", localPath)
 	r, err := git.PlainOpen(localPath)
 	if err != nil {
@@ -198,11 +172,10 @@ func ScanLocal(ctx context.Context, kvClient KVScannerClient, localPath, commit 
 		}
 		chunk := checkKeys[i:end]
 
-		resultsInterface, err := kvClient.BatchGet(ctx, nil, chunk)
+		results, err := kvClient.BatchGet(ctx, nil, chunk)
 		if err != nil {
 			return fmt.Errorf("error batch getting keys from KV service: %w", err)
 		}
-		results := extractBatchGetResults(resultsInterface)
 
 		for k := range results {
 			existingKeys[k] = true
@@ -337,7 +310,7 @@ func ScanLocal(ctx context.Context, kvClient KVScannerClient, localPath, commit 
 }
 
 // ScanRemote scans a remote GitHub repository starting from commit, indexing Git SHA1 to SHA256 blob mappings.
-func ScanRemote(ctx context.Context, kvClient KVScannerClient, owner, repo, token, commit string, depth, concurrency int, logWriter io.Writer) error {
+func ScanRemote(ctx context.Context, kvClient kv.BatchKeyValueStore, owner, repo, token, commit string, depth, concurrency int, logWriter io.Writer) error {
 	httpClient := http.DefaultClient
 
 	logf(logWriter, "Traversing commit history starting from commit %s (depth limit: %d)...\n", commit, depth)
@@ -394,14 +367,13 @@ func ScanRemote(ctx context.Context, kvClient KVScannerClient, owner, repo, toke
 		for _, tSHA := range rootTrees {
 			checkKeys = append(checkKeys, "tree:sha1:"+tSHA)
 		}
-		resultsInterface, err := kvClient.BatchGet(ctx, nil, checkKeys)
+		results, err := kvClient.BatchGet(ctx, nil, checkKeys)
 		if err != nil {
 			return fmt.Errorf("error batch getting root trees: %w", err)
 		}
-		results := extractBatchGetResults(resultsInterface)
 		for k, val := range results {
 			tSHA := k[10:]
-			if string(val) == "scanned" {
+			if string(val.Value) == "scanned" {
 				scannedTreeCache[tSHA] = true
 			}
 		}
@@ -450,14 +422,13 @@ func ScanRemote(ctx context.Context, kvClient KVScannerClient, owner, repo, toke
 					end = len(checkKeys)
 				}
 				chunk := checkKeys[i:end]
-				resultsInterface, err := kvClient.BatchGet(ctx, nil, chunk)
+				results, err := kvClient.BatchGet(ctx, nil, chunk)
 				if err != nil {
 					return fmt.Errorf("error batch getting subtree statuses: %w", err)
 				}
-				results := extractBatchGetResults(resultsInterface)
 				for k, val := range results {
 					sha := k[10:]
-					if string(val) == "scanned" {
+					if string(val.Value) == "scanned" {
 						scannedTreeCache[sha] = true
 					}
 				}
@@ -535,11 +506,10 @@ func ScanRemote(ctx context.Context, kvClient KVScannerClient, owner, repo, toke
 		}
 		chunk := checkKeys[i:end]
 
-		resultsInterface, err := kvClient.BatchGet(ctx, nil, chunk)
+		results, err := kvClient.BatchGet(ctx, nil, chunk)
 		if err != nil {
 			return fmt.Errorf("error batch getting keys from KV service: %w", err)
 		}
-		results := extractBatchGetResults(resultsInterface)
 
 		for k := range results {
 			existingKeys[k] = true
@@ -702,22 +672,21 @@ func sendGitHubRequest(ctx context.Context, httpClient *http.Client, token, meth
 	return resp, nil
 }
 
-func uploadMappings(ctx context.Context, kvClient KVScannerClient, mappings map[string][]byte) error {
+func uploadMappings(ctx context.Context, kvClient kv.BatchKeyValueStore, mappings map[string][]byte) error {
 	_, err := kvClient.BatchPut(ctx, nil, mappings)
 	return err
 }
 
-func isTreeScanned(ctx context.Context, kvClient KVScannerClient, sha1Hex string, cache map[string]bool) (bool, error) {
+func isTreeScanned(ctx context.Context, kvClient kv.BatchKeyValueStore, sha1Hex string, cache map[string]bool) (bool, error) {
 	if scanned, ok := cache[sha1Hex]; ok {
 		return scanned, nil
 	}
-	resultsInterface, err := kvClient.BatchGet(ctx, nil, []string{"tree:sha1:" + sha1Hex})
+	results, err := kvClient.BatchGet(ctx, nil, []string{"tree:sha1:" + sha1Hex})
 	if err != nil {
 		return false, err
 	}
-	results := extractBatchGetResults(resultsInterface)
 	val, ok := results["tree:sha1:"+sha1Hex]
-	scanned := ok && string(val) == "scanned"
+	scanned := ok && string(val.Value) == "scanned"
 	cache[sha1Hex] = scanned
 	return scanned, nil
 }

@@ -8,12 +8,11 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 func TestStore_BasicPutGet(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store
@@ -73,7 +72,7 @@ func TestStore_BasicPutGet(t *testing.T) {
 
 func TestStore_BTreeSplit(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	// Create store. MaxKeys = 100, we need to insert > 100 to cause split. We set mergeThreshold = 10 to merge frequently.
@@ -111,7 +110,7 @@ func TestStore_BTreeSplit(t *testing.T) {
 
 func TestStore_JournalRecovery(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	journalDir := t.TempDir()
 
@@ -155,7 +154,7 @@ func TestStore_JournalRecovery(t *testing.T) {
 
 func TestStore_RemoteJournalRecovery(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	journalDir := t.TempDir()
 
@@ -206,7 +205,7 @@ func TestStore_RemoteJournalRecovery(t *testing.T) {
 
 func TestStore_GetHistory(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-hist", nil, "journal-hist", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -260,7 +259,7 @@ func TestStore_GetHistory(t *testing.T) {
 
 func TestStore_TransactionIsolation(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-iso", nil, "journal-iso", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -311,7 +310,7 @@ func TestStore_TransactionIsolation(t *testing.T) {
 
 func TestStore_TransactionAtomicity(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-atom", nil, "journal-atom", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -364,7 +363,7 @@ func TestStore_TransactionAtomicity(t *testing.T) {
 
 func TestStore_TransactionConsistency(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-cons", nil, "journal-cons", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -436,7 +435,7 @@ func TestStore_TransactionConsistency(t *testing.T) {
 
 func TestStore_TransactionAbortPreservesOldValue(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-abort-pres", nil, "journal-abort-pres", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -481,7 +480,7 @@ func TestStore_TransactionAbortPreservesOldValue(t *testing.T) {
 
 func TestStore_GetHistoryMerging(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 
 	s, err := NewFileKeyValueStore(ctx, slotClient, "btree-hist-merging", nil, "journal-hist-merging", nil, storeClient, t.TempDir(), 1000000, 10, 10, content.WriterOptions{})
@@ -570,7 +569,7 @@ func (m *mockSlotsMulti) Get(ctx context.Context, id string) (string, error) {
 
 func TestStore_NewFileKeyValueStore_Errors(t *testing.T) {
 	ctx := context.Background()
-	storeClient := storage.NewInMemoryStorage()
+	storeClient := newInMemoryStorage()
 
 	// 1. slotClient.Get returns error on bTree root
 	badSlot1 := &mockSlotsGetError{

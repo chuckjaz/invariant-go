@@ -6,7 +6,6 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 
 	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/tailcfg"
@@ -14,7 +13,7 @@ import (
 
 func TestJournal_GettersAndSetters(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	tempDir := t.TempDir()
 
@@ -53,7 +52,7 @@ func TestJournal_GettersAndSetters(t *testing.T) {
 
 func TestJournal_AutoFlush(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	tempDir := t.TempDir()
 
@@ -114,7 +113,7 @@ func TestJournal_LoadLocalJournals_Error(t *testing.T) {
 }
 
 func TestJournal_CloseMultipleTimes(t *testing.T) {
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	tempDir := t.TempDir()
 
@@ -142,7 +141,7 @@ func TestJournal_CloseMultipleTimes(t *testing.T) {
 
 func TestJournal_AppendWithUserInfo(t *testing.T) {
 	ctx := context.Background()
-	store := storage.NewInMemoryStorage()
+	store := newInMemoryStorage()
 	slotClient := slots.NewMemorySlots("test-slot")
 	tempDir := t.TempDir()
 

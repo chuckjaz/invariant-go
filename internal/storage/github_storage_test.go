@@ -10,14 +10,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"invariant/internal/kv"
 )
 
-type mockKV struct {
+type mockGitHubKV struct {
 	getFunc func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error)
 }
 
-func (m *mockKV) Get(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+func (m *mockGitHubKV) Get(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
 	return m.getFunc(ctx, txID, key)
+}
+
+func (m *mockGitHubKV) GetHistory(ctx context.Context, txID *uint64, key string, minTxID uint64, maxTxID uint64, pageSize int) (kv.HistoryPage, error) {
+	return kv.HistoryPage{}, fmt.Errorf("GetHistory not implemented")
 }
 
 func TestGitHubStorage(t *testing.T) {
@@ -33,7 +39,7 @@ func TestGitHubStorage(t *testing.T) {
 	gitSHA1Hex := hex.EncodeToString(gitSHA1Bytes)
 
 	// Mock KV client in memory
-	mockKVClient := &mockKV{
+	mockKVClient := &mockGitHubKV{
 		getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
 			expectedKey := "SHA256:" + contentSHA256Hex
 			if key == expectedKey {

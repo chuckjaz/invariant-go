@@ -13,7 +13,6 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
-	"invariant/internal/storage"
 )
 
 type TxState int
@@ -42,7 +41,7 @@ type FileKeyValueStore struct {
 	btreeSlotAuth   []byte
 	journalSlotID   string
 	journalSlotAuth []byte
-	storage         storage.Storage
+	storage         content.Storage
 	journal         *Journal
 	btree           *BTree
 	cache           *Cache
@@ -69,7 +68,7 @@ func NewFileKeyValueStore(
 	btreeSlotAuth []byte,
 	journalSlotID string,
 	journalSlotAuth []byte,
-	storage storage.Storage,
+	storage content.Storage,
 	journalDir string,
 	maxCacheSize int,
 	bTreeMergeThreshold int,
