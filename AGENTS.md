@@ -29,3 +29,11 @@ Each module should have its own tests. The tests should be run using the standar
 ### Documentation
 
 Each module should have its own documentation. The documentation should be run using the standard Go doc tools. The documentation should be run using the standard Go build system as much as possible.
+
+### Coding standards
+
+#### Avoid reflection
+Reflection should be used sparingly and only when necessary. It should not be used for performance reasons. It should not be used for convenience reasons. It should not be used for code organization reasons.
+
+#### Avoid interface capability upgrading
+Avoid interface capability upgrading by performing type assertions only at the edges of the system. Specifically avoid trying to access write capability from a reader interface. If a module needs to perform both read and write operations, it should use a different interface that supports both operations. A reader interface can be checked for "batch" capabilities as long as the check only enables to do batch operations it read/write access to.
