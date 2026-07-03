@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"io"
 	"testing"
+
+	"invariant/internal/storage"
 )
 
 func TestReadWriteBasic(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	data := []byte("hello world")
 	link, err := Write(bytes.NewReader(data), store, WriterOptions{})
@@ -33,7 +35,7 @@ func TestReadWriteBasic(t *testing.T) {
 }
 
 func TestReadWriteEncryptedCompressed(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	data := []byte("hello world with compression and encryption")
 
@@ -80,7 +82,7 @@ func TestReadWriteEncryptedCompressed(t *testing.T) {
 }
 
 func TestReadWriteLarge(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	data := make([]byte, 5*1024*1024)
 	if _, err := rand.Read(data); err != nil {
@@ -119,7 +121,7 @@ func TestReadWriteLarge(t *testing.T) {
 }
 
 func TestReadWriteSuppliedKey(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	data := []byte("hello world with supplied key")
 
@@ -160,7 +162,7 @@ func TestReadWriteSuppliedKey(t *testing.T) {
 }
 
 func TestReadWriteZstd(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	data := []byte("hello world compressed with zstandard algorithm")
 	for range 20 {

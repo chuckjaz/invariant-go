@@ -1,4 +1,4 @@
-package storage
+package git
 
 import (
 	"container/list"
@@ -10,6 +10,7 @@ import (
 
 	"invariant/internal/gitscan"
 	"invariant/internal/kv"
+	"invariant/internal/storage"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -88,7 +89,7 @@ type GitStorage struct {
 }
 
 // Assert that GitStorage implements the Storage interface
-var _ Storage = (*GitStorage)(nil)
+var _ storage.Storage = (*GitStorage)(nil)
 
 // NewGitStorage creates a new GitStorage instance.
 // If opts.CacheCapacity is 0, the default capacity of 10,000 is used.

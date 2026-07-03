@@ -1,4 +1,4 @@
-package storage
+package git
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -445,9 +446,7 @@ func TestGitStorage_ScanOnStartup(t *testing.T) {
 		batchPutFunc: func(ctx context.Context, txID *uint64, kvs map[string][]byte) (uint64, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			for k, v := range kvs {
-				store[k] = v
-			}
+			maps.Copy(store, kvs)
 			return 1, nil
 		},
 	}

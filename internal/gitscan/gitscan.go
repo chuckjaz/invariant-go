@@ -42,7 +42,7 @@ type GitHubTree struct {
 	Tree []GitHubTreeEntry `json:"tree"`
 }
 
-func logf(w io.Writer, format string, args ...interface{}) {
+func logf(w io.Writer, format string, args ...any) {
 	if w != nil {
 		fmt.Fprintf(w, format, args...)
 	}
@@ -166,10 +166,7 @@ func ScanLocal(ctx context.Context, kvClient kv.BatchKeyValueStore, localPath, c
 	existingKeys := make(map[string]bool)
 	const batchSize = 200
 	for i := 0; i < len(checkKeys); i += batchSize {
-		end := i + batchSize
-		if end > len(checkKeys) {
-			end = len(checkKeys)
-		}
+		end := min(i+batchSize, len(checkKeys))
 		chunk := checkKeys[i:end]
 
 		results, err := kvClient.BatchGet(ctx, nil, chunk)
@@ -206,9 +203,7 @@ func ScanLocal(ctx context.Context, kvClient kv.BatchKeyValueStore, localPath, c
 
 	var workerWg sync.WaitGroup
 	for w := 0; w < concurrency; w++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
+		workerWg.Go(func() {
 			for t := range taskCh {
 				sha1Hex := t.key[5:]
 				fileObj := uniqueBlobs[sha1Hex]
@@ -236,7 +231,7 @@ func ScanLocal(ctx context.Context, kvClient kv.BatchKeyValueStore, localPath, c
 					sha256Hex: sha256Hex,
 				}
 			}
-		}()
+		})
 	}
 
 	for _, key := range checkKeys {
@@ -417,10 +412,7 @@ func ScanRemote(ctx context.Context, kvClient kv.BatchKeyValueStore, owner, repo
 				checkKeys = append(checkKeys, "tree:sha1:"+sha)
 			}
 			for i := 0; i < len(checkKeys); i += 200 {
-				end := i + 200
-				if end > len(checkKeys) {
-					end = len(checkKeys)
-				}
+				end := min(i+200, len(checkKeys))
 				chunk := checkKeys[i:end]
 				results, err := kvClient.BatchGet(ctx, nil, chunk)
 				if err != nil {
@@ -500,10 +492,7 @@ func ScanRemote(ctx context.Context, kvClient kv.BatchKeyValueStore, owner, repo
 	existingKeys := make(map[string]bool)
 	const batchSize = 200
 	for i := 0; i < len(checkKeys); i += batchSize {
-		end := i + batchSize
-		if end > len(checkKeys) {
-			end = len(checkKeys)
-		}
+		end := min(i+batchSize, len(checkKeys))
 		chunk := checkKeys[i:end]
 
 		results, err := kvClient.BatchGet(ctx, nil, chunk)
@@ -540,9 +529,7 @@ func ScanRemote(ctx context.Context, kvClient kv.BatchKeyValueStore, owner, repo
 
 	var workerWg sync.WaitGroup
 	for w := 0; w < concurrency; w++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
+		workerWg.Go(func() {
 			for t := range taskCh {
 				sha1Hex := t.key[5:]
 				blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s", owner, repo, sha1Hex)
@@ -569,7 +556,7 @@ func ScanRemote(ctx context.Context, kvClient kv.BatchKeyValueStore, owner, repo
 					sha256Hex: sha256Hex,
 				}
 			}
-		}()
+		})
 	}
 
 	for _, key := range checkKeys {

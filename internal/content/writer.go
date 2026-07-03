@@ -15,6 +15,8 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
+
+	"invariant/internal/storage"
 )
 
 type KeyPolicy string
@@ -45,7 +47,7 @@ const (
 // Write reads from r, splits it into ~1MB blocks using a rolling hash,
 // applies compression and encryption according to opts,
 // writes the blocks to store, and returns a ContentLink to the root block (or block list).
-func Write(r io.Reader, store Storage, opts WriterOptions) (ContentLink, error) {
+func Write(r io.Reader, store storage.Storage, opts WriterOptions) (ContentLink, error) {
 	var sharedKey []byte
 	switch opts.KeyPolicy {
 	case RandomAllKey:
@@ -115,7 +117,7 @@ func Write(r io.Reader, store Storage, opts WriterOptions) (ContentLink, error) 
 	return writeBlockList(blocks, store, opts, sharedKey, hex.EncodeToString(overallHasher.Sum(nil)))
 }
 
-func writeBlockList(items []BlockListItem, store Storage, opts WriterOptions, sharedKey []byte, overallExpectedHash string) (ContentLink, error) {
+func writeBlockList(items []BlockListItem, store storage.Storage, opts WriterOptions, sharedKey []byte, overallExpectedHash string) (ContentLink, error) {
 	// A JSON block list might exceed 1MB if there are many items.
 	// We'll recursively split if it's too large.
 
@@ -173,7 +175,7 @@ func ceilDiv(a, b int) int {
 	return (a + b - 1) / b
 }
 
-func writeBlock(data []byte, store Storage, opts WriterOptions, sharedKey []byte) (ContentLink, error) {
+func writeBlock(data []byte, store storage.Storage, opts WriterOptions, sharedKey []byte) (ContentLink, error) {
 	link := ContentLink{}
 
 	// Compute expected hash of the plaintext

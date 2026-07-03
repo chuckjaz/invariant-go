@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"io"
 	"testing"
+
+	"invariant/internal/storage"
 )
 
 func TestNewSeededGearTable(t *testing.T) {
@@ -112,7 +114,7 @@ func TestBuzHashSplitter_Match(t *testing.T) {
 }
 
 func TestWriteBlockList_Recursion(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	// Create a large list of BlockListItems.
 	// Since writeBlockList only marshals and writes to store without reading,
@@ -160,7 +162,7 @@ func TestHashCheckerReader_SeekNonSeeker(t *testing.T) {
 }
 
 func TestBlockListReader_Seek(t *testing.T) {
-	store := newInMemoryStorage()
+	store := storage.NewInMemoryStorage()
 
 	// Write a multi-block file
 	// We want to force it to create a block list, so we'll use a large file.

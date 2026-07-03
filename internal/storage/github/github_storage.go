@@ -1,4 +1,4 @@
-package storage
+package github
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"invariant/internal/kv"
+	"invariant/internal/storage"
 )
 
 // GitHubStorage implements the Storage interface by reading blobs from GitHub.
@@ -22,7 +23,7 @@ type GitHubStorage struct {
 }
 
 // Assert that GitHubStorage implements the Storage interface
-var _ Storage = (*GitHubStorage)(nil)
+var _ storage.Storage = (*GitHubStorage)(nil)
 
 // NewGitHubStorage creates a new GitHubStorage instance.
 func NewGitHubStorage(owner, repo, token string, kvClient kv.KeyValueStoreReader, httpClient *http.Client) *GitHubStorage {
