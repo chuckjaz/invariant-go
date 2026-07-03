@@ -1,27 +1,87 @@
 package storage
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 )
+
+type cacheEntry struct {
+	key   string
+	value string
+}
+
+type shaCache struct {
+	mu       sync.Mutex
+	capacity int
+	lruList  *list.List
+	cacheMap map[string]*list.Element
+}
+
+func newSHACache(capacity int) *shaCache {
+	return &shaCache{
+		capacity: capacity,
+		lruList:  list.New(),
+		cacheMap: make(map[string]*list.Element),
+	}
+}
+
+func (c *shaCache) get(key string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.cacheMap[key]; ok {
+		c.lruList.MoveToFront(elem)
+		return elem.Value.(*cacheEntry).value, true
+	}
+	return "", false
+}
+
+func (c *shaCache) put(key, value string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.cacheMap[key]; ok {
+		c.lruList.MoveToFront(elem)
+		elem.Value.(*cacheEntry).value = value
+		return
+	}
+
+	if c.lruList.Len() >= c.capacity {
+		back := c.lruList.Back()
+		if back != nil {
+			c.lruList.Remove(back)
+			oldEntry := back.Value.(*cacheEntry)
+			delete(c.cacheMap, oldEntry.key)
+		}
+	}
+
+	entry := &cacheEntry{key: key, value: value}
+	elem := c.lruList.PushFront(entry)
+	c.cacheMap[key] = elem
+}
 
 // GitStorage implements the Storage interface by reading blobs from a local Git repository.
 type GitStorage struct {
 	gitDir   string
 	repo     *git.Repository
 	kvClient KVGetter
+	cache    *shaCache
 }
 
 // Assert that GitStorage implements the Storage interface
 var _ Storage = (*GitStorage)(nil)
 
 // NewGitStorage creates a new GitStorage instance.
-func NewGitStorage(gitDir string, kvClient KVGetter) (*GitStorage, error) {
+// If cacheCapacity is 0, the default capacity of 10,000 is used.
+// If cacheCapacity is negative, caching is disabled.
+func NewGitStorage(gitDir string, kvClient KVGetter, cacheCapacity int) (*GitStorage, error) {
 	repo, err := git.PlainOpen(gitDir)
 	if err != nil {
 		var err2 error
@@ -30,10 +90,19 @@ func NewGitStorage(gitDir string, kvClient KVGetter) (*GitStorage, error) {
 			return nil, fmt.Errorf("failed to open git repository at %s: %w (fallback: %v)", gitDir, err, err2)
 		}
 	}
+
+	var cache *shaCache
+	if cacheCapacity > 0 {
+		cache = newSHACache(cacheCapacity)
+	} else if cacheCapacity == 0 {
+		cache = newSHACache(10000)
+	}
+
 	return &GitStorage{
 		gitDir:   gitDir,
 		repo:     repo,
 		kvClient: kvClient,
+		cache:    cache,
 	}, nil
 }
 
@@ -103,11 +172,21 @@ func (s *GitStorage) Size(ctx context.Context, address string) (int64, bool) {
 
 // getBlobSHA1 looks up the Git SHA1 mapping from the KV client.
 func (s *GitStorage) getBlobSHA1(ctx context.Context, address string) (string, bool) {
+	if s.cache != nil {
+		if val, ok := s.cache.get(address); ok {
+			return val, true
+		}
+	}
+
 	key := "SHA256:" + address
 	val, _, err := s.kvClient.Get(ctx, nil, key)
 	if err != nil {
 		return "", false
 	}
 
-	return string(val), true
+	sha1Hex := string(val)
+	if s.cache != nil {
+		s.cache.put(address, sha1Hex)
+	}
+	return sha1Hex, true
 }

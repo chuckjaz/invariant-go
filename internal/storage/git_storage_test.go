@@ -82,8 +82,8 @@ func TestGitStorage(t *testing.T) {
 		},
 	}
 
-	// 2. Initialize GitStorage
-	gitStorage, err := NewGitStorage(repoDir, mockKVClient)
+	// 2. Initialize GitStorage (using default cache capacity 0)
+	gitStorage, err := NewGitStorage(repoDir, mockKVClient, 0)
 	if err != nil {
 		t.Fatalf("Failed to create GitStorage: %v", err)
 	}
@@ -149,4 +149,162 @@ func TestGitStorage(t *testing.T) {
 	if err == nil {
 		t.Error("Expected StoreAt to return an error, got nil")
 	}
+}
+
+func TestGitStorage_Caching(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	r, err := git.PlainInit(repoDir, false)
+	if err != nil {
+		t.Fatalf("Failed to initialize git repository: %v", err)
+	}
+
+	wt, err := r.Worktree()
+	if err != nil {
+		t.Fatalf("Failed to get worktree: %v", err)
+	}
+
+	testContent := []byte("hello git storage caching test content")
+	testPath := filepath.Join(repoDir, "test.txt")
+	if err := os.WriteFile(testPath, testContent, 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	_, err = wt.Add("test.txt")
+	if err != nil {
+		t.Fatalf("Failed to add test.txt: %v", err)
+	}
+
+	commitHash, err := wt.Commit("Add test.txt", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Test Bot",
+			Email: "bot@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	commitObj, err := r.CommitObject(commitHash)
+	if err != nil {
+		t.Fatalf("Failed to get commit: %v", err)
+	}
+	tree, err := commitObj.Tree()
+	if err != nil {
+		t.Fatalf("Failed to get tree: %v", err)
+	}
+	file, err := tree.File("test.txt")
+	if err != nil {
+		t.Fatalf("Failed to get file test.txt: %v", err)
+	}
+
+	gitSHA1Hex := file.Hash.String()
+	hasher := sha256.New()
+	hasher.Write(testContent)
+	sha256Hex := hex.EncodeToString(hasher.Sum(nil))
+
+	t.Run("default cache capacity (0) handles lookup and caches results", func(t *testing.T) {
+		kvCallCount := 0
+		mockKVClient := &mockKV{
+			getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+				kvCallCount++
+				expectedKey := "SHA256:" + sha256Hex
+				if key == expectedKey {
+					return []byte(gitSHA1Hex), 1, nil
+				}
+				return nil, 0, fmt.Errorf("key not found: %s", key)
+			},
+		}
+
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, 0)
+		if err != nil {
+			t.Fatalf("Failed to create GitStorage: %v", err)
+		}
+
+		// First lookup - should hit KV client
+		if !gitStorage.Has(ctx, sha256Hex) {
+			t.Fatalf("Expected Has to return true")
+		}
+		if kvCallCount != 1 {
+			t.Fatalf("Expected 1 KV call on first lookup, got %d", kvCallCount)
+		}
+
+		// Second lookup - should hit cache, NOT KV client
+		if !gitStorage.Has(ctx, sha256Hex) {
+			t.Fatalf("Expected Has to return true on second call")
+		}
+		if kvCallCount != 1 {
+			t.Fatalf("Expected KV call count to remain 1 (cached), got %d", kvCallCount)
+		}
+	})
+
+	t.Run("cache capacity is respected and evicts oldest items", func(t *testing.T) {
+		kvCalls := make(map[string]int)
+		mockKVClient := &mockKV{
+			getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+				kvCalls[key]++
+				return []byte(gitSHA1Hex), 1, nil
+			},
+		}
+
+		// Create cache with capacity of 2
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, 2)
+		if err != nil {
+			t.Fatalf("Failed to create GitStorage: %v", err)
+		}
+
+		// Query 1, 2 (will fill cache)
+		gitStorage.Has(ctx, "addr1")
+		gitStorage.Has(ctx, "addr2")
+
+		// Verify they were called once
+		if kvCalls["SHA256:addr1"] != 1 || kvCalls["SHA256:addr2"] != 1 {
+			t.Fatalf("Expected addr1 and addr2 to have 1 KV call, got: %v", kvCalls)
+		}
+
+		// Query 1 again (moves to front of LRU)
+		gitStorage.Has(ctx, "addr1")
+		if kvCalls["SHA256:addr1"] != 1 {
+			t.Fatalf("Expected addr1 to be cached, got calls: %d", kvCalls["SHA256:addr1"])
+		}
+
+		// Query 3 (exceeds capacity, evicts addr2 which is at the back of LRU)
+		gitStorage.Has(ctx, "addr3")
+
+		// Query 1 (should still be in cache)
+		gitStorage.Has(ctx, "addr1")
+		if kvCalls["SHA256:addr1"] != 1 {
+			t.Fatalf("Expected addr1 to still be cached, got calls: %d", kvCalls["SHA256:addr1"])
+		}
+
+		// Query 2 (should have been evicted, causing a new KV call)
+		gitStorage.Has(ctx, "addr2")
+		if kvCalls["SHA256:addr2"] != 2 {
+			t.Fatalf("Expected addr2 to be evicted and queried again, got calls: %d", kvCalls["SHA256:addr2"])
+		}
+	})
+
+	t.Run("negative cache capacity disables caching", func(t *testing.T) {
+		kvCallCount := 0
+		mockKVClient := &mockKV{
+			getFunc: func(ctx context.Context, txID *uint64, key string) ([]byte, uint64, error) {
+				kvCallCount++
+				return []byte(gitSHA1Hex), 1, nil
+			},
+		}
+
+		// -1 disables caching
+		gitStorage, err := NewGitStorage(repoDir, mockKVClient, -1)
+		if err != nil {
+			t.Fatalf("Failed to create GitStorage: %v", err)
+		}
+
+		gitStorage.Has(ctx, sha256Hex)
+		gitStorage.Has(ctx, sha256Hex)
+
+		if kvCallCount != 2 {
+			t.Fatalf("Expected 2 KV calls (caching disabled), got %d", kvCallCount)
+		}
+	})
 }
