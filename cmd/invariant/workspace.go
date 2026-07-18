@@ -36,7 +36,7 @@ import (
 
 func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant workspace <create|mount|pull|unmount|branch|merge> ...\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant workspace <create|mount|pull|unmount|branch|merge|rebase> ...\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  create    Create a new workspace\n")
 		fmt.Fprintf(os.Stderr, "  mount     Mount a workspace\n")
@@ -44,6 +44,7 @@ func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "  pull      Pull a workspace\n")
 		fmt.Fprintf(os.Stderr, "  branch    Branch a workspace\n")
 		fmt.Fprintf(os.Stderr, "  merge     Merge a branch workspace back to parent\n")
+		fmt.Fprintf(os.Stderr, "  rebase    Rebase a branch workspace onto parent's current state\n")
 		os.Exit(1)
 	}
 
@@ -60,6 +61,8 @@ func runWorkspace(globalCfg *config.InvariantConfig, args []string) {
 		runWorkspaceBranch(globalCfg, args[1:])
 	case "merge":
 		runWorkspaceMerge(globalCfg, args[1:])
+	case "rebase":
+		runWorkspaceRebase(globalCfg, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown workspace command: %s\n", args[0])
 		os.Exit(1)
@@ -701,4 +704,126 @@ func runWorkspaceMerge(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	log.Printf("Successfully merged branch into parent! Parent slot updated to %s\n", mergedRootAddress)
+}
+
+func runWorkspaceRebase(globalCfg *config.InvariantConfig, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant workspace rebase <parent-directory> [branch-directory]\n")
+		os.Exit(1)
+	}
+
+	parentDir := args[0]
+	branchDir := "."
+	if len(args) > 1 {
+		branchDir = args[1]
+	}
+
+	parentAbsDir, err := filepath.Abs(parentDir)
+	if err != nil {
+		log.Fatalf("invalid parent directory path: %v", err)
+	}
+	branchAbsDir, err := filepath.Abs(branchDir)
+	if err != nil {
+		log.Fatalf("invalid branch directory path: %v", err)
+	}
+
+	parentWsPath := filepath.Join(parentAbsDir, ".invariant-workspace")
+	parentData, err := os.ReadFile(parentWsPath)
+	if err != nil {
+		log.Fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
+	}
+
+	var parentWsInfo workspace.WorkspaceInfo
+	if err := json.Unmarshal(parentData, &parentWsInfo); err != nil {
+		log.Fatalf("invalid parent workspace file: %v", err)
+	}
+
+	branchWsPath := filepath.Join(branchAbsDir, ".invariant-workspace")
+	branchData, err := os.ReadFile(branchWsPath)
+	if err != nil {
+		log.Fatalf("branch directory is not a valid workspace: failed to read %s: %v", branchWsPath, err)
+	}
+
+	var branchWsInfo workspace.WorkspaceInfo
+	if err := json.Unmarshal(branchData, &branchWsInfo); err != nil {
+		log.Fatalf("invalid branch workspace file: %v", err)
+	}
+
+	if branchWsInfo.ParentSlot == "" || branchWsInfo.ParentSnapshot == "" {
+		log.Fatalf("workspace %s is not a branch (missing parent tracking metadata)", branchDir)
+	}
+
+	_, _, storageClient, slotsClient := initClients(globalCfg)
+
+	parentSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, parentWsInfo)
+	if err != nil {
+		log.Fatalf("failed to get parent workspace slot ID: %v", err)
+	}
+
+	branchSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, branchWsInfo)
+	if err != nil {
+		log.Fatalf("failed to get branch workspace slot ID: %v", err)
+	}
+
+	if parentSlotID != branchWsInfo.ParentSlot {
+		log.Fatalf("conflict: branch parent slot %s does not match specified parent slot %s", branchWsInfo.ParentSlot, parentSlotID)
+	}
+
+	parentCurrentAddress, err := slotsClient.Get(context.Background(), parentSlotID)
+	if err != nil {
+		log.Fatalf("failed to get parent workspace slot address: %v", err)
+	}
+
+	branchCurrentAddress, err := slotsClient.Get(context.Background(), branchSlotID)
+	if err != nil {
+		log.Fatalf("failed to get branch workspace slot address: %v", err)
+	}
+
+	ancestorAddress := branchWsInfo.ParentSnapshot
+
+	log.Printf("Rebasing branch workspace %s onto parent workspace %s...\n", branchDir, parentDir)
+	log.Printf("  Parent Slot:       %s (current hash: %s)\n", parentSlotID, parentCurrentAddress)
+	log.Printf("  Branch Slot:       %s (current hash: %s)\n", branchSlotID, branchCurrentAddress)
+	log.Printf("  Ancestor Snapshot: %s\n", ancestorAddress)
+
+	mergedRootAddress, conflicts, err := workspace.MergeTrees(
+		context.Background(),
+		ancestorAddress,
+		parentCurrentAddress,
+		branchCurrentAddress,
+		storageClient,
+		slotsClient,
+	)
+	if err != nil {
+		log.Fatalf("failed to perform tree merge for rebase: %v", err)
+	}
+
+	if len(conflicts) > 0 {
+		fmt.Fprintf(os.Stderr, "Rebase failed: conflicts detected at the following paths:\n")
+		for _, conf := range conflicts {
+			fmt.Fprintf(os.Stderr, "  - %s\n", conf)
+		}
+		os.Exit(2)
+	}
+
+	err = slotsClient.Update(context.Background(), branchSlotID, mergedRootAddress, branchCurrentAddress, nil)
+	if err != nil {
+		log.Fatalf("failed to update branch slot: %v", err)
+	}
+
+	// Update branchWsInfo ParentSnapshot to parentCurrentAddress
+	branchWsInfo.ParentSnapshot = parentCurrentAddress
+
+	// Write branchWsInfo back to .invariant-workspace file
+	branchWsFile, err := os.Create(branchWsPath)
+	if err != nil {
+		log.Fatalf("failed to create branch .invariant-workspace: %v", err)
+	}
+	defer branchWsFile.Close()
+
+	if err := json.NewEncoder(branchWsFile).Encode(branchWsInfo); err != nil {
+		log.Fatalf("failed to write branch .invariant-workspace: %v", err)
+	}
+
+	log.Printf("Successfully rebased branch! Branch slot updated to %s, parent snapshot advanced to %s\n", mergedRootAddress, parentCurrentAddress)
 }

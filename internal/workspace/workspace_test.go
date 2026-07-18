@@ -305,3 +305,103 @@ func TestWorkspace_MergeConflicts(t *testing.T) {
 		t.Errorf("expected 1 conflict on 'file1.txt', got: %v", conflicts)
 	}
 }
+
+func TestWorkspace_Rebase(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-id")
+
+	// 1. Create parent workspace and base file
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	parentSlotID := "parent-slot"
+	_ = memSlots.Create(ctx, parentSlotID, initLink.Address, "")
+
+	parentRootLink := content.ContentLink{
+		Address: parentSlotID,
+		Slot:    true,
+	}
+
+	parentOpts := files.Options{
+		Storage:          store,
+		Slots:            memSlots,
+		RootLink:         parentRootLink,
+		AutoSyncTimeout:  time.Hour,
+		SlotPollInterval: time.Hour,
+		Layers: []files.Layer{
+			{RootLink: parentRootLink},
+		},
+	}
+
+	fsParent, _ := files.NewInMemoryFiles(parentOpts)
+	defer fsParent.Close()
+
+	_ = fsParent.CreateEntry(ctx, 1, "file1.txt", filetree.FileKind, "", nil, bytes.NewReader([]byte("base parent")))
+	_ = fsParent.Sync(ctx, 1, true)
+
+	parentSnapshotHash, _ := memSlots.Get(ctx, parentSlotID)
+
+	// 2. Create branch
+	branchSlotID := "branch-slot"
+	_ = memSlots.Create(ctx, branchSlotID, parentSnapshotHash, "")
+
+	branchRootLink := content.ContentLink{
+		Address: branchSlotID,
+		Slot:    true,
+	}
+
+	branchOpts := files.Options{
+		Storage:          store,
+		Slots:            memSlots,
+		RootLink:         branchRootLink,
+		AutoSyncTimeout:  time.Hour,
+		SlotPollInterval: time.Hour,
+		Layers: []files.Layer{
+			{RootLink: branchRootLink},
+		},
+	}
+
+	fsBranch, _ := files.NewInMemoryFiles(branchOpts)
+	defer fsBranch.Close()
+
+	// Modify branch: create branch_only.txt
+	_ = fsBranch.CreateEntry(ctx, 1, "branch_only.txt", filetree.FileKind, "", nil, bytes.NewReader([]byte("branch content")))
+	_ = fsBranch.Sync(ctx, 1, true)
+
+	// Modify parent: create parent_only.txt
+	_ = fsParent.CreateEntry(ctx, 1, "parent_only.txt", filetree.FileKind, "", nil, bytes.NewReader([]byte("parent content")))
+	_ = fsParent.Sync(ctx, 1, true)
+
+	// 3. Perform rebase programmatically
+	parentCurrentAddress, _ := memSlots.Get(ctx, parentSlotID)
+	branchCurrentAddress, _ := memSlots.Get(ctx, branchSlotID)
+
+	mergedRootAddress, conflicts, err := MergeTrees(ctx, parentSnapshotHash, parentCurrentAddress, branchCurrentAddress, store, memSlots)
+	if err != nil {
+		t.Fatalf("rebase merge failed: %v", err)
+	}
+	if len(conflicts) > 0 {
+		t.Fatalf("expected no conflicts, got: %v", conflicts)
+	}
+
+	// Update branch slot
+	err = memSlots.Update(ctx, branchSlotID, mergedRootAddress, branchCurrentAddress, nil)
+	if err != nil {
+		t.Fatalf("failed to update branch slot: %v", err)
+	}
+
+	// 4. Verify branch state after rebase
+	fsRebased, _ := files.NewInMemoryFiles(branchOpts)
+	defer fsRebased.Close()
+
+	// Branch should now contain branch_only.txt, parent_only.txt, and file1.txt
+	if _, err := fsRebased.Lookup(ctx, 1, "branch_only.txt"); err != nil {
+		t.Errorf("branch_only.txt missing from rebased branch: %v", err)
+	}
+	if _, err := fsRebased.Lookup(ctx, 1, "parent_only.txt"); err != nil {
+		t.Errorf("parent_only.txt missing from rebased branch: %v", err)
+	}
+	if _, err := fsRebased.Lookup(ctx, 1, "file1.txt"); err != nil {
+		t.Errorf("file1.txt missing from rebased branch: %v", err)
+	}
+}
