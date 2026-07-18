@@ -495,13 +495,20 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 }
 
 func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
-	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant workspace branch <parent-directory> <branch-directory>\n")
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant workspace branch [parent-directory] <branch-directory>\n")
 		os.Exit(1)
 	}
 
-	parentDir := args[0]
-	branchDir := args[1]
+	var parentDir string
+	var branchDir string
+	if len(args) == 1 {
+		parentDir = "."
+		branchDir = args[0]
+	} else {
+		parentDir = args[0]
+		branchDir = args[1]
+	}
 
 	parentAbsDir, err := filepath.Abs(parentDir)
 	if err != nil {
@@ -585,13 +592,20 @@ func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runWorkspaceMerge(globalCfg *config.InvariantConfig, args []string) {
-	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant workspace merge <parent-directory> <branch-directory>\n")
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant workspace merge [parent-directory] <branch-directory>\n")
 		os.Exit(1)
 	}
 
-	parentDir := args[0]
-	branchDir := args[1]
+	var parentDir string
+	var branchDir string
+	if len(args) == 1 {
+		parentDir = "."
+		branchDir = args[0]
+	} else {
+		parentDir = args[0]
+		branchDir = args[1]
+	}
 
 	parentAbsDir, err := filepath.Abs(parentDir)
 	if err != nil {
