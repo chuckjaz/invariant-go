@@ -194,10 +194,17 @@ build bin/test_internal_storage_github.passed: go_test || bin/test_internal_stor
   pkg = ./internal/storage/github
   dyndep = bin/test_internal_storage_github.dd
 
+build bin/test_internal_workspace.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/workspace
+
+build bin/test_internal_workspace.passed: go_test || bin/test_internal_workspace.dd
+  pkg = ./internal/workspace
+  dyndep = bin/test_internal_workspace.dd
+
 default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage $
   bin/test_cmd_invariant.passed bin/test_internal_cluster.passed bin/test_internal_content.passed $
   bin/test_internal_discovery.passed bin/test_internal_distribute.passed bin/test_internal_files.passed $
   bin/test_internal_filetree.passed bin/test_internal_finder.passed bin/test_internal_fuse.passed $
   bin/test_internal_kv.passed bin/test_internal_names.passed bin/test_internal_nfs.passed $
   bin/test_internal_slots.passed bin/test_internal_start.passed bin/test_internal_storage.passed $
-  bin/test_internal_storage_git.passed bin/test_internal_storage_github.passed
+  bin/test_internal_storage_git.passed bin/test_internal_storage_github.passed bin/test_internal_workspace.passed

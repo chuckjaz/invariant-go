@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"invariant/internal/content"
@@ -17,7 +19,9 @@ import (
 
 // WorkspaceInfo represents the contents of the .invariant-workspace JSON file.
 type WorkspaceInfo struct {
-	Content content.ContentLink `json:"content"`
+	Content        content.ContentLink `json:"content"`
+	ParentSnapshot string              `json:"parent_snapshot,omitempty"`
+	ParentSlot     string              `json:"parent_slot,omitempty"`
 }
 
 func CreateWorkspace(
@@ -218,4 +222,272 @@ func parseIgnoreLines(r interface{ Read([]byte) (int, error) }) []string {
 		}
 	}
 	return rules
+}
+
+// GetWorkspaceSlotID returns the slot ID tracking the workspace changes.
+func GetWorkspaceSlotID(ctx context.Context, slotsClient slots.Slots, store storage.Storage, info WorkspaceInfo) (string, error) {
+	layers, err := ResolveLayers(ctx, slotsClient, store, info.Content)
+	if err != nil {
+		return "", err
+	}
+	for _, layer := range layers {
+		if layer.RootLink.Slot {
+			return layer.RootLink.Address, nil
+		}
+	}
+	return "", fmt.Errorf("no tracking slot found in workspace layers")
+}
+
+// CreateWorkspaceFromLayers serializes the layers and creates a workspace metadata link.
+func CreateWorkspaceFromLayers(
+	ctx context.Context,
+	store storage.Storage,
+	slotsClient slots.Slots,
+	layers []files.Layer,
+) (content.ContentLink, error) {
+	layerBytes, err := json.MarshalIndent(layers, "", "  ")
+	if err != nil {
+		return content.ContentLink{}, fmt.Errorf("failed to marshal layers: %w", err)
+	}
+
+	workspaceOpts := files.Options{
+		Storage:  store,
+		Slots:    slotsClient,
+		RootLink: content.ContentLink{Slot: true},
+	}
+
+	wkFs, err := files.NewInMemoryFiles(workspaceOpts)
+	if err != nil {
+		return content.ContentLink{}, fmt.Errorf("failed to create temp workspace file tree: %w", err)
+	}
+	defer wkFs.Close()
+
+	err = wkFs.CreateEntry(ctx, 1, ".invariant-layer", filetree.FileKind, "", nil, strings.NewReader(string(layerBytes)))
+	if err != nil {
+		return content.ContentLink{}, fmt.Errorf("failed to write .invariant-layer to temp file tree: %w", err)
+	}
+
+	err = wkFs.Sync(ctx, 1, true)
+	if err != nil {
+		return content.ContentLink{}, fmt.Errorf("failed to sync temp file tree: %w", err)
+	}
+
+	return wkFs.GetContent(ctx, 1)
+}
+
+// MergeTrees performs a recursive 3-way directory merge.
+// It returns the merged root block address and a list of paths with conflicts.
+func MergeTrees(
+	ctx context.Context,
+	ancestorAddress string,
+	parentAddress string,
+	branchAddress string,
+	store storage.Storage,
+	slotsClient slots.Slots,
+) (string, []string, error) {
+	return mergeDirectoriesRecursive(ctx, "", ancestorAddress, parentAddress, branchAddress, store, slotsClient)
+}
+
+func mergeDirectoriesRecursive(
+	ctx context.Context,
+	path string,
+	ancestorAddr string,
+	parentAddr string,
+	branchAddr string,
+	store storage.Storage,
+	slotsClient slots.Slots,
+) (string, []string, error) {
+	if parentAddr == branchAddr {
+		return parentAddr, nil, nil
+	}
+	if parentAddr == ancestorAddr {
+		return branchAddr, nil, nil
+	}
+	if branchAddr == ancestorAddr {
+		return parentAddr, nil, nil
+	}
+
+	ancestorDir, err := readDirectory(ctx, ancestorAddr, store, slotsClient)
+	if err != nil {
+		return "", nil, err
+	}
+	parentDir, err := readDirectory(ctx, parentAddr, store, slotsClient)
+	if err != nil {
+		return "", nil, err
+	}
+	branchDir, err := readDirectory(ctx, branchAddr, store, slotsClient)
+	if err != nil {
+		return "", nil, err
+	}
+
+	ancestorMap := make(map[string]filetree.Entry)
+	for _, entry := range ancestorDir {
+		ancestorMap[entry.GetName()] = entry
+	}
+	parentMap := make(map[string]filetree.Entry)
+	for _, entry := range parentDir {
+		parentMap[entry.GetName()] = entry
+	}
+	branchMap := make(map[string]filetree.Entry)
+	for _, entry := range branchDir {
+		branchMap[entry.GetName()] = entry
+	}
+
+	names := make(map[string]bool)
+	for name := range ancestorMap {
+		names[name] = true
+	}
+	for name := range parentMap {
+		names[name] = true
+	}
+	for name := range branchMap {
+		names[name] = true
+	}
+
+	var sortedNames []string
+	for name := range names {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+
+	var mergedDir filetree.Directory
+	var conflicts []string
+
+	for _, name := range sortedNames {
+		A := ancestorMap[name]
+		P := parentMap[name]
+		B := branchMap[name]
+
+		childPath := name
+		if path != "" {
+			childPath = path + "/" + name
+		}
+
+		if isEqualEntry(A, P) {
+			if B != nil {
+				mergedDir = append(mergedDir, B)
+			}
+			continue
+		}
+
+		if isEqualEntry(A, B) {
+			if P != nil {
+				mergedDir = append(mergedDir, P)
+			}
+			continue
+		}
+
+		if isEqualEntry(P, B) {
+			if P != nil {
+				mergedDir = append(mergedDir, P)
+			}
+			continue
+		}
+
+		if P != nil && B != nil && P.GetKind() == filetree.DirectoryKind && B.GetKind() == filetree.DirectoryKind {
+			pDirEntry := P.(*filetree.DirectoryEntry)
+			bDirEntry := B.(*filetree.DirectoryEntry)
+			var aDirAddr string
+			if A != nil && A.GetKind() == filetree.DirectoryKind {
+				aDirAddr = A.(*filetree.DirectoryEntry).Content.Address
+			}
+
+			mergedChildAddr, childConflicts, err := mergeDirectoriesRecursive(
+				ctx,
+				childPath,
+				aDirAddr,
+				pDirEntry.Content.Address,
+				bDirEntry.Content.Address,
+				store,
+				slotsClient,
+			)
+			if err != nil {
+				return "", nil, err
+			}
+			if len(childConflicts) > 0 {
+				conflicts = append(conflicts, childConflicts...)
+			} else {
+				newDirEntry := &filetree.DirectoryEntry{
+					BaseEntry: pDirEntry.BaseEntry,
+					Content: content.ContentLink{
+						Address: mergedChildAddr,
+					},
+					Size: pDirEntry.Size,
+				}
+				mergedDir = append(mergedDir, newDirEntry)
+			}
+			continue
+		}
+
+		conflicts = append(conflicts, childPath)
+	}
+
+	if len(conflicts) > 0 {
+		return "", conflicts, nil
+	}
+
+	data, err := json.Marshal(mergedDir)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to marshal merged directory: %w", err)
+	}
+
+	link, err := content.Write(bytes.NewReader(data), store, content.WriterOptions{})
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to write merged directory: %w", err)
+	}
+
+	return link.Address, nil, nil
+}
+
+func readDirectory(ctx context.Context, address string, store storage.Storage, slotsClient slots.Slots) (filetree.Directory, error) {
+	if address == "" {
+		return filetree.Directory{}, nil
+	}
+	link := content.ContentLink{Address: address}
+	reader, err := content.Read(link, store, slotsClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory at address %s: %w", address, err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory bytes: %w", err)
+	}
+
+	var dir filetree.Directory
+	if err := json.Unmarshal(data, &dir); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal directory: %w", err)
+	}
+	return dir, nil
+}
+
+func isEqualEntry(e1, e2 filetree.Entry) bool {
+	if e1 == nil && e2 == nil {
+		return true
+	}
+	if e1 == nil || e2 == nil {
+		return false
+	}
+	if e1.GetKind() != e2.GetKind() {
+		return false
+	}
+	if e1.GetName() != e2.GetName() {
+		return false
+	}
+	switch e1.GetKind() {
+	case filetree.FileKind:
+		f1 := e1.(*filetree.FileEntry)
+		f2 := e2.(*filetree.FileEntry)
+		return f1.Content.Address == f2.Content.Address
+	case filetree.DirectoryKind:
+		d1 := e1.(*filetree.DirectoryEntry)
+		d2 := e2.(*filetree.DirectoryEntry)
+		return d1.Content.Address == d2.Content.Address
+	case filetree.SymbolicLinkKind:
+		s1 := e1.(*filetree.SymbolicLinkEntry)
+		s2 := e2.(*filetree.SymbolicLinkEntry)
+		return s1.Target == s2.Target
+	}
+	return false
 }
