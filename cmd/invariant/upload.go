@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -259,11 +260,19 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	os.MkdirAll(cacheDir, 0755)
 	cachePath := filepath.Join(cacheDir, "cache.json")
 
+	numWorkers := runtime.NumCPU() * 4
+	if numWorkers < 32 {
+		numWorkers = 32
+	}
+	if numWorkers > 128 {
+		numWorkers = 128
+	}
+
 	up := &uploader{
 		cache:        make(map[string]UploadCacheEntry),
 		cachePath:    cachePath,
 		disableCache: disableCache,
-		fileQueue:    newWorkerQueue(10000, 100000),
+		fileQueue:    newWorkerQueue(numWorkers, 100000),
 	}
 
 	if !disableCache {
