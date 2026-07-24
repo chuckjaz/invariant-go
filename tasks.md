@@ -4,7 +4,7 @@
   - Skip remote `store.Has()` network checks in `cmd/invariant/upload.go` when a file's modification time (`mtime`) matches the local upload cache entry (`u.cache`).
 - [x] **Task 2: Optimize Batching Timer Delays**
   - Reduce or eliminate artificial batching timer delays in `cmd/invariant/batching_storage.go` when queued items are below the 100-item threshold.
-- [ ] **Task 3: Single-Pass Upload Processing**
+- [x] **Task 3: Single-Pass Upload Processing**
   - Refactor file upload processing in `cmd/invariant/upload.go` to eliminate double-pass file reading, splitting, and hashing.
 - [ ] **Task 4: Tune Concurrency and Worker Pool**
   - Replace the fixed 10,000 worker goroutine pool with a bounded pool aligned with system CPU/IO capacity to reduce lock contention and scheduler overhead.

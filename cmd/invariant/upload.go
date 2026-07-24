@@ -432,27 +432,15 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 		return nil, err
 	}
 
-	memStore := storage.NewHashingStorage()
-	memLink, err := content.Write(strings.NewReader(string(data)), memStore, opts)
+	atomic.AddInt64(&u.UploadsInFlight, 1)
+	memLink, err := content.Write(strings.NewReader(string(data)), store, opts)
+	atomic.AddInt64(&u.UploadsInFlight, -1)
 	if err != nil {
 		return nil, err
 	}
 
-	if !store.Has(ctx, memLink.Address) {
-		atomic.AddInt64(&u.UploadsInFlight, 1)
-		defer atomic.AddInt64(&u.UploadsInFlight, -1)
-
-		atomic.AddUint64(&u.BlocksUploaded, 1)
-		atomic.AddUint64(&u.DirsCreated, 1)
-
-		_, err = content.Write(strings.NewReader(string(data)), store, opts)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		atomic.AddUint64(&u.DirsShared, 1)
-	}
-
+	atomic.AddUint64(&u.BlocksUploaded, 1)
+	atomic.AddUint64(&u.DirsCreated, 1)
 	atomic.AddUint64(&u.DirsChecked, 1)
 
 	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
@@ -518,29 +506,14 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 		&content.RepMaxSplitter{},
 	}
 
-	memStore := storage.NewHashingStorage()
-	memLink, err := content.Write(file, memStore, opts)
+	atomic.AddInt64(&u.UploadsInFlight, 1)
+	memLink, err := content.Write(file, store, opts)
+	atomic.AddInt64(&u.UploadsInFlight, -1)
 	if err != nil {
 		return nil, err
 	}
 
-	if !store.Has(ctx, memLink.Address) {
-		atomic.AddInt64(&u.UploadsInFlight, 1)
-		defer atomic.AddInt64(&u.UploadsInFlight, -1)
-
-		atomic.AddUint64(&u.BlocksUploaded, 1)
-
-		// Rewind the open file descriptor to push natively without OOM allocations globally
-		file.Seek(0, io.SeekStart)
-
-		_, err = content.Write(file, store, opts)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		atomic.AddUint64(&u.FilesShared, 1)
-	}
-
+	atomic.AddUint64(&u.BlocksUploaded, 1)
 	atomic.AddUint64(&u.FilesChecked, 1)
 
 	modeStr := fmt.Sprintf("%04o", fileInfo.Mode().Perm())
