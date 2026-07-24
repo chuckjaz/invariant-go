@@ -73,41 +73,13 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 
 	var fileCount uint64
 	var totalBytes uint64
-	buf := make([]byte, 64*1024)
-
-	err = filepath.WalkDir(absDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		name := d.Name()
-		if name == ".invariant-mount.json" || name == ".invariant-workspace" {
-			return nil
-		}
-
-		if !d.IsDir() && d.Type().IsRegular() {
-			f, err := os.Open(path)
-			if err != nil {
-				return nil
-			}
-			n, err := io.CopyBuffer(io.Discard, f, buf)
-			f.Close()
-			if err == nil {
-				atomic.AddUint64(&fileCount, 1)
-				atomic.AddUint64(&totalBytes, uint64(n))
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning during mount directory traversal: %v\n", err)
-	}
 
 	discURL := mountCfg.DiscoveryURL
 	if discURL == "" && globalCfg != nil {
 		discURL = globalCfg.Discovery
 	}
 
+	ranDirectTraversal := false
 	if discURL != "" && (mountCfg.RootAddr != "" || mountCfg.Slot != "") {
 		dClient := discovery.NewClient(discURL, nil)
 
@@ -145,15 +117,47 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 
 			if rootAddr != "" {
 				rootLink := content.ContentLink{Address: rootAddr, Slot: isSlot}
-				cacheContentTree(context.Background(), rootLink, l2Store, cachingStore, slotsClient)
+				cacheContentTree(context.Background(), rootLink, l2Store, cachingStore, slotsClient, &fileCount, &totalBytes)
+				ranDirectTraversal = true
 			}
+		}
+	}
+
+	if !ranDirectTraversal {
+		buf := make([]byte, 64*1024)
+		err = filepath.WalkDir(absDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := d.Name()
+			if name == ".invariant-mount.json" || name == ".invariant-workspace" {
+				return nil
+			}
+
+			if !d.IsDir() && d.Type().IsRegular() {
+				f, err := os.Open(path)
+				if err != nil {
+					return nil
+				}
+				n, err := io.CopyBuffer(io.Discard, f, buf)
+				f.Close()
+				if err == nil {
+					atomic.AddUint64(&fileCount, 1)
+					atomic.AddUint64(&totalBytes, uint64(n))
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning during mount directory traversal: %v\n", err)
 		}
 	}
 
 	fmt.Printf("Successfully cached all blocks for mount %s in %s (%d files, %d bytes)\n", absDir, cacheDir, fileCount, totalBytes)
 }
 
-func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots) {
+func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64) {
 	rc, err := content.Read(link, store, slotsClient)
 	if err != nil {
 		return
@@ -173,17 +177,17 @@ func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store sto
 		switch entry.GetKind() {
 		case filetree.DirectoryKind:
 			if de, ok := entry.(*filetree.DirectoryEntry); ok {
-				cacheContentTree(ctx, de.Content, l2Store, store, slotsClient)
+				cacheContentTree(ctx, de.Content, l2Store, store, slotsClient, fileCount, totalBytes)
 			}
 		case filetree.FileKind:
 			if fe, ok := entry.(*filetree.FileEntry); ok {
-				ensureContentCached(ctx, fe.Content, l2Store, store, slotsClient)
+				ensureContentCached(ctx, fe.Content, l2Store, store, slotsClient, fileCount, totalBytes)
 			}
 		}
 	}
 }
 
-func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots) {
+func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64) {
 	address := link.Address
 	if link.Slot && slotsClient != nil {
 		if resolved, err := slotsClient.Get(ctx, link.Address); err == nil {
@@ -203,13 +207,25 @@ func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store 
 		}
 	}
 
+	if fileCount != nil {
+		atomic.AddUint64(fileCount, 1)
+	}
+
 	if l2Store != nil && l2Store.Has(ctx, address) && !hasBlocksTransform {
+		if totalBytes != nil {
+			if size, ok := l2Store.Size(ctx, address); ok {
+				atomic.AddUint64(totalBytes, uint64(size))
+			}
+		}
 		return
 	}
 
 	frc, err := content.Read(link, store, slotsClient)
 	if err == nil {
-		io.Copy(io.Discard, frc)
+		n, _ := io.Copy(io.Discard, frc)
 		frc.Close()
+		if totalBytes != nil {
+			atomic.AddUint64(totalBytes, uint64(n))
+		}
 	}
 }

@@ -15,7 +15,7 @@
 
 - [x] **Task 6: Short-circuit Cached Blocks in `cacheContentTree`**
   - Check if target block address is already present in `l2Store` (`cacheDir`) using `l2Store.Has(ctx, addr)` to avoid unnecessary block reading, decompressing, and deciphering for cached files.
-- [ ] **Task 7: Direct Storage Tree Traversal Bypassing FUSE `filepath.WalkDir`**
+- [x] **Task 7: Direct Storage Tree Traversal Bypassing FUSE `filepath.WalkDir`**
   - Directly traverse storage tree from `.invariant-mount.json` root metadata to bypass FUSE syscall overhead.
 - [ ] **Task 8: Parallelize `cacheContentTree` with Bounded Worker Pool**
   - Process directory entries and block links concurrently using a bounded worker pool.
