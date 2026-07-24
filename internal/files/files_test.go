@@ -729,3 +729,70 @@ func TestFilesService_AllEndpoints(t *testing.T) {
 		t.Errorf("Expected 400 Bad Request for rename invalid directory, got %d", rr.Code)
 	}
 }
+
+func TestFilesService_MountConfigPseudoFile(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	mc := &MountConfig{
+		InvariantMount:  true,
+		CacheDir:        "/tmp/test-cache",
+		IsWorkspace:     true,
+		DiscoveryURL:    "http://127.0.0.1:8080",
+		CacheSizeMB:     128,
+		DiskCacheSizeMB: 1024,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:     store,
+		MountConfig: mc,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create files service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+	info, err := filesService.Lookup(ctx, 1, ".invariant-mount.json")
+	if err != nil {
+		t.Fatalf("Lookup(.invariant-mount.json) failed: %v", err)
+	}
+
+	if info.Kind != string(filetree.FileKind) {
+		t.Errorf("Expected FileKind for pseudo file, got %s", info.Kind)
+	}
+
+	r, err := filesService.ReadFile(ctx, info.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadFile(.invariant-mount.json) failed: %v", err)
+	}
+	defer r.Close()
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("Failed to read pseudo file content: %v", err)
+	}
+
+	var readMC MountConfig
+	if err := json.Unmarshal(data, &readMC); err != nil {
+		t.Fatalf("Failed to unmarshal .invariant-mount.json content: %v", err)
+	}
+
+	if !readMC.InvariantMount || !readMC.IsWorkspace || readMC.CacheDir != "/tmp/test-cache" {
+		t.Errorf("Mismatch in MountConfig fields: %+v", readMC)
+	}
+
+	entries, err := filesService.ReadDirectory(ctx, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadDirectory failed: %v", err)
+	}
+
+	found := false
+	for _, entry := range entries {
+		if entry.GetName() == ".invariant-mount.json" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected .invariant-mount.json in ReadDirectory entries")
+	}
+}

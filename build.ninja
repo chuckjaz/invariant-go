@@ -45,7 +45,7 @@ build bin/finder: go_build cmd/finder/main.go || bin/finder.dd
 build bin/invariant.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/invariant
 
-build bin/invariant: go_build cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/invariant.dd
+build bin/invariant: go_build cmd/invariant/cache.go cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/invariant.dd
   pkg = ./cmd/invariant
   dyndep = bin/invariant.dd
 

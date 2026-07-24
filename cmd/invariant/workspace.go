@@ -342,7 +342,24 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		ReadOnly: true,
 	}}, layers...)
 
+	wsData, _ := json.Marshal(wsInfo)
+
 	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
+
+	mountConfig := &files.MountConfig{
+		InvariantMount:  true,
+		CacheDir:        commonFlags.CacheDir,
+		IsWorkspace:     true,
+		DiscoveryURL:    commonFlags.DiscoveryURL,
+		RootAddr:        wsInfo.Content.Address,
+		CacheSizeMB:     commonFlags.CacheSizeMB,
+		DiskCacheSizeMB: commonFlags.DiskCacheSizeMB,
+		OverflowDir:     commonFlags.OverflowDir,
+		Compress:        commonFlags.Compress,
+		Encrypt:         commonFlags.Encrypt,
+		KeyPolicyStr:    commonFlags.KeyPolicyStr,
+		WorkspaceInfo:   wsData,
+	}
 
 	// We copy the SetupFileSystem logic but insert layers
 	filesOpts := files.Options{
@@ -354,6 +371,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		Layers:           layers,
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
+		MountConfig:      mountConfig,
 	}
 
 	filesrv, err := files.NewInMemoryFiles(filesOpts)

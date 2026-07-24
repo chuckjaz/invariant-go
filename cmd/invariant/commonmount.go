@@ -201,6 +201,21 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		&content.RepMaxSplitter{},
 	}
 
+	mountConfig := &files.MountConfig{
+		InvariantMount:  true,
+		CacheDir:        f.CacheDir,
+		IsWorkspace:     false,
+		DiscoveryURL:    f.DiscoveryURL,
+		RootAddr:        f.RootAddr,
+		Slot:            f.Slot,
+		CacheSizeMB:     f.CacheSizeMB,
+		DiskCacheSizeMB: f.DiskCacheSizeMB,
+		OverflowDir:     f.OverflowDir,
+		Compress:        f.Compress,
+		Encrypt:         f.Encrypt,
+		KeyPolicyStr:    f.KeyPolicyStr,
+	}
+
 	opts := files.Options{
 		Storage:          finalStorage,
 		LocalStorage:     localStore,
@@ -210,6 +225,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		AutoSyncTimeout:  time.Minute,
 		SlotPollInterval: 5 * time.Minute,
 		WriterOptions:    writerOpts,
+		MountConfig:      mountConfig,
 	}
 
 	rc, err := content.Read(opts.RootLink, finalStorage, slotsClient)

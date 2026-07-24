@@ -133,6 +133,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 	}
 
 	s.nodes[1] = rootNode
+	s.ensurePseudoMountNodeLocked(rootNode)
 
 	go s.autoSyncLoop()
 	if opts.Slots != nil {
@@ -305,8 +306,47 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 		}
 	}
 
+	if id == 1 {
+		s.ensurePseudoMountNodeLocked(node)
+	}
+
 	node.IsLoaded = true
 	return nil
+}
+
+func (s *InMemoryFiles) ensurePseudoMountNodeLocked(rootNode *Node) {
+	if s.opts.MountConfig == nil || rootNode == nil {
+		return
+	}
+	if rootNode.Children == nil {
+		rootNode.Children = make(map[string]uint64)
+	}
+	if _, exists := rootNode.Children[".invariant-mount.json"]; exists {
+		return
+	}
+	data, err := json.MarshalIndent(s.opts.MountConfig, "", "  ")
+	if err != nil {
+		return
+	}
+	now := uint64(time.Now().Unix())
+	pseudoID := s.next
+	s.next++
+	modeStr := "0444"
+	s.nodes[pseudoID] = &Node{
+		ID:              pseudoID,
+		Name:            ".invariant-mount.json",
+		Kind:            filetree.FileKind,
+		Parents:         map[uint64]bool{1: true},
+		CreateTime:      &now,
+		ModifyTime:      &now,
+		Mode:            &modeStr,
+		Size:            uint64(len(data)),
+		Type:            "regular",
+		Target:          string(data),
+		LayerMembership: map[int]bool{0: true},
+		IsLoaded:        true,
+	}
+	rootNode.Children[".invariant-mount.json"] = pseudoID
 }
 
 func (s *InMemoryFiles) getFullPath(id uint64) string {
@@ -490,7 +530,10 @@ func (s *InMemoryFiles) ReadFile(ctx context.Context, nodeID uint64, offset, len
 	}
 
 	var link content.ContentLink
-	if node.Kind == filetree.SymbolicLinkKind {
+	if node.Name == ".invariant-mount.json" || (node.Kind == filetree.FileKind && node.Target != "" && node.Content.Address == "") {
+		s.mu.RUnlock()
+		return io.NopCloser(bytes.NewReader([]byte(node.Target))), nil
+	} else if node.Kind == filetree.SymbolicLinkKind {
 		s.mu.RUnlock()
 		return io.NopCloser(bytes.NewReader([]byte(node.Target))), nil
 	} else {
@@ -1188,6 +1231,9 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 		for layerIdx := range node.LayerMembership {
 			var entries filetree.Directory
 			for name, childID := range node.Children {
+				if name == ".invariant-mount.json" {
+					continue
+				}
 				child := s.nodes[childID]
 				if !child.LayerMembership[layerIdx] {
 					continue

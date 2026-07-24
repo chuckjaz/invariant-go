@@ -117,6 +117,23 @@ func (l Layer) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw)
 }
 
+// MountConfig represents the configuration and metadata for an invariant mount.
+type MountConfig struct {
+	InvariantMount  bool            `json:"invariant_mount"`
+	CacheDir        string          `json:"cache_dir"`
+	IsWorkspace     bool            `json:"is_workspace"`
+	DiscoveryURL    string          `json:"discovery,omitempty"`
+	RootAddr        string          `json:"root,omitempty"`
+	Slot            string          `json:"slot,omitempty"`
+	CacheSizeMB     int             `json:"cache_size_mb,omitempty"`
+	DiskCacheSizeMB int             `json:"disk_cache_size_mb,omitempty"`
+	OverflowDir     string          `json:"overflow_dir,omitempty"`
+	Compress        bool            `json:"compress,omitempty"`
+	Encrypt         bool            `json:"encrypt,omitempty"`
+	KeyPolicyStr    string          `json:"key_policy,omitempty"`
+	WorkspaceInfo   json.RawMessage `json:"workspace_info,omitempty"`
+}
+
 // Options configuring the internal Files service.
 type Options struct {
 	Slots            slots.Slots
@@ -128,6 +145,7 @@ type Options struct {
 	AutoSyncTimeout  time.Duration
 	SlotPollInterval time.Duration
 	WriterOptions    content.WriterOptions
+	MountConfig      *MountConfig
 }
 
 // ContentInformationCommon represents the info returned by GET /info/:node
