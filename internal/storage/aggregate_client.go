@@ -489,42 +489,92 @@ var _ SyncStorage = (*AggregateClient)(nil)
 var _ BatchStorage = (*AggregateClient)(nil)
 
 func (c *AggregateClient) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
-	missing := append([]string(nil), addresses...)
+	if len(addresses) == 0 {
+		return nil, nil
+	}
 
 	_ = c.ensureLiveServers()
 
 	c.liveMu.RLock()
-	liveIDsCopy := append([]string(nil), c.liveIDs...)
+	var servers []liveServerEntry
+	for _, id := range c.liveIDs {
+		if entry, ok := c.liveServers[id]; ok {
+			servers = append(servers, entry)
+		}
+	}
 	c.liveMu.RUnlock()
 
-	for _, id := range liveIDsCopy {
-		if len(missing) == 0 {
-			break
-		}
+	if len(servers) == 0 {
+		return append([]string(nil), addresses...), nil
+	}
 
-		c.liveMu.RLock()
-		entry, ok := c.liveServers[id]
-		c.liveMu.RUnlock()
-
-		if !ok {
-			continue
-		}
-
+	queryServer := func(entry liveServerEntry) (map[string]bool, error) {
+		found := make(map[string]bool)
 		if entry.supportsBatch {
 			if batchStore, ok := entry.client.(BatchStorage); ok {
-				newMissing, err := batchStore.BatchHas(ctx, missing)
-				if err == nil {
-					missing = newMissing
+				missing, err := batchStore.BatchHas(ctx, addresses)
+				if err != nil {
+					return nil, err
 				}
-			}
-		} else {
-			var newMissing []string
-			for _, addr := range missing {
-				if !entry.client.Has(ctx, addr) {
-					newMissing = append(newMissing, addr)
+				missingSet := make(map[string]bool, len(missing))
+				for _, m := range missing {
+					missingSet[m] = true
 				}
+				for _, addr := range addresses {
+					if !missingSet[addr] {
+						found[addr] = true
+					}
+				}
+				return found, nil
 			}
-			missing = newMissing
+		}
+
+		for _, addr := range addresses {
+			if entry.client.Has(ctx, addr) {
+				found[addr] = true
+			}
+		}
+		return found, nil
+	}
+
+	if len(servers) == 1 {
+		found, err := queryServer(servers[0])
+		if err != nil {
+			return append([]string(nil), addresses...), nil
+		}
+		var missing []string
+		for _, addr := range addresses {
+			if !found[addr] {
+				missing = append(missing, addr)
+			}
+		}
+		return missing, nil
+	}
+
+	foundMap := make(map[string]bool)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, srv := range servers {
+		wg.Add(1)
+		go func(entry liveServerEntry) {
+			defer wg.Done()
+			found, err := queryServer(entry)
+			if err == nil && len(found) > 0 {
+				mu.Lock()
+				for addr := range found {
+					foundMap[addr] = true
+				}
+				mu.Unlock()
+			}
+		}(srv)
+	}
+	wg.Wait()
+
+	var missing []string
+	for _, addr := range addresses {
+		if !foundMap[addr] {
+			missing = append(missing, addr)
 		}
 	}
 
