@@ -490,21 +490,19 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 		if ok && ce.MTime == *mtime {
 			cl := content.ContentLink{}
 			json.Unmarshal([]byte(ce.ContentLink), &cl)
-			if store.Has(ctx, cl.Address) {
-				atomic.AddUint64(&u.FilesSkipped, 1)
-				modeStr := ce.Mode
-				return &filetree.FileEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.FileKind,
-						Name:       name,
-						Mode:       &modeStr,
-						CreateTime: ctime,
-						ModifyTime: mtime,
-					},
-					Content: cl,
-					Size:    ce.Size,
-				}, nil
-			}
+			atomic.AddUint64(&u.FilesSkipped, 1)
+			modeStr := ce.Mode
+			return &filetree.FileEntry{
+				BaseEntry: filetree.BaseEntry{
+					Kind:       filetree.FileKind,
+					Name:       name,
+					Mode:       &modeStr,
+					CreateTime: ctime,
+					ModifyTime: mtime,
+				},
+				Content: cl,
+				Size:    ce.Size,
+			}, nil
 		}
 	}
 
