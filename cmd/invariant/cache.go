@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"invariant/internal/config"
@@ -116,8 +118,10 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 			}
 
 			if rootAddr != "" {
+				maxWorkers := max(32, min(128, runtime.NumCPU()*4))
+				sem := make(chan struct{}, maxWorkers)
 				rootLink := content.ContentLink{Address: rootAddr, Slot: isSlot}
-				cacheContentTree(context.Background(), rootLink, l2Store, cachingStore, slotsClient, &fileCount, &totalBytes)
+				cacheContentTree(context.Background(), rootLink, l2Store, cachingStore, slotsClient, &fileCount, &totalBytes, sem)
 				ranDirectTraversal = true
 			}
 		}
@@ -157,7 +161,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("Successfully cached all blocks for mount %s in %s (%d files, %d bytes)\n", absDir, cacheDir, fileCount, totalBytes)
 }
 
-func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64) {
+func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64, sem chan struct{}) {
 	rc, err := content.Read(link, store, slotsClient)
 	if err != nil {
 		return
@@ -173,21 +177,40 @@ func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store sto
 		return
 	}
 
+	var wg sync.WaitGroup
 	for _, entry := range dir {
+		entry := entry
 		switch entry.GetKind() {
 		case filetree.DirectoryKind:
 			if de, ok := entry.(*filetree.DirectoryEntry); ok {
-				cacheContentTree(ctx, de.Content, l2Store, store, slotsClient, fileCount, totalBytes)
+				wg.Add(1)
+				sem <- struct{}{}
+				go func(de *filetree.DirectoryEntry) {
+					defer func() {
+						<-sem
+						wg.Done()
+					}()
+					cacheContentTree(ctx, de.Content, l2Store, store, slotsClient, fileCount, totalBytes, sem)
+				}(de)
 			}
 		case filetree.FileKind:
 			if fe, ok := entry.(*filetree.FileEntry); ok {
-				ensureContentCached(ctx, fe.Content, l2Store, store, slotsClient, fileCount, totalBytes)
+				wg.Add(1)
+				sem <- struct{}{}
+				go func(fe *filetree.FileEntry) {
+					defer func() {
+						<-sem
+						wg.Done()
+					}()
+					ensureContentCached(ctx, fe.Content, l2Store, store, slotsClient, fileCount, totalBytes, sem)
+				}(fe)
 			}
 		}
 	}
+	wg.Wait()
 }
 
-func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64) {
+func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots, fileCount, totalBytes *uint64, sem chan struct{}) {
 	address := link.Address
 	if link.Slot && slotsClient != nil {
 		if resolved, err := slotsClient.Get(ctx, link.Address); err == nil {
