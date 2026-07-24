@@ -23,13 +23,27 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	commonFlags.Register(fsFlags)
 
 	fsFlags.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant mount [options] [root]\n\n")
 		fsFlags.PrintDefaults()
 	}
 	fsFlags.Parse(args)
 
+	if fsFlags.NArg() > 0 {
+		rootParam := fsFlags.Arg(0)
+		if commonFlags.RootAddr == "" && commonFlags.Slot == "" {
+			commonFlags.RootAddr = rootParam
+		}
+		if mountpoint == "" {
+			mountpoint = rootParam
+		}
+	}
+
 	if mountpoint == "" {
-		log.Fatalf("Mountpoint is required (--mount)")
+		log.Fatalf("Mountpoint is required (specify [root] or --mount)")
+	}
+
+	if err := os.MkdirAll(mountpoint, 0755); err != nil {
+		log.Fatalf("Failed to create mountpoint directory %s: %v", mountpoint, err)
 	}
 
 	filesrv := SetupFileSystem(globalCfg, &commonFlags)
