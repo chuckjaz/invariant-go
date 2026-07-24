@@ -19,5 +19,5 @@
   - Directly traverse storage tree from `.invariant-mount.json` root metadata to bypass FUSE syscall overhead.
 - [x] **Task 8: Parallelize `cacheContentTree` with Bounded Worker Pool**
   - Process directory entries and block links concurrently using a bounded worker pool.
-- [ ] **Task 9: Avoid Startup `cacheDir` Disk Scanning in `runCache`**
+- [x] **Task 9: Avoid Startup `cacheDir` Disk Scanning in `runCache`**
   - Bypass full `cacheDir` disk scanning during `NewCachingStorage` initialization when running cache population.

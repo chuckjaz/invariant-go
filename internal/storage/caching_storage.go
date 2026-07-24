@@ -62,6 +62,29 @@ func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, de
 	return cs
 }
 
+// NewCachingStorageNoScan creates a CachingStorage without performing an initial scan of the local storage directory.
+func NewCachingStorageNoScan(local ControlledStorage, destination Storage, maxSize, desiredSize int64, delegateOnMax bool) *CachingStorage {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cs := &CachingStorage{
+		local:         local,
+		destination:   destination,
+		maxSize:       maxSize,
+		desiredSize:   desiredSize,
+		delegateOnMax: delegateOnMax,
+		lruList:       list.New(),
+		lruMap:        make(map[string]*list.Element),
+		ctx:           ctx,
+		cancel:        cancel,
+		evict:         make(chan struct{}, 1),
+		destHas:       make(map[string]struct{}),
+	}
+
+	go cs.evictionLoop()
+
+	return cs
+}
+
 func (s *CachingStorage) SetOverflow(overflow ControlledStorage) {
 	s.mu.Lock()
 	s.overflow = overflow

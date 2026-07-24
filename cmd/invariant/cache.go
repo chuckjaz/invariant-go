@@ -106,7 +106,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 			}
 
 			l2Store := storage.NewFileSystemStorage(cacheDir)
-			cachingStore := storage.NewCachingStorage(l2Store, storageClient, 10*1024*1024*1024, 8*1024*1024*1024, true)
+			cachingStore := storage.NewCachingStorageNoScan(l2Store, storageClient, 10*1024*1024*1024, 8*1024*1024*1024, true)
 
 			rootAddr := mountCfg.RootAddr
 			isSlot := mountCfg.Slot != ""
