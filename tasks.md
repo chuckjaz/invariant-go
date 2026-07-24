@@ -2,7 +2,7 @@
 
 - [x] **Task 1: Short-circuit MTime Cache Hits**
   - Skip remote `store.Has()` network checks in `cmd/invariant/upload.go` when a file's modification time (`mtime`) matches the local upload cache entry (`u.cache`).
-- [ ] **Task 2: Optimize Batching Timer Delays**
+- [x] **Task 2: Optimize Batching Timer Delays**
   - Reduce or eliminate artificial batching timer delays in `cmd/invariant/batching_storage.go` when queued items are below the 100-item threshold.
 - [ ] **Task 3: Single-Pass Upload Processing**
   - Refactor file upload processing in `cmd/invariant/upload.go` to eliminate double-pass file reading, splitting, and hashing.

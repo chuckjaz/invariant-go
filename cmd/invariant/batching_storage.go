@@ -45,7 +45,7 @@ func NewBatchingTrackingStorage(store storage.Storage, bytesUploaded *uint64) *B
 	// Start a background flusher for StoreAt just in case it doesn't reach the size limit
 	go func() {
 		for {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 			b.FlushStore(context.Background())
 		}
 	}()
@@ -84,7 +84,7 @@ func (b *BatchingTrackingStorage) Has(ctx context.Context, address string) bool 
 	shouldFlush := len(b.hasWaiters) >= 100
 
 	if b.hasTimer == nil {
-		b.hasTimer = time.AfterFunc(50*time.Millisecond, func() {
+		b.hasTimer = time.AfterFunc(1*time.Millisecond, func() {
 			b.FlushHas(context.Background())
 		})
 	}
