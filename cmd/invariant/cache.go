@@ -145,7 +145,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 
 			if rootAddr != "" {
 				rootLink := content.ContentLink{Address: rootAddr, Slot: isSlot}
-				cacheContentTree(context.Background(), rootLink, cachingStore, slotsClient)
+				cacheContentTree(context.Background(), rootLink, l2Store, cachingStore, slotsClient)
 			}
 		}
 	}
@@ -153,7 +153,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("Successfully cached all blocks for mount %s in %s (%d files, %d bytes)\n", absDir, cacheDir, fileCount, totalBytes)
 }
 
-func cacheContentTree(ctx context.Context, link content.ContentLink, store storage.Storage, slotsClient slots.Slots) {
+func cacheContentTree(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots) {
 	rc, err := content.Read(link, store, slotsClient)
 	if err != nil {
 		return
@@ -173,16 +173,43 @@ func cacheContentTree(ctx context.Context, link content.ContentLink, store stora
 		switch entry.GetKind() {
 		case filetree.DirectoryKind:
 			if de, ok := entry.(*filetree.DirectoryEntry); ok {
-				cacheContentTree(ctx, de.Content, store, slotsClient)
+				cacheContentTree(ctx, de.Content, l2Store, store, slotsClient)
 			}
 		case filetree.FileKind:
 			if fe, ok := entry.(*filetree.FileEntry); ok {
-				frc, err := content.Read(fe.Content, store, slotsClient)
-				if err == nil {
-					io.Copy(io.Discard, frc)
-					frc.Close()
-				}
+				ensureContentCached(ctx, fe.Content, l2Store, store, slotsClient)
 			}
 		}
+	}
+}
+
+func ensureContentCached(ctx context.Context, link content.ContentLink, l2Store storage.Storage, store storage.Storage, slotsClient slots.Slots) {
+	address := link.Address
+	if link.Slot && slotsClient != nil {
+		if resolved, err := slotsClient.Get(ctx, link.Address); err == nil {
+			address = resolved
+		}
+	}
+
+	if address == "" {
+		return
+	}
+
+	hasBlocksTransform := false
+	for _, t := range link.Transforms {
+		if t.Kind == "Blocks" {
+			hasBlocksTransform = true
+			break
+		}
+	}
+
+	if l2Store != nil && l2Store.Has(ctx, address) && !hasBlocksTransform {
+		return
+	}
+
+	frc, err := content.Read(link, store, slotsClient)
+	if err == nil {
+		io.Copy(io.Discard, frc)
+		frc.Close()
 	}
 }
