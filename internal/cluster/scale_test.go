@@ -1,3 +1,5 @@
+//go:build cluster
+
 package cluster
 
 import (

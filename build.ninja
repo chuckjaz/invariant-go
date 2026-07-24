@@ -84,11 +84,14 @@ build bin/test_cmd_invariant.passed: go_test || bin/test_cmd_invariant.dd
   dyndep = bin/test_cmd_invariant.dd
 
 build bin/test_internal_cluster.dd: gen_dyndep_test | utils/build_dd.go
-  pkg = ./internal/cluster
+  pkg = -tags cluster ./internal/cluster
 
 build bin/test_internal_cluster.passed: go_test || bin/test_internal_cluster.dd
-  pkg = ./internal/cluster
+  pkg = -tags cluster ./internal/cluster
   dyndep = bin/test_internal_cluster.dd
+
+build cluster_test: phony bin/test_internal_cluster.passed
+build test_cluster: phony bin/test_internal_cluster.passed
 
 build bin/test_internal_content.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/content
@@ -202,7 +205,7 @@ build bin/test_internal_workspace.passed: go_test || bin/test_internal_workspace
   dyndep = bin/test_internal_workspace.dd
 
 default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage $
-  bin/test_cmd_invariant.passed bin/test_internal_cluster.passed bin/test_internal_content.passed $
+  bin/test_cmd_invariant.passed bin/test_internal_content.passed $
   bin/test_internal_discovery.passed bin/test_internal_distribute.passed bin/test_internal_files.passed $
   bin/test_internal_filetree.passed bin/test_internal_finder.passed bin/test_internal_fuse.passed $
   bin/test_internal_kv.passed bin/test_internal_names.passed bin/test_internal_nfs.passed $

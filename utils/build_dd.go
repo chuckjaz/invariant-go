@@ -28,34 +28,27 @@ type Package struct {
 }
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-test] <go-target> <output-file>\n", os.Args[0])
+	args := os.Args[1:]
+	isTest := false
+	if len(args) > 0 && args[0] == "-test" {
+		isTest = true
+		args = args[1:]
+	}
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s [-test] [flags...] <go-target> <output-file>\n", os.Args[0])
 		os.Exit(1)
 	}
 
-	isTest := false
-	var targetPkg string
-	var outputFile string
-
-	if os.Args[1] == "-test" {
-		isTest = true
-		if len(os.Args) < 4 {
-			fmt.Fprintf(os.Stderr, "Usage: %s [-test] <go-target> <output-file>\n", os.Args[0])
-			os.Exit(1)
-		}
-		targetPkg = os.Args[2]
-		outputFile = os.Args[3]
-	} else {
-		targetPkg = os.Args[1]
-		outputFile = os.Args[2]
-	}
+	outputFile := args[len(args)-1]
+	targetArgs := args[:len(args)-1]
 
 	// 1. Run 'go list' with dependencies
 	goArgs := []string{"list", "-json"}
 	if isTest {
 		goArgs = append(goArgs, "-test")
 	}
-	goArgs = append(goArgs, "-deps", targetPkg)
+	goArgs = append(goArgs, "-deps")
+	goArgs = append(goArgs, targetArgs...)
 
 	cmd := exec.Command("go", goArgs...)
 	stdout, err := cmd.Output()
