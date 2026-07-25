@@ -92,7 +92,7 @@ func main() {
 	// If it is a main package, use bin/<base-name>. Otherwise, use target name from outputFile.
 	var targetName string
 	if isTest {
-		targetName = strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + ".passed"
+		targetName = filepath.Join("bin", strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))+".passed")
 	} else if mainPkg.Name == "main" {
 		targetName = "bin/" + filepath.Base(mainPkg.ImportPath)
 	} else {
@@ -131,6 +131,11 @@ func main() {
 	sort.Strings(deps)
 
 	// 2. Generate the Ninja dyndep file
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
+		os.Exit(1)
+	}
+
 	file, err := os.Create(outputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating dyndep file: %v\n", err)

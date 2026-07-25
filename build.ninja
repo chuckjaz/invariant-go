@@ -14,195 +14,195 @@ rule gen_dyndep_test
   command = go run utils/build_dd.go -test $pkg $out
   description = GEN_DYNDEP_TEST $out
 
-build bin/discovery.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/discovery.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/discovery
 
-build bin/discovery: go_build cmd/discovery/main.go || bin/discovery.dd
+build bin/discovery: go_build cmd/discovery/main.go || bin/dd/discovery.dd
   pkg = ./cmd/discovery
-  dyndep = bin/discovery.dd
+  dyndep = bin/dd/discovery.dd
 
-build bin/distribute.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/distribute.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/distribute
 
-build bin/distribute: go_build cmd/distribute/main.go || bin/distribute.dd
+build bin/distribute: go_build cmd/distribute/main.go || bin/dd/distribute.dd
   pkg = ./cmd/distribute
-  dyndep = bin/distribute.dd
+  dyndep = bin/dd/distribute.dd
 
-build bin/files.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/files.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/files
 
-build bin/files: go_build cmd/files/main.go || bin/files.dd
+build bin/files: go_build cmd/files/main.go || bin/dd/files.dd
   pkg = ./cmd/files
-  dyndep = bin/files.dd
+  dyndep = bin/dd/files.dd
 
-build bin/finder.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/finder.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/finder
 
-build bin/finder: go_build cmd/finder/main.go || bin/finder.dd
+build bin/finder: go_build cmd/finder/main.go || bin/dd/finder.dd
   pkg = ./cmd/finder
-  dyndep = bin/finder.dd
+  dyndep = bin/dd/finder.dd
 
-build bin/invariant.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/invariant.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/invariant
 
-build bin/invariant: go_build cmd/invariant/cache.go cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/invariant.dd
+build bin/invariant: go_build cmd/invariant/cache.go cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/dd/invariant.dd
   pkg = ./cmd/invariant
-  dyndep = bin/invariant.dd
+  dyndep = bin/dd/invariant.dd
 
-build bin/kv.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/kv.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/kv
 
-build bin/kv: go_build cmd/kv/main.go || bin/kv.dd
+build bin/kv: go_build cmd/kv/main.go || bin/dd/kv.dd
   pkg = ./cmd/kv
-  dyndep = bin/kv.dd
+  dyndep = bin/dd/kv.dd
 
-build bin/names.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/names.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/names
 
-build bin/names: go_build cmd/names/main.go || bin/names.dd
+build bin/names: go_build cmd/names/main.go || bin/dd/names.dd
   pkg = ./cmd/names
-  dyndep = bin/names.dd
+  dyndep = bin/dd/names.dd
 
-build bin/slots.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/slots.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/slots
 
-build bin/slots: go_build cmd/slots/main.go || bin/slots.dd
+build bin/slots: go_build cmd/slots/main.go || bin/dd/slots.dd
   pkg = ./cmd/slots
-  dyndep = bin/slots.dd
+  dyndep = bin/dd/slots.dd
 
-build bin/storage.dd: gen_dyndep | utils/build_dd.go
+build bin/dd/storage.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/storage
 
-build bin/storage: go_build cmd/storage/main.go || bin/storage.dd
+build bin/storage: go_build cmd/storage/main.go || bin/dd/storage.dd
   pkg = ./cmd/storage
-  dyndep = bin/storage.dd
-build bin/test_cmd_invariant.dd: gen_dyndep_test | utils/build_dd.go
+  dyndep = bin/dd/storage.dd
+build bin/dd/test_cmd_invariant.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./cmd/invariant
 
-build bin/test_cmd_invariant.passed: go_test || bin/test_cmd_invariant.dd
+build bin/test_cmd_invariant.passed: go_test || bin/dd/test_cmd_invariant.dd
   pkg = ./cmd/invariant
-  dyndep = bin/test_cmd_invariant.dd
+  dyndep = bin/dd/test_cmd_invariant.dd
 
-build bin/test_internal_cluster.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_cluster.dd: gen_dyndep_test | utils/build_dd.go
   pkg = -tags cluster ./internal/cluster
 
-build bin/test_internal_cluster.passed: go_test || bin/test_internal_cluster.dd
+build bin/test_internal_cluster.passed: go_test || bin/dd/test_internal_cluster.dd
   pkg = -tags cluster ./internal/cluster
-  dyndep = bin/test_internal_cluster.dd
+  dyndep = bin/dd/test_internal_cluster.dd
 
 build cluster_test: phony bin/test_internal_cluster.passed
 build test_cluster: phony bin/test_internal_cluster.passed
 
-build bin/test_internal_content.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_content.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/content
 
-build bin/test_internal_content.passed: go_test || bin/test_internal_content.dd
+build bin/test_internal_content.passed: go_test || bin/dd/test_internal_content.dd
   pkg = ./internal/content
-  dyndep = bin/test_internal_content.dd
+  dyndep = bin/dd/test_internal_content.dd
 
-build bin/test_internal_discovery.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_discovery.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/discovery
 
-build bin/test_internal_discovery.passed: go_test || bin/test_internal_discovery.dd
+build bin/test_internal_discovery.passed: go_test || bin/dd/test_internal_discovery.dd
   pkg = ./internal/discovery
-  dyndep = bin/test_internal_discovery.dd
+  dyndep = bin/dd/test_internal_discovery.dd
 
-build bin/test_internal_distribute.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_distribute.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/distribute
 
-build bin/test_internal_distribute.passed: go_test || bin/test_internal_distribute.dd
+build bin/test_internal_distribute.passed: go_test || bin/dd/test_internal_distribute.dd
   pkg = ./internal/distribute
-  dyndep = bin/test_internal_distribute.dd
+  dyndep = bin/dd/test_internal_distribute.dd
 
-build bin/test_internal_files.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_files.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/files
 
-build bin/test_internal_files.passed: go_test || bin/test_internal_files.dd
+build bin/test_internal_files.passed: go_test || bin/dd/test_internal_files.dd
   pkg = ./internal/files
-  dyndep = bin/test_internal_files.dd
+  dyndep = bin/dd/test_internal_files.dd
 
-build bin/test_internal_filetree.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_filetree.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/filetree
 
-build bin/test_internal_filetree.passed: go_test || bin/test_internal_filetree.dd
+build bin/test_internal_filetree.passed: go_test || bin/dd/test_internal_filetree.dd
   pkg = ./internal/filetree
-  dyndep = bin/test_internal_filetree.dd
+  dyndep = bin/dd/test_internal_filetree.dd
 
-build bin/test_internal_finder.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_finder.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/finder
 
-build bin/test_internal_finder.passed: go_test || bin/test_internal_finder.dd
+build bin/test_internal_finder.passed: go_test || bin/dd/test_internal_finder.dd
   pkg = ./internal/finder
-  dyndep = bin/test_internal_finder.dd
+  dyndep = bin/dd/test_internal_finder.dd
 
-build bin/test_internal_fuse.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_fuse.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/fuse
 
-build bin/test_internal_fuse.passed: go_test || bin/test_internal_fuse.dd
+build bin/test_internal_fuse.passed: go_test || bin/dd/test_internal_fuse.dd
   pkg = ./internal/fuse
-  dyndep = bin/test_internal_fuse.dd
+  dyndep = bin/dd/test_internal_fuse.dd
 
-build bin/test_internal_kv.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_kv.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/kv
 
-build bin/test_internal_kv.passed: go_test || bin/test_internal_kv.dd
+build bin/test_internal_kv.passed: go_test || bin/dd/test_internal_kv.dd
   pkg = ./internal/kv
-  dyndep = bin/test_internal_kv.dd
+  dyndep = bin/dd/test_internal_kv.dd
 
-build bin/test_internal_names.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_names.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/names
 
-build bin/test_internal_names.passed: go_test || bin/test_internal_names.dd
+build bin/test_internal_names.passed: go_test || bin/dd/test_internal_names.dd
   pkg = ./internal/names
-  dyndep = bin/test_internal_names.dd
+  dyndep = bin/dd/test_internal_names.dd
 
-build bin/test_internal_nfs.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_nfs.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/nfs
 
-build bin/test_internal_nfs.passed: go_test || bin/test_internal_nfs.dd
+build bin/test_internal_nfs.passed: go_test || bin/dd/test_internal_nfs.dd
   pkg = ./internal/nfs
-  dyndep = bin/test_internal_nfs.dd
+  dyndep = bin/dd/test_internal_nfs.dd
 
-build bin/test_internal_slots.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_slots.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/slots
 
-build bin/test_internal_slots.passed: go_test || bin/test_internal_slots.dd
+build bin/test_internal_slots.passed: go_test || bin/dd/test_internal_slots.dd
   pkg = ./internal/slots
-  dyndep = bin/test_internal_slots.dd
+  dyndep = bin/dd/test_internal_slots.dd
 
-build bin/test_internal_start.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_start.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/start
 
-build bin/test_internal_start.passed: go_test || bin/test_internal_start.dd
+build bin/test_internal_start.passed: go_test || bin/dd/test_internal_start.dd
   pkg = ./internal/start
-  dyndep = bin/test_internal_start.dd
+  dyndep = bin/dd/test_internal_start.dd
 
-build bin/test_internal_storage.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_storage.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/storage
 
-build bin/test_internal_storage.passed: go_test || bin/test_internal_storage.dd
+build bin/test_internal_storage.passed: go_test || bin/dd/test_internal_storage.dd
   pkg = ./internal/storage
-  dyndep = bin/test_internal_storage.dd
-build bin/test_internal_storage_git.dd: gen_dyndep_test | utils/build_dd.go
+  dyndep = bin/dd/test_internal_storage.dd
+build bin/dd/test_internal_storage_git.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/storage/git
 
-build bin/test_internal_storage_git.passed: go_test || bin/test_internal_storage_git.dd
+build bin/test_internal_storage_git.passed: go_test || bin/dd/test_internal_storage_git.dd
   pkg = ./internal/storage/git
-  dyndep = bin/test_internal_storage_git.dd
+  dyndep = bin/dd/test_internal_storage_git.dd
 
-build bin/test_internal_storage_github.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_storage_github.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/storage/github
 
-build bin/test_internal_storage_github.passed: go_test || bin/test_internal_storage_github.dd
+build bin/test_internal_storage_github.passed: go_test || bin/dd/test_internal_storage_github.dd
   pkg = ./internal/storage/github
-  dyndep = bin/test_internal_storage_github.dd
+  dyndep = bin/dd/test_internal_storage_github.dd
 
-build bin/test_internal_workspace.dd: gen_dyndep_test | utils/build_dd.go
+build bin/dd/test_internal_workspace.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./internal/workspace
 
-build bin/test_internal_workspace.passed: go_test || bin/test_internal_workspace.dd
+build bin/test_internal_workspace.passed: go_test || bin/dd/test_internal_workspace.dd
   pkg = ./internal/workspace
-  dyndep = bin/test_internal_workspace.dd
+  dyndep = bin/dd/test_internal_workspace.dd
 
 default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage $
   bin/test_cmd_invariant.passed bin/test_internal_content.passed $
