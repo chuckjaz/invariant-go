@@ -76,12 +76,26 @@ build bin/dd/storage.dd: gen_dyndep | utils/build_dd.go
 build bin/storage: go_build cmd/storage/main.go || bin/dd/storage.dd
   pkg = ./cmd/storage
   dyndep = bin/dd/storage.dd
+
+build bin/dd/inv-go-build-cache.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-go-build-cache
+
+build bin/inv-go-build-cache: go_build cmd/inv-go-build-cache/main.go || bin/dd/inv-go-build-cache.dd
+  pkg = ./cmd/inv-go-build-cache
+  dyndep = bin/dd/inv-go-build-cache.dd
 build bin/dd/test_cmd_invariant.dd: gen_dyndep_test | utils/build_dd.go
   pkg = ./cmd/invariant
 
 build bin/dd/test_cmd_invariant.passed: go_test || bin/dd/test_cmd_invariant.dd
   pkg = ./cmd/invariant
   dyndep = bin/dd/test_cmd_invariant.dd
+
+build bin/dd/test_internal_buildcache.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/buildcache
+
+build bin/dd/test_internal_buildcache.passed: go_test || bin/dd/test_internal_buildcache.dd
+  pkg = ./internal/buildcache
+  dyndep = bin/dd/test_internal_buildcache.dd
 
 build bin/dd/test_internal_cluster.dd: gen_dyndep_test | utils/build_dd.go
   pkg = -tags cluster ./internal/cluster
@@ -204,8 +218,8 @@ build bin/dd/test_internal_workspace.passed: go_test || bin/dd/test_internal_wor
   pkg = ./internal/workspace
   dyndep = bin/dd/test_internal_workspace.dd
 
-default bin/discovery bin/distribute bin/files bin/finder bin/invariant bin/kv bin/names bin/slots bin/storage $
-  bin/dd/test_cmd_invariant.passed bin/dd/test_internal_content.passed $
+default bin/discovery bin/distribute bin/files bin/finder bin/inv-go-build-cache bin/invariant bin/kv bin/names bin/slots bin/storage $
+  bin/dd/test_cmd_invariant.passed bin/dd/test_internal_buildcache.passed bin/dd/test_internal_content.passed $
   bin/dd/test_internal_discovery.passed bin/dd/test_internal_distribute.passed bin/dd/test_internal_files.passed $
   bin/dd/test_internal_filetree.passed bin/dd/test_internal_finder.passed bin/dd/test_internal_fuse.passed $
   bin/dd/test_internal_kv.passed bin/dd/test_internal_names.passed bin/dd/test_internal_nfs.passed $
