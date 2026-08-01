@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"invariant/internal/buildcache"
+	"invariant/internal/config"
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
@@ -17,96 +18,74 @@ import (
 	"invariant/internal/storage"
 )
 
-func getEnvOrDefault(keys []string, defaultVal string) string {
-	for _, key := range keys {
-		if val := os.Getenv(key); val != "" {
-			return val
-		}
-	}
-	return defaultVal
-}
-
 func main() {
 	var cacheDir string
-	flag.StringVar(&cacheDir, "cache-dir", getEnvOrDefault([]string{"INVARIANT_BUILD_CACHE_DIR", "GOBUILDCACHE_DIR"}, ".invariant/build-cache"), "Directory for storing build cache files")
+	flag.StringVar(&cacheDir, "cache-dir", ".invariant/build-cache", "Directory for storing build cache files")
 
 	var discoveryURL string
-	flag.StringVar(&discoveryURL, "discovery", getEnvOrDefault([]string{"INVARIANT_DISCOVERY", "DISCOVERY"}, ""), "URL of the discovery service")
-
-	var kvURL string
-	flag.StringVar(&kvURL, "kv", getEnvOrDefault([]string{"INVARIANT_KV", "KV_URL"}, ""), "URL of the KV service")
-
-	var storageURL string
-	flag.StringVar(&storageURL, "storage", getEnvOrDefault([]string{"INVARIANT_STORAGE", "STORAGE_URL"}, ""), "URL of the storage service")
-
-	var slotsURL string
-	flag.StringVar(&slotsURL, "slots", getEnvOrDefault([]string{"INVARIANT_SLOTS", "SLOTS_URL"}, ""), "URL of the slots service")
+	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service (overrides configuration)")
 
 	var compress bool
 	flag.BoolVar(&compress, "compress", false, "Compress written content")
 
 	var compressAlgo string
-	flag.StringVar(&compressAlgo, "compress-algo", getEnvOrDefault([]string{"INVARIANT_COMPRESS_ALGO"}, ""), "Compression algorithm (gzip, inflate, zstd)")
+	flag.StringVar(&compressAlgo, "compress-algo", "", "Compression algorithm (gzip, inflate, zstd)")
 
 	var encrypt bool
 	flag.BoolVar(&encrypt, "encrypt", false, "Encrypt written content")
 
 	var encryptAlgo string
-	flag.StringVar(&encryptAlgo, "encrypt-algo", getEnvOrDefault([]string{"INVARIANT_ENCRYPT_ALGO"}, ""), "Encryption algorithm (aes-256-cbc)")
+	flag.StringVar(&encryptAlgo, "encrypt-algo", "", "Encryption algorithm (aes-256-cbc)")
 
 	var keyPolicyStr string
-	flag.StringVar(&keyPolicyStr, "key-policy", getEnvOrDefault([]string{"INVARIANT_KEY_POLICY"}, "Deterministic"), "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
+	flag.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 
 	var keyStr string
-	flag.StringVar(&keyStr, "key", getEnvOrDefault([]string{"INVARIANT_KEY"}, ""), "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
+	flag.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	flag.Parse()
 
-	var disc discovery.Discovery
-	if discoveryURL != "" {
-		disc = discovery.NewClient(discoveryURL, nil)
+	invCfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Error loading invariant configuration: %v", err)
 	}
 
-	findService := func(kind string) string {
-		if disc == nil {
-			return ""
-		}
-		id, err := disc.Find(context.Background(), kind, 1)
-		if err != nil || len(id) == 0 {
-			return ""
-		}
-		return id[0].Address
+	discURL := discoveryURL
+	if discURL == "" && invCfg != nil {
+		discURL = invCfg.Discovery
 	}
 
 	var kvStore kv.KeyValueStore
-	if kvURL != "" {
-		kvStore = kv.NewClient(kvURL, nil)
-	} else if disc != nil {
-		if addr := findService("kv-v1"); addr != "" {
-			kvStore = kv.NewClient(addr, nil)
-		}
-	}
-
 	var storageClient storage.Storage
-	if storageURL != "" {
-		storageClient = storage.NewClient(storageURL, nil)
-	} else if disc != nil {
+	var slotsClient slots.Slots
+
+	if discURL != "" {
+		disc := discovery.NewClient(discURL, nil)
+		ctx := context.Background()
+
+		findService := func(kind string) string {
+			descs, err := disc.Find(ctx, kind, 1)
+			if err != nil || len(descs) == 0 {
+				return ""
+			}
+			return descs[0].Address
+		}
+
+		if kvAddr := findService("kv-v1"); kvAddr != "" {
+			kvStore = kv.NewClient(kvAddr, nil)
+		}
+
 		if finderAddr := findService("finder-v1"); finderAddr != "" {
 			finderClient := finder.NewClient(finderAddr, nil)
 			storageClient = storage.NewAggregateClient(finderClient, disc, 3, 1000)
 		}
-	}
 
-	var slotsClient slots.Slots
-	if slotsURL != "" {
-		slotsClient = slots.NewClient(slotsURL, nil)
-	} else if disc != nil {
 		if slotsAddr := findService("slots-v1"); slotsAddr != "" {
 			slotsClient = slots.NewClient(slotsAddr, nil)
 		}
 	}
 
-	// Standalone local fallbacks if services are not specified or discovered
+	// Standalone local fallbacks if services are not provided or discovered
 	if storageClient == nil {
 		localStorageDir := filepath.Join(cacheDir, "storage")
 		_ = os.MkdirAll(localStorageDir, 0755)
