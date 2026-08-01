@@ -316,3 +316,80 @@ func TestHandler_CompressionAndEncryption(t *testing.T) {
 		t.Errorf("expected restored content %q, got %q", bodyData, restoredContent)
 	}
 }
+
+func TestHandler_LRUEvictionAndKVBackup(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "build-cache")
+
+	memoryKV := kv.NewMemoryKeyValueStore()
+	memoryStorage := storage.NewInMemoryStorage()
+	memorySlots := slots.NewMemorySlots("test-slot")
+
+	cfg := CacheConfig{
+		CacheDir:         cacheDir,
+		KVStore:          memoryKV,
+		Storage:          memoryStorage,
+		Slots:            memorySlots,
+		InMemoryCapacity: 2,
+	}
+
+	handler, err := NewHandler(cfg)
+	if err != nil {
+		t.Fatalf("NewHandler failed: %v", err)
+	}
+
+	// Put 3 items to overflow capacity 2
+	for i := 1; i <= 3; i++ {
+		actionID := []byte(filepath.Join("act", string(rune('0'+i))))
+		outputID := []byte(filepath.Join("out", string(rune('0'+i))))
+		bodyData := []byte(filepath.Join("content", string(rune('0'+i))))
+
+		req := Request{
+			ID:       int64(i),
+			Command:  CmdPut,
+			ActionID: actionID,
+			OutputID: outputID,
+			BodySize: int64(len(bodyData)),
+		}
+
+		resp := handler.handlePut(t.Context(), req, bodyData)
+		if resp.Err != "" {
+			t.Fatalf("handlePut failed for item %d: %s", i, resp.Err)
+		}
+	}
+
+	// Wait for async puts to complete
+	handler.Wait()
+
+	// Item 1 (hex: "6163742f31") should have been evicted from in-memory cache due to LRU (capacity = 2)
+	item1Key := hex.EncodeToString([]byte("act/1"))
+	if _, ok := handler.getMemory(item1Key); ok {
+		t.Errorf("expected item 1 to be evicted from memory, but it was found")
+	}
+
+	// Items 2 and 3 should be in memory
+	item2Key := hex.EncodeToString([]byte("act/2"))
+	item3Key := hex.EncodeToString([]byte("act/3"))
+	if _, ok := handler.getMemory(item2Key); !ok {
+		t.Errorf("expected item 2 to be in memory")
+	}
+	if _, ok := handler.getMemory(item3Key); !ok {
+		t.Errorf("expected item 3 to be in memory")
+	}
+
+	// Getting item 1 should fetch from KV and bring it back into memory
+	getReq1 := Request{
+		ID:       10,
+		Command:  CmdGet,
+		ActionID: []byte("act/1"),
+	}
+	getResp1 := handler.handleGet(t.Context(), getReq1)
+	if getResp1.Miss || getResp1.Err != "" {
+		t.Fatalf("expected get for item 1 to succeed from KV, got miss=%v err=%s", getResp1.Miss, getResp1.Err)
+	}
+
+	// Item 1 should now be back in memory
+	if _, ok := handler.getMemory(item1Key); !ok {
+		t.Errorf("expected item 1 to be brought into memory after get")
+	}
+}

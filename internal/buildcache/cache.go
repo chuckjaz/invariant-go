@@ -3,6 +3,7 @@ package buildcache
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,8 @@ import (
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
+
+const DefaultInMemoryCapacity = 100000
 
 // Cmd represents a command in the GOCACHEPROG protocol.
 type Cmd string
@@ -59,17 +62,28 @@ type ActionEntry struct {
 
 // CacheConfig holds configuration options for the build cache handler.
 type CacheConfig struct {
-	CacheDir      string
-	KVStore       kv.KeyValueStore
-	Storage       storage.Storage
-	Slots         slots.Slots
-	WriterOptions content.WriterOptions
+	CacheDir         string
+	KVStore          kv.KeyValueStore
+	Storage          storage.Storage
+	Slots            slots.Slots
+	WriterOptions    content.WriterOptions
+	InMemoryCapacity int
+}
+
+type lruItem struct {
+	key   string
+	entry ActionEntry
 }
 
 // Handler processes GOCACHEPROG protocol requests.
 type Handler struct {
-	cfg CacheConfig
-	mu  sync.Mutex // Serializes response writes
+	cfg      CacheConfig
+	mu       sync.Mutex // Serializes response writes
+	lruMu    sync.Mutex
+	lruList  *list.List
+	lruMap   map[string]*list.Element
+	capacity int
+	wg       sync.WaitGroup
 }
 
 // NewHandler creates a new Handler with the given configuration.
@@ -87,13 +101,74 @@ func NewHandler(cfg CacheConfig) (*Handler, error) {
 		return nil, fmt.Errorf("failed to create cache directory %s: %w", cfg.CacheDir, err)
 	}
 
+	capacity := cfg.InMemoryCapacity
+	if capacity <= 0 {
+		capacity = DefaultInMemoryCapacity
+	}
+
 	return &Handler{
-		cfg: cfg,
+		cfg:      cfg,
+		lruList:  list.New(),
+		lruMap:   make(map[string]*list.Element),
+		capacity: capacity,
 	}, nil
+}
+
+// Wait waits for all async background KV puts to complete.
+func (h *Handler) Wait() {
+	h.wg.Wait()
+}
+
+func (h *Handler) getMemory(key string) (ActionEntry, bool) {
+	h.lruMu.Lock()
+	defer h.lruMu.Unlock()
+
+	if el, ok := h.lruMap[key]; ok {
+		h.lruList.MoveToFront(el)
+		return el.Value.(*lruItem).entry, true
+	}
+	return ActionEntry{}, false
+}
+
+func (h *Handler) putMemory(key string, entry ActionEntry) {
+	h.lruMu.Lock()
+	defer h.lruMu.Unlock()
+
+	if el, ok := h.lruMap[key]; ok {
+		el.Value.(*lruItem).entry = entry
+		h.lruList.MoveToFront(el)
+		return
+	}
+
+	item := &lruItem{
+		key:   key,
+		entry: entry,
+	}
+	el := h.lruList.PushFront(item)
+	h.lruMap[key] = el
+
+	if h.lruList.Len() > h.capacity {
+		back := h.lruList.Back()
+		if back != nil {
+			h.lruList.Remove(back)
+			delete(h.lruMap, back.Value.(*lruItem).key)
+		}
+	}
+}
+
+func (h *Handler) updateMemoryContentLink(key string, link content.ContentLink) {
+	h.lruMu.Lock()
+	defer h.lruMu.Unlock()
+
+	if el, ok := h.lruMap[key]; ok {
+		el.Value.(*lruItem).entry.ContentLink = link
+	}
 }
 
 // Start begins processing the GOCACHEPROG protocol from r and writing responses to w.
 func (h *Handler) Start(r io.Reader, w io.Writer) error {
+	defer h.wg.Wait()
+
 	// Step 1: Send initial handshake response with ID == 0 and KnownCommands
 	initResp := Response{
 		ID:            0,
@@ -154,6 +229,7 @@ func (h *Handler) Start(r io.Reader, w io.Writer) error {
 				return err
 			}
 		case CmdClose:
+			h.wg.Wait()
 			_ = h.sendResponse(w, Response{ID: req.ID})
 			return nil
 		default:
@@ -167,55 +243,98 @@ func (h *Handler) handleGet(ctx context.Context, req Request) Response {
 		return Response{ID: req.ID, Err: "missing ActionID"}
 	}
 
-	key := fmt.Sprintf("go-build-cache:%x", req.ActionID)
-	val, _, err := h.cfg.KVStore.Get(ctx, nil, key)
+	fileName := hex.EncodeToString(req.ActionID)
+	diskPath := filepath.Join(h.cfg.CacheDir, fileName)
+
+	// Step 1: Check in-memory map
+	entry, inMem := h.getMemory(fileName)
+	if inMem {
+		// Requirement 2: If a get is in the in memory map and the file is on disk already, return early.
+		if _, err := os.Stat(diskPath); err == nil {
+			return Response{
+				ID:       req.ID,
+				OutputID: entry.OutputID,
+				DiskPath: diskPath,
+				Size:     entry.Size,
+				Time:     &entry.Time,
+			}
+		}
+
+		// File is in memory, but not on disk. Download using ContentLink if available.
+		if entry.ContentLink.Address != "" || entry.ContentLink.Slot {
+			if err := h.downloadToDisk(entry.ContentLink, diskPath); err == nil {
+				return Response{
+					ID:       req.ID,
+					OutputID: entry.OutputID,
+					DiskPath: diskPath,
+					Size:     entry.Size,
+					Time:     &entry.Time,
+				}
+			}
+		}
+	}
+
+	// Step 2: Check KV store backup if not in memory (or file missing & link unavailable)
+	if h.cfg.KVStore == nil {
+		return Response{ID: req.ID, Miss: true}
+	}
+
+	kvKey := fmt.Sprintf("go-build-cache:%x", req.ActionID)
+	val, _, err := h.cfg.KVStore.Get(ctx, nil, kvKey)
 	if err != nil || len(val) == 0 {
 		return Response{ID: req.ID, Miss: true}
 	}
 
-	var entry ActionEntry
-	if err := json.Unmarshal(val, &entry); err != nil {
+	var kvEntry ActionEntry
+	if err := json.Unmarshal(val, &kvEntry); err != nil {
 		return Response{ID: req.ID, Miss: true}
 	}
 
-	fileName := hex.EncodeToString(req.ActionID)
-	diskPath := filepath.Join(h.cfg.CacheDir, fileName)
+	// Bring into memory
+	h.putMemory(fileName, kvEntry)
 
-	// If the file does not exist locally, download it from Invariant storage using its ContentLink
+	// Check local disk file
 	if _, err := os.Stat(diskPath); os.IsNotExist(err) {
-		rc, err := content.Read(entry.ContentLink, h.cfg.Storage, h.cfg.Slots)
-		if err != nil {
-			return Response{ID: req.ID, Miss: true}
-		}
-
-		tmpPath := diskPath + ".tmp"
-		f, err := os.Create(tmpPath)
-		if err != nil {
-			rc.Close()
-			return Response{ID: req.ID, Err: fmt.Sprintf("failed to create local file: %v", err)}
-		}
-
-		_, copyErr := io.Copy(f, rc)
-		rc.Close()
-		f.Close()
-		if copyErr != nil {
-			os.Remove(tmpPath)
-			return Response{ID: req.ID, Err: fmt.Sprintf("failed to write local file: %v", copyErr)}
-		}
-
-		if err := os.Rename(tmpPath, diskPath); err != nil {
-			os.Remove(tmpPath)
-			return Response{ID: req.ID, Err: fmt.Sprintf("failed to rename local file: %v", err)}
+		if err := h.downloadToDisk(kvEntry.ContentLink, diskPath); err != nil {
+			return Response{ID: req.ID, Err: fmt.Sprintf("failed to download file: %v", err)}
 		}
 	}
 
 	return Response{
 		ID:       req.ID,
-		OutputID: entry.OutputID,
+		OutputID: kvEntry.OutputID,
 		DiskPath: diskPath,
-		Size:     entry.Size,
-		Time:     &entry.Time,
+		Size:     kvEntry.Size,
+		Time:     &kvEntry.Time,
 	}
+}
+
+func (h *Handler) downloadToDisk(link content.ContentLink, diskPath string) error {
+	rc, err := content.Read(link, h.cfg.Storage, h.cfg.Slots)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	tmpPath := diskPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(f, rc)
+	f.Close()
+	if copyErr != nil {
+		os.Remove(tmpPath)
+		return copyErr
+	}
+
+	if err := os.Rename(tmpPath, diskPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }
 
 func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) Response {
@@ -235,30 +354,45 @@ func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) R
 		return Response{ID: req.ID, Err: fmt.Sprintf("failed to rename local file: %v", err)}
 	}
 
-	// Store body in Invariant content storage
-	link, err := content.Write(bytes.NewReader(bodyData), h.cfg.Storage, h.cfg.WriterOptions)
-	if err != nil {
-		return Response{ID: req.ID, Err: fmt.Sprintf("failed to write content to storage: %v", err)}
-	}
-
 	now := time.Now().UTC()
 	entry := ActionEntry{
-		OutputID:    req.OutputID,
-		ContentLink: link,
-		Size:        int64(len(bodyData)),
-		Time:        now,
+		OutputID: req.OutputID,
+		Size:     int64(len(bodyData)),
+		Time:     now,
 	}
 
-	entryBytes, err := json.Marshal(entry)
-	if err != nil {
-		return Response{ID: req.ID, Err: fmt.Sprintf("failed to marshal action entry: %v", err)}
-	}
+	// Add to in-memory map
+	h.putMemory(fileName, entry)
 
-	key := fmt.Sprintf("go-build-cache:%x", req.ActionID)
-	_, err = h.cfg.KVStore.Put(ctx, nil, key, entryBytes)
-	if err != nil {
-		return Response{ID: req.ID, Err: fmt.Sprintf("failed to store KV entry: %v", err)}
-	}
+	// Increment WaitGroup and schedule KV/storage put in parallel
+	h.wg.Add(1)
+	go func(actionID []byte, outputID []byte, body []byte, t time.Time, keyName string) {
+		defer h.wg.Done()
+
+		var link content.ContentLink
+		if h.cfg.Storage != nil {
+			l, err := content.Write(bytes.NewReader(body), h.cfg.Storage, h.cfg.WriterOptions)
+			if err == nil {
+				link = l
+				h.updateMemoryContentLink(keyName, link)
+			}
+		}
+
+		if h.cfg.KVStore != nil {
+			bgEntry := ActionEntry{
+				OutputID:    outputID,
+				ContentLink: link,
+				Size:        int64(len(body)),
+				Time:        t,
+			}
+
+			entryBytes, err := json.Marshal(bgEntry)
+			if err == nil {
+				kvKey := fmt.Sprintf("go-build-cache:%x", actionID)
+				_, _ = h.cfg.KVStore.Put(context.Background(), nil, kvKey, entryBytes)
+			}
+		}
+	}(req.ActionID, req.OutputID, bodyData, now, fileName)
 
 	return Response{
 		ID:       req.ID,
