@@ -14,7 +14,7 @@ func ResolveName(ctx context.Context, dClient Discovery, idOrName string) (strin
 		return idOrName, nil
 	}
 
-	namesServers, err := dClient.Find(ctx, "names-v1", 100)
+	namesServers, err := dClient.Find(ctx, "names-v1", "", 100)
 	if err == nil && len(namesServers) > 0 {
 		for _, ns := range namesServers {
 			nClient := names.NewClient(ns.Address, nil)

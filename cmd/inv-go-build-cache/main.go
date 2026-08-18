@@ -64,7 +64,7 @@ func main() {
 		ctx := context.Background()
 
 		findService := func(kind string) string {
-			descs, err := disc.Find(ctx, kind, 1)
+			descs, err := disc.Find(ctx, kind, "", 1)
 			if err != nil || len(descs) == 0 {
 				return ""
 			}

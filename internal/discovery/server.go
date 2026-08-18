@@ -65,6 +65,7 @@ func (s *DiscoveryServer) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 	protocol := r.URL.Query().Get("protocol")
+	tag := r.URL.Query().Get("tag")
 	countStr := r.URL.Query().Get("count")
 	count := 1
 	if countStr != "" {
@@ -74,7 +75,7 @@ func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	descs, err := s.discovery.Find(r.Context(), protocol, count)
+	descs, err := s.discovery.Find(r.Context(), protocol, tag, count)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return

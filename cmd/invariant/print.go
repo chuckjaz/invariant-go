@@ -62,7 +62,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	var dClient discovery.Discovery
 	dClient = discovery.NewClient(discoveryURL, nil)
 
-	descs, err := dClient.Find(context.Background(), "", 1000)
+	descs, err := dClient.Find(context.Background(), "", "", 1000)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not reach discovery service: %v\n", err)
 		os.Exit(1)

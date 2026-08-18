@@ -73,7 +73,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 		dClient := discovery.NewClient(discURL, nil)
 
 		findService := func(kind string) string {
-			id, err := dClient.Find(context.Background(), kind, 1)
+			id, err := dClient.Find(context.Background(), kind, "", 1)
 			if err != nil || len(id) == 0 {
 				return ""
 			}

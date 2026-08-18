@@ -51,8 +51,8 @@ func (u *UpstreamDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 // Find queries local services. If it receives fewer than `count` results,
 // it delegates the remaining needed count to the parent, appends the results,
 // and caches the parent hits locally.
-func (u *UpstreamDiscovery) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
-	localResults, err := u.local.Find(ctx, protocol, count)
+func (u *UpstreamDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]ServiceDescription, error) {
+	localResults, err := u.local.Find(ctx, protocol, tag, count)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (u *UpstreamDiscovery) Find(ctx context.Context, protocol string, count int
 	}
 
 	remaining := count - len(localResults)
-	parentResults, err := u.parent.Find(ctx, protocol, remaining)
+	parentResults, err := u.parent.Find(ctx, protocol, tag, remaining)
 	if err != nil {
 		// Logically we can return local results rather than hard failing,
 		// but standard Go patterns return the err.

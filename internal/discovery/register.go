@@ -43,7 +43,7 @@ func RegisterName(ctx context.Context, disc Discovery, name, id string, protocol
 
 	var lastErr error
 	for range 5 {
-		nameServices, err := disc.Find(ctx, "names-v1", 1)
+		nameServices, err := disc.Find(ctx, "names-v1", "", 1)
 		if err == nil && len(nameServices) > 0 {
 			nameClient := names.NewClient(nameServices[0].Address, nil)
 			err = nameClient.Put(ctx, name, id, protocols)

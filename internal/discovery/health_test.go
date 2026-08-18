@@ -44,7 +44,7 @@ func TestHealthTracker_SortingAndEviction(t *testing.T) {
 	d.Register(ctx, ServiceRegistration{ID: "node1", Address: addr1, Protocols: []string{"test-proto"}})
 	d.Register(ctx, ServiceRegistration{ID: "node2", Address: addr2, Protocols: []string{"test-proto"}})
 
-	res, _ := d.Find(ctx, "test-proto", 10)
+	res, _ := d.Find(ctx, "test-proto", "", 10)
 	if len(res) != 2 {
 		t.Fatalf("expected 2 services, got %d", len(res))
 	}
@@ -52,7 +52,7 @@ func TestHealthTracker_SortingAndEviction(t *testing.T) {
 	// Wait for health check to run and mark node2 as unhealthy
 	time.Sleep(100 * time.Millisecond)
 
-	res, _ = d.Find(ctx, "test-proto", 10)
+	res, _ = d.Find(ctx, "test-proto", "", 10)
 	if len(res) != 2 {
 		t.Fatalf("expected 2 services before eviction, got %d", len(res))
 	}
@@ -64,7 +64,7 @@ func TestHealthTracker_SortingAndEviction(t *testing.T) {
 	// Wait for eviction timeout
 	time.Sleep(500 * time.Millisecond)
 
-	res, _ = d.Find(ctx, "test-proto", 10)
+	res, _ = d.Find(ctx, "test-proto", "", 10)
 	if len(res) != 1 {
 		t.Fatalf("expected 1 service after eviction, got %d", len(res))
 	}

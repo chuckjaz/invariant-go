@@ -47,15 +47,16 @@ interface ServiceDescription {
 }
 ```
 
-## `GET /?protocol=:protocol&count=:count`
+## `GET /?protocol=:protocol&tag=:tag&count=:count`
 
-Returns a list of service descriptions for the given protocol. The response is a JSON array of service descriptions. The count parameter is optional and defaults to 1.
+Returns a list of service descriptions filtered by protocol and/or tag. If both protocol and tag are specified, services must match both. The response is a JSON array of service descriptions. The count parameter is optional and defaults to 1.
 
 ### Query Parameters
 
 | Parameter | Description |
 | --------- | ----------- |
-| protocol  | The protocol to search for. |
+| protocol  | The protocol to search for (optional). |
+| tag       | The tag to filter by (optional). |
 | count     | The number of services to return. |
 
 ### Response

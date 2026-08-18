@@ -126,7 +126,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	dClient = discovery.NewClient(discoveryURL, nil)
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(context.Background(), kind, 1)
+		id, err := dClient.Find(context.Background(), kind, "", 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not find %s service: %v\n", kind, err)
 			os.Exit(1)

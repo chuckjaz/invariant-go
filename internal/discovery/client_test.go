@@ -40,8 +40,8 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Expected tags [cache source], got %v", desc.Tags)
 	}
 
-	// 3. Find with matching protocol
-	results, err := client.Find(context.Background(), "client-protocol", 1)
+	// 3. Find with matching protocol and no tag
+	results, err := client.Find(context.Background(), "client-protocol", "", 1)
 	if err != nil {
 		t.Fatalf("Find error: %v", err)
 	}
@@ -52,8 +52,26 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Expected tags [cache source] in find result, got %v", results[0].Tags)
 	}
 
-	// 4. Find with unknown protocol
-	results, err = client.Find(context.Background(), "unknown-protocol", 1)
+	// 4. Find with matching tag and no protocol
+	results, err = client.Find(context.Background(), "", "cache", 1)
+	if err != nil {
+		t.Fatalf("Find error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+
+	// 5. Find with matching protocol and matching tag
+	results, err = client.Find(context.Background(), "client-protocol", "cache", 1)
+	if err != nil {
+		t.Fatalf("Find error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+
+	// 6. Find with matching protocol but mismatched tag
+	results, err = client.Find(context.Background(), "client-protocol", "unknown-tag", 1)
 	if err != nil {
 		t.Fatalf("Find error: %v", err)
 	}
@@ -61,7 +79,16 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Expected 0 results, got %d", len(results))
 	}
 
-	// 5. Test Non-existent Data
+	// 7. Find with unknown protocol
+	results, err = client.Find(context.Background(), "unknown-protocol", "", 1)
+	if err != nil {
+		t.Fatalf("Find error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Expected 0 results, got %d", len(results))
+	}
+
+	// 8. Test Non-existent Data
 	_, ok = client.Get(context.Background(), "missing-id")
 	if ok {
 		t.Fatal("Expected Get to return false for non-existent service")

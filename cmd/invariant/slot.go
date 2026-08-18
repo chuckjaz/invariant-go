@@ -53,7 +53,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 
 	dClient := discovery.NewClient(globalCfg.Discovery, nil)
 
-	finderID, err := dClient.Find(context.Background(), "finder-v1", 1)
+	finderID, err := dClient.Find(context.Background(), "finder-v1", "", 1)
 	if err == nil && len(finderID) > 0 {
 		fClient := finder.NewClient(finderID[0].Address, nil)
 		res, err := fClient.Find(context.Background(), blockAddress)
@@ -62,7 +62,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
-	id, err := dClient.Find(context.Background(), "slots-v1", 1)
+	id, err := dClient.Find(context.Background(), "slots-v1", "", 1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not query discovery service: %v\n", err)
 		os.Exit(1)
@@ -120,7 +120,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if *nameFlag != "" {
-		namesID, err := dClient.Find(context.Background(), "names-v1", 1)
+		namesID, err := dClient.Find(context.Background(), "names-v1", "", 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not query discovery service for names-v1: %v\n", err)
 			os.Exit(1)

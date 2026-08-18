@@ -146,7 +146,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 	}
 
 	findService := func(kind string) string {
-		id, err := dClient.Find(context.Background(), kind, 1)
+		id, err := dClient.Find(context.Background(), kind, "", 1)
 		if err != nil {
 			log.Fatalf("Could not find %s service: %v", kind, err)
 		}

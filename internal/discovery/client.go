@@ -54,15 +54,20 @@ func (c *Client) Get(ctx context.Context, id string) (ServiceDescription, bool) 
 	return desc, true
 }
 
-// Find searches for services by protocol up to a certain count.
-func (c *Client) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
+// Find searches for services by protocol and/or tag up to a certain count.
+func (c *Client) Find(ctx context.Context, protocol, tag string, count int) ([]ServiceDescription, error) {
 	u, err := url.Parse(fmt.Sprintf("%s/", c.baseURL))
 	if err != nil {
 		return nil, err
 	}
 
 	q := u.Query()
-	q.Set("protocol", protocol)
+	if protocol != "" {
+		q.Set("protocol", protocol)
+	}
+	if tag != "" {
+		q.Set("tag", tag)
+	}
 	q.Set("count", strconv.Itoa(count))
 	u.RawQuery = q.Encode()
 

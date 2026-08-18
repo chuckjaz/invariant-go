@@ -61,7 +61,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		}
 
 		dClient := discovery.NewClient(discoveryURL, nil)
-		svcs, err := dClient.Find(ctx, "kv-v1", 1)
+		svcs, err := dClient.Find(ctx, "kv-v1", "", 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error querying discovery service: %v\n", err)
 			os.Exit(1)

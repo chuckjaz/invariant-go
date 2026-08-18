@@ -21,16 +21,27 @@ func (m *mockParentDiscovery) Get(ctx context.Context, id string) (ServiceDescri
 	return desc, ok
 }
 
-func (m *mockParentDiscovery) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
+func (m *mockParentDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]ServiceDescription, error) {
 	var results []ServiceDescription
 	for _, desc := range m.services {
+		hasProtocol := protocol == ""
 		for _, p := range desc.Protocols {
 			if p == protocol {
-				results = append(results, desc)
-				if len(results) >= count {
-					return results, nil
-				}
+				hasProtocol = true
 				break
+			}
+		}
+		hasTag := tag == ""
+		for _, t := range desc.Tags {
+			if t == tag {
+				hasTag = true
+				break
+			}
+		}
+		if hasProtocol && hasTag {
+			results = append(results, desc)
+			if len(results) >= count {
+				return results, nil
 			}
 		}
 	}
@@ -112,22 +123,25 @@ func TestUpstreamDiscovery_Find(t *testing.T) {
 		ID:        "node-local",
 		Address:   "10.0.0.1",
 		Protocols: []string{"http"},
+		Tags:      []string{"cache"},
 	})
 
 	parent.Register(ctx, ServiceRegistration{
 		ID:        "node-parent1",
 		Address:   "10.0.0.2",
 		Protocols: []string{"http"},
+		Tags:      []string{"source"},
 	})
 
 	parent.Register(ctx, ServiceRegistration{
 		ID:        "node-parent2",
 		Address:   "10.0.0.3",
 		Protocols: []string{"http"},
+		Tags:      []string{"cache"},
 	})
 
-	// 1. Request 2 nodes. 1 should be fulfilled locally, 1 from parent.
-	results, err := upstream.Find(ctx, "http", 2)
+	// 1. Request 2 nodes with tag 'cache'. 1 should be fulfilled locally, 1 from parent (node-parent2).
+	results, err := upstream.Find(ctx, "http", "cache", 2)
 	if err != nil {
 		t.Fatalf("Find failed: %v", err)
 	}
@@ -140,8 +154,8 @@ func TestUpstreamDiscovery_Find(t *testing.T) {
 		t.Errorf("Expected local node to be first, got %s", results[0].ID)
 	}
 
-	if results[1].ID != "node-parent1" && results[1].ID != "node-parent2" {
-		t.Errorf("Expected parent node appended, got %s", results[1].ID)
+	if results[1].ID != "node-parent2" {
+		t.Errorf("Expected node-parent2 with tag 'cache', got %s", results[1].ID)
 	}
 
 	// 2. Verify that the fetched parent node got cached automatically
@@ -153,19 +167,20 @@ func TestUpstreamDiscovery_Find(t *testing.T) {
 
 	// 3. Test deduplication: Registering parent node locally with a different address
 	local.Register(ctx, ServiceRegistration{
-		ID:        "node-parent2",
+		ID:        "node-parent1",
 		Address:   "local-override",
 		Protocols: []string{"http"},
+		Tags:      []string{"source"},
 	})
 
-	// Query for 3 nodes, it will pull node-parent1 from parent and NOT duplicate node-parent2
-	resultsDedup, err := upstream.Find(ctx, "http", 3)
+	// Query for 3 nodes with tag 'source' or any tag
+	resultsDedup, err := upstream.Find(ctx, "http", "", 3)
 	if err != nil {
 		t.Fatalf("Find failed: %v", err)
 	}
 
 	for _, n := range resultsDedup {
-		if n.ID == "node-parent2" && n.Address != "local-override" {
+		if n.ID == "node-parent1" && n.Address != "local-override" {
 			t.Errorf("Local cached value was unexpectedly overwritten or duplicated by parent")
 		}
 	}

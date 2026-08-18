@@ -356,7 +356,7 @@ func (c *AggregateClient) ensureLiveServers() error {
 		return ErrNoLiveServers
 	}
 
-	services, err := c.discovery.Find(context.Background(), "storage-v1", c.numStoreServers)
+	services, err := c.discovery.Find(context.Background(), "storage-v1", "", c.numStoreServers)
 	if err != nil {
 		return fmt.Errorf("failed to discover storage services: %w", err)
 	}

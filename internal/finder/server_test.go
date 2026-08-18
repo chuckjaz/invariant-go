@@ -29,12 +29,27 @@ func (m *mockDiscovery) Get(ctx context.Context, id string) (discovery.ServiceDe
 	return desc, ok
 }
 
-func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]discovery.ServiceDescription, error) {
 	var results []discovery.ServiceDescription
 	for _, desc := range m.services {
+		hasProtocol := protocol == ""
 		for _, p := range desc.Protocols {
 			if p == protocol {
-				results = append(results, desc)
+				hasProtocol = true
+				break
+			}
+		}
+		hasTag := tag == ""
+		for _, t := range desc.Tags {
+			if t == tag {
+				hasTag = true
+				break
+			}
+		}
+		if hasProtocol && hasTag {
+			results = append(results, desc)
+			if len(results) >= count {
+				break
 			}
 		}
 	}

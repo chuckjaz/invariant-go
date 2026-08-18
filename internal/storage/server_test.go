@@ -127,7 +127,7 @@ type mockDiscovery struct {
 	services map[string]discovery.ServiceDescription
 }
 
-func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]discovery.ServiceDescription, error) {
 	return nil, nil // Not needed for this test
 }
 

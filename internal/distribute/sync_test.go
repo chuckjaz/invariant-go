@@ -20,7 +20,7 @@ type mockDiscovery struct {
 	services []discovery.ServiceDescription
 }
 
-func (m *mockDiscovery) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]discovery.ServiceDescription, error) {
 	return m.services, nil
 }
 

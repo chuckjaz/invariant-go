@@ -87,7 +87,58 @@ func TestDiscoveryServer(t *testing.T) {
 		t.Errorf("expected tags [cache source] in find result, got %v", descs[0].Tags)
 	}
 
-	// 5. GET /?protocol=unknown
+	// 5. GET /?tag=cache
+	res, err = http.Get(ts.URL + "/?tag=cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", res.StatusCode)
+	}
+	var tagDescs []ServiceDescription
+	if err := json.NewDecoder(res.Body).Decode(&tagDescs); err != nil {
+		t.Fatal(err)
+	}
+	if len(tagDescs) != 1 || tagDescs[0].ID != reg.ID {
+		t.Errorf("expected 1 result with ID %s, got %v", reg.ID, tagDescs)
+	}
+
+	// 6. GET /?protocol=http&tag=cache
+	res, err = http.Get(ts.URL + "/?protocol=http&tag=cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", res.StatusCode)
+	}
+	var comboDescs []ServiceDescription
+	if err := json.NewDecoder(res.Body).Decode(&comboDescs); err != nil {
+		t.Fatal(err)
+	}
+	if len(comboDescs) != 1 || comboDescs[0].ID != reg.ID {
+		t.Errorf("expected 1 result for protocol+tag combo, got %v", comboDescs)
+	}
+
+	// 7. GET /?protocol=http&tag=mismatched
+	res, err = http.Get(ts.URL + "/?protocol=http&tag=mismatched")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", res.StatusCode)
+	}
+	var mismatchedDescs []ServiceDescription
+	if err := json.NewDecoder(res.Body).Decode(&mismatchedDescs); err != nil {
+		t.Fatal(err)
+	}
+	if len(mismatchedDescs) != 0 {
+		t.Errorf("expected 0 results for mismatched tag, got %d", len(mismatchedDescs))
+	}
+
+	// 8. GET /?protocol=unknown
 	res, err = http.Get(ts.URL + "/?protocol=unknown")
 	if err != nil {
 		t.Fatal(err)

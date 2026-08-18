@@ -45,8 +45,8 @@ func TestFileSystemDiscovery(t *testing.T) {
 		t.Errorf("expected tags %v, got %v", reg1.Tags, desc.Tags)
 	}
 
-	// Test Find
-	results, err := fsd.Find(ctx, "grpc", 10)
+	// Test Find by protocol
+	results, err := fsd.Find(ctx, "grpc", "", 10)
 	if err != nil {
 		t.Fatalf("Find failed: %v", err)
 	}
@@ -58,6 +58,24 @@ func TestFileSystemDiscovery(t *testing.T) {
 	}
 	if !slices.Equal(results[0].Tags, reg1.Tags) {
 		t.Errorf("expected tags %v, got %v", reg1.Tags, results[0].Tags)
+	}
+
+	// Test Find by tag
+	resultsByTag, err := fsd.Find(ctx, "", "cache", 10)
+	if err != nil {
+		t.Fatalf("Find by tag failed: %v", err)
+	}
+	if len(resultsByTag) != 1 || resultsByTag[0].ID != "service1" {
+		t.Fatalf("expected 1 result matching tag 'cache', got %v", resultsByTag)
+	}
+
+	// Test Find by non-matching tag
+	resultsNonMatch, err := fsd.Find(ctx, "grpc", "nonexistent-tag", 10)
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+	if len(resultsNonMatch) != 0 {
+		t.Fatalf("expected 0 results for non-matching tag, got %d", len(resultsNonMatch))
 	}
 
 	// Wait for snapshot

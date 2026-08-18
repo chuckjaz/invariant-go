@@ -27,8 +27,8 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// protocol="" retrieves all services
-	descs, err := client.Find(ctx, "", 10000)
+	// protocol="" and tag="" retrieves all services
+	descs, err := client.Find(ctx, "", "", 10000)
 	if err != nil {
 		log.Fatalf("Failed to query discovery service: %v", err)
 	}

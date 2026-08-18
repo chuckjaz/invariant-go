@@ -111,7 +111,7 @@ type mockDiscoveryLocal struct {
 	services []discovery.ServiceDescription
 }
 
-func (m *mockDiscoveryLocal) Find(ctx context.Context, protocol string, count int) ([]discovery.ServiceDescription, error) {
+func (m *mockDiscoveryLocal) Find(ctx context.Context, protocol, tag string, count int) ([]discovery.ServiceDescription, error) {
 	return m.services, nil
 }
 

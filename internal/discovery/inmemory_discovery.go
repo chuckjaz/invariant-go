@@ -76,13 +76,14 @@ func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 	}, true
 }
 
-func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int) ([]ServiceDescription, error) {
+func (d *InMemoryDiscovery) Find(ctx context.Context, protocol, tag string, count int) ([]ServiceDescription, error) {
 	d.mu.RLock()
 	var results []ServiceDescription
 	for _, reg := range d.services {
 		hasProtocol := protocol == "" || slices.Contains(reg.Protocols, protocol)
+		hasTag := tag == "" || slices.Contains(reg.Tags, tag)
 
-		if hasProtocol {
+		if hasProtocol && hasTag {
 			protocolsCopy := make([]string, len(reg.Protocols))
 			copy(protocolsCopy, reg.Protocols)
 			var tagsCopy []string
