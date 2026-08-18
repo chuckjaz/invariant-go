@@ -10,11 +10,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/tags"
 )
 
 func generateID() string {
@@ -32,25 +31,12 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
-	var tags string
-	flag.StringVar(&tags, "tags", "", "Comma-separated list of tags describing configuration intent")
-	var tag string
-	flag.StringVar(&tag, "tag", "", "Tag describing configuration intent")
+	tagFlags := tags.RegisterFlags()
 	var port int
 	flag.IntVar(&port, "port", 3004, "Port to listen on (using 3004 to not conflict with storage/discovery)")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
-
-	var tagList []string
-	for _, tStr := range []string{tags, tag} {
-		for t := range strings.SplitSeq(tStr, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" && !slices.Contains(tagList, t) {
-				tagList = append(tagList, t)
-			}
-		}
-	}
 
 	if id == "" {
 		if dir != "" {
@@ -80,7 +66,7 @@ func main() {
 	if discoveryURL != "" {
 		disc = discovery.NewClient(discoveryURL, nil)
 
-		err := discovery.AdvertiseAndRegister(context.Background(), disc, id, advertiseAddr, port, []string{"finder-v1", "notify-v1"}, tagList)
+		err := discovery.AdvertiseAndRegister(context.Background(), disc, id, advertiseAddr, port, []string{"finder-v1", "notify-v1"}, tagFlags.Tags())
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

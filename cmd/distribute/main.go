@@ -7,12 +7,11 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"slices"
-	"strings"
 	"time"
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
+	"invariant/internal/tags"
 )
 
 func main() {
@@ -22,10 +21,7 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
-	var tags string
-	flag.StringVar(&tags, "tags", "", "Comma-separated list of tags describing configuration intent")
-	var tag string
-	flag.StringVar(&tag, "tag", "", "Tag describing configuration intent")
+	tagFlags := tags.RegisterFlags()
 	var repFactor int
 	flag.IntVar(&repFactor, "N", 3, "Replication factor for blocks")
 	var destination string
@@ -37,16 +33,6 @@ func main() {
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
-
-	var tagList []string
-	for _, tStr := range []string{tags, tag} {
-		for t := range strings.SplitSeq(tStr, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" && !slices.Contains(tagList, t) {
-				tagList = append(tagList, t)
-			}
-		}
-	}
 
 	var disc discovery.Discovery
 	if discoveryURL != "" {
@@ -80,7 +66,7 @@ func main() {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 
 	if discoveryURL != "" {
-		err := discovery.AdvertiseAndRegister(context.Background(), disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "notify-v1"}, tagList)
+		err := discovery.AdvertiseAndRegister(context.Background(), disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "notify-v1"}, tagFlags.Tags())
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
