@@ -282,7 +282,7 @@ func (m *Machine) StartNames(ctx context.Context, discoveryURL string) (string, 
 	if discoveryURL != "" {
 		id := fsn.ID()
 		dClient := discovery.NewClient(discoveryURL, nil)
-		err := discovery.AdvertiseAndRegister(ctx, dClient, id, "http://127.0.0.1", port, []string{"names-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, dClient, id, "http://127.0.0.1", port, []string{"names-v1"}, nil)
 		if err != nil {
 			_ = srv.Close()
 			_ = fsn.Close()
@@ -342,7 +342,7 @@ func (m *Machine) StartSlots(ctx context.Context, discoveryURL string) (string, 
 	if discoveryURL != "" {
 		id := fss.ID()
 		dClient := discovery.NewClient(discoveryURL, nil)
-		err := discovery.AdvertiseAndRegister(ctx, dClient, id, "http://127.0.0.1", port, []string{"slots-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, dClient, id, "http://127.0.0.1", port, []string{"slots-v1"}, nil)
 		if err != nil {
 			_ = srv.Close()
 			_ = fss.Close()
@@ -405,7 +405,7 @@ func (m *Machine) StartDistribute(ctx context.Context, discoveryURL string, repF
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
-		err := discovery.AdvertiseAndRegister(ctx, dClient, server.ID(), "http://127.0.0.1", port, []string{"distribute-v1", "notify-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, dClient, server.ID(), "http://127.0.0.1", port, []string{"distribute-v1", "notify-v1"}, nil)
 		if err != nil {
 			cancel()
 			_ = srv.Close()
@@ -504,7 +504,7 @@ func (m *Machine) StartStorage(ctx context.Context, discoveryURL string, distrib
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
-		err := discovery.AdvertiseAndRegister(ctx, dClient, m.storageID, "http://127.0.0.1", port, []string{"storage-v1", "batch-storage-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, dClient, m.storageID, "http://127.0.0.1", port, []string{"storage-v1", "batch-storage-v1"}, nil)
 		if err != nil {
 			cancel()
 			_ = srv.Close()
@@ -602,7 +602,7 @@ func (m *Machine) StartFinder(ctx context.Context, discoveryURL string) (string,
 
 	if discoveryURL != "" {
 		dClient := discovery.NewClient(discoveryURL, nil)
-		err := discovery.AdvertiseAndRegister(ctx, dClient, idStr, "http://127.0.0.1", port, []string{"finder-v1", "notify-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, dClient, idStr, "http://127.0.0.1", port, []string{"finder-v1", "notify-v1"}, nil)
 		if err != nil {
 			_ = srv.Close()
 			return "", fmt.Errorf("failed to register with discovery: %w", err)
@@ -697,7 +697,7 @@ func (m *Machine) StartKV(ctx context.Context, discoveryURL string, slotsURL str
 
 	if discoveryURL != "" {
 		myID := kvServer.ID()
-		err := discovery.AdvertiseAndRegister(ctx, disc, myID, "http://127.0.0.1", port, []string{"kv-v1", "kv-batch-v1"})
+		err := discovery.AdvertiseAndRegister(ctx, disc, myID, "http://127.0.0.1", port, []string{"kv-v1", "kv-batch-v1"}, nil)
 		if err != nil {
 			_ = srv.Close()
 			_ = l.Close()

@@ -20,6 +20,7 @@ func TestClient(t *testing.T) {
 		ID:        "client-test-id",
 		Address:   "http://client:8081",
 		Protocols: []string{"client-protocol"},
+		Tags:      []string{"cache", "source"},
 	}
 
 	err := client.Register(context.Background(), reg)
@@ -35,6 +36,9 @@ func TestClient(t *testing.T) {
 	if desc.Address != "http://client:8081" {
 		t.Fatalf("Expected Address %s, got %s", "http://client:8081", desc.Address)
 	}
+	if len(desc.Tags) != 2 || desc.Tags[0] != "cache" || desc.Tags[1] != "source" {
+		t.Fatalf("Expected tags [cache source], got %v", desc.Tags)
+	}
 
 	// 3. Find with matching protocol
 	results, err := client.Find(context.Background(), "client-protocol", 1)
@@ -43,6 +47,9 @@ func TestClient(t *testing.T) {
 	}
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if len(results[0].Tags) != 2 || results[0].Tags[0] != "cache" || results[0].Tags[1] != "source" {
+		t.Fatalf("Expected tags [cache source] in find result, got %v", results[0].Tags)
 	}
 
 	// 4. Find with unknown protocol

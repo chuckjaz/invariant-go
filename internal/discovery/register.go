@@ -12,7 +12,7 @@ import (
 // AdvertiseAndRegister forms the complete advertise URL and registers the service
 // with the discovery service. If the advertise address is empty, it uses localhost.
 // If it lacks a port, the port is appended.
-func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols []string) error {
+func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols, tags []string) error {
 	if advertiseAddr == "" {
 		advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 	} else {
@@ -30,6 +30,7 @@ func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr
 		ID:        id,
 		Address:   advertiseAddr,
 		Protocols: protocols,
+		Tags:      tags,
 	})
 }
 

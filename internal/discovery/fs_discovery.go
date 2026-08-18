@@ -73,10 +73,17 @@ func (d *FileSystemDiscovery) Get(ctx context.Context, id string) (ServiceDescri
 	protocolsCopy := make([]string, len(reg.Protocols))
 	copy(protocolsCopy, reg.Protocols)
 
+	var tagsCopy []string
+	if reg.Tags != nil {
+		tagsCopy = make([]string, len(reg.Tags))
+		copy(tagsCopy, reg.Tags)
+	}
+
 	return ServiceDescription{
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: protocolsCopy,
+		Tags:      tagsCopy,
 	}, true
 }
 
@@ -87,10 +94,16 @@ func (d *FileSystemDiscovery) Find(ctx context.Context, protocol string, count i
 			if protocol == "" || slices.Contains(reg.Protocols, protocol) {
 				protocolsCopy := make([]string, len(reg.Protocols))
 				copy(protocolsCopy, reg.Protocols)
+				var tagsCopy []string
+				if reg.Tags != nil {
+					tagsCopy = make([]string, len(reg.Tags))
+					copy(tagsCopy, reg.Tags)
+				}
 				results = append(results, ServiceDescription{
 					ID:        reg.ID,
 					Address:   reg.Address,
 					Protocols: protocolsCopy,
+					Tags:      tagsCopy,
 				})
 				if count > 0 && len(results) >= count {
 					break
@@ -112,10 +125,16 @@ func (d *FileSystemDiscovery) Find(ctx context.Context, protocol string, count i
 func (d *FileSystemDiscovery) Register(ctx context.Context, reg ServiceRegistration) error {
 	protocolsCopy := make([]string, len(reg.Protocols))
 	copy(protocolsCopy, reg.Protocols)
+	var tagsCopy []string
+	if reg.Tags != nil {
+		tagsCopy = make([]string, len(reg.Tags))
+		copy(tagsCopy, reg.Tags)
+	}
 	regCopy := ServiceRegistration{
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: protocolsCopy,
+		Tags:      tagsCopy,
 	}
 
 	err := d.store.Put(reg.ID, regCopy, nil)

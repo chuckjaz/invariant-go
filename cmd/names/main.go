@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"invariant/internal/discovery"
@@ -21,6 +23,10 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
+	var tags string
+	flag.StringVar(&tags, "tags", "", "Comma-separated list of tags describing configuration intent")
+	var tag string
+	flag.StringVar(&tag, "tag", "", "Tag describing configuration intent")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var upstreamURL string
@@ -28,6 +34,16 @@ func main() {
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
 	flag.Parse()
+
+	var tagList []string
+	for _, tStr := range []string{tags, tag} {
+		for t := range strings.SplitSeq(tStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" && !slices.Contains(tagList, t) {
+				tagList = append(tagList, t)
+			}
+		}
+	}
 
 	var n names.Names
 	if dir != "" {
@@ -59,7 +75,7 @@ func main() {
 
 	if discoveryURL != "" {
 		id := n.(identity.Identity).ID()
-		err := discovery.AdvertiseAndRegister(context.Background(), discovery.NewClient(discoveryURL, nil), id, advertiseAddr, actualPort, []string{"names-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), discovery.NewClient(discoveryURL, nil), id, advertiseAddr, actualPort, []string{"names-v1"}, tagList)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

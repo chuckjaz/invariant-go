@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -24,6 +24,7 @@ func TestFileSystemDiscovery(t *testing.T) {
 		ID:        "service1",
 		Address:   "127.0.0.1:8080",
 		Protocols: []string{"http", "grpc"},
+		Tags:      []string{"cache", "source"},
 	}
 	if err := fsd.Register(ctx, reg1); err != nil {
 		t.Fatalf("failed to register service1: %v", err)
@@ -37,8 +38,11 @@ func TestFileSystemDiscovery(t *testing.T) {
 	if desc.Address != reg1.Address {
 		t.Errorf("expected address %s, got %s", reg1.Address, desc.Address)
 	}
-	if !reflect.DeepEqual(desc.Protocols, reg1.Protocols) {
+	if !slices.Equal(desc.Protocols, reg1.Protocols) {
 		t.Errorf("expected protocols %v, got %v", reg1.Protocols, desc.Protocols)
+	}
+	if !slices.Equal(desc.Tags, reg1.Tags) {
+		t.Errorf("expected tags %v, got %v", reg1.Tags, desc.Tags)
 	}
 
 	// Test Find
@@ -51,6 +55,9 @@ func TestFileSystemDiscovery(t *testing.T) {
 	}
 	if results[0].ID != "service1" {
 		t.Errorf("expected service1, got %s", results[0].ID)
+	}
+	if !slices.Equal(results[0].Tags, reg1.Tags) {
+		t.Errorf("expected tags %v, got %v", reg1.Tags, results[0].Tags)
 	}
 
 	// Wait for snapshot
@@ -75,6 +82,9 @@ func TestFileSystemDiscovery(t *testing.T) {
 	}
 	if desc2.Address != reg1.Address {
 		t.Errorf("expected address %s, got %s", reg1.Address, desc2.Address)
+	}
+	if !slices.Equal(desc2.Tags, reg1.Tags) {
+		t.Errorf("expected tags after reopen %v, got %v", reg1.Tags, desc2.Tags)
 	}
 }
 

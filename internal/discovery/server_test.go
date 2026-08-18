@@ -29,6 +29,7 @@ func TestDiscoveryServer(t *testing.T) {
 		ID:        "test-service-id",
 		Address:   "http://localhost:8080",
 		Protocols: []string{"http", "grpc"},
+		Tags:      []string{"cache", "source"},
 	}
 
 	reqBody, _ := json.Marshal(reg)
@@ -59,6 +60,9 @@ func TestDiscoveryServer(t *testing.T) {
 	if desc.ID != reg.ID {
 		t.Errorf("expected ID %s, got %s", reg.ID, desc.ID)
 	}
+	if len(desc.Tags) != 2 || desc.Tags[0] != "cache" || desc.Tags[1] != "source" {
+		t.Errorf("expected tags [cache source], got %v", desc.Tags)
+	}
 
 	// 4. GET /?protocol=http
 	res, err = http.Get(ts.URL + "/?protocol=http")
@@ -78,6 +82,9 @@ func TestDiscoveryServer(t *testing.T) {
 	}
 	if descs[0].ID != reg.ID {
 		t.Errorf("expected ID %s, got %s", reg.ID, descs[0].ID)
+	}
+	if len(descs[0].Tags) != 2 || descs[0].Tags[0] != "cache" || descs[0].Tags[1] != "source" {
+		t.Errorf("expected tags [cache source] in find result, got %v", descs[0].Tags)
 	}
 
 	// 5. GET /?protocol=unknown

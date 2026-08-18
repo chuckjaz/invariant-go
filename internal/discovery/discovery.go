@@ -7,6 +7,7 @@ type ServiceDescription struct {
 	ID        string   `json:"id"`
 	Address   string   `json:"address"`
 	Protocols []string `json:"protocols"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // ServiceRegistration is the payload used to register a service.
@@ -14,6 +15,7 @@ type ServiceRegistration struct {
 	ID        string   `json:"id"`
 	Address   string   `json:"address"`
 	Protocols []string `json:"protocols"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // Discovery dictates the necessary requirements for the discovery service.

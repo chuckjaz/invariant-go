@@ -42,6 +42,7 @@ func (m *mockParentDiscovery) Register(ctx context.Context, reg ServiceRegistrat
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: reg.Protocols,
+		Tags:      reg.Tags,
 	}
 	return nil
 }
@@ -57,6 +58,7 @@ func TestUpstreamDiscovery_Get(t *testing.T) {
 		ID:        "parent-1",
 		Address:   "1.2.3.4",
 		Protocols: []string{"test-proto"},
+		Tags:      []string{"cache", "source"},
 	})
 
 	// 1. Service not in local but in parent
@@ -67,6 +69,9 @@ func TestUpstreamDiscovery_Get(t *testing.T) {
 	if desc.Address != "1.2.3.4" {
 		t.Errorf("Expected address 1.2.3.4, got %v", desc.Address)
 	}
+	if len(desc.Tags) != 2 || desc.Tags[0] != "cache" || desc.Tags[1] != "source" {
+		t.Errorf("Expected tags [cache source], got %v", desc.Tags)
+	}
 
 	// 2. The service should now be cached in local
 	localDesc, ok := local.Get(ctx, "parent-1")
@@ -75,6 +80,9 @@ func TestUpstreamDiscovery_Get(t *testing.T) {
 	}
 	if localDesc.Address != "1.2.3.4" {
 		t.Errorf("Expected cached address 1.2.3.4, got %v", localDesc.Address)
+	}
+	if len(localDesc.Tags) != 2 || localDesc.Tags[0] != "cache" || localDesc.Tags[1] != "source" {
+		t.Errorf("Expected cached tags [cache source], got %v", localDesc.Tags)
 	}
 
 	// 3. Service registered to upstream directly ONLY goes to local

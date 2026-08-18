@@ -97,14 +97,18 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	wg.Wait()
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "Registered ID\tTarget Address\tProtocols\tAliases\tStatus")
+	fmt.Fprintln(w, "Registered ID\tTarget Address\tProtocols\tTags\tAliases\tStatus")
 	for _, r := range results {
 		protos := strings.Join(r.desc.Protocols, ", ")
+		tags := strings.Join(r.desc.Tags, ", ")
+		if tags == "" {
+			tags = "-"
+		}
 		aliases := strings.Join(r.mappedNames, ", ")
 		if aliases == "" {
 			aliases = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.desc.ID, r.desc.Address, protos, aliases, r.status)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", r.desc.ID, r.desc.Address, protos, tags, aliases, r.status)
 	}
 	w.Flush()
 }

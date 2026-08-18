@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ func main() {
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
+	var tags string
+	flag.StringVar(&tags, "tags", "", "Comma-separated list of tags describing configuration intent (e.g. cache, source)")
+	var tag string
+	flag.StringVar(&tag, "tag", "", "Tag describing configuration intent (e.g. cache, source)")
 	var distributeArg string
 	flag.StringVar(&distributeArg, "distribute", "", "ID or Name of the distribute service to register with")
 	var notifyIDs string
@@ -56,6 +61,16 @@ func main() {
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	flag.Parse()
+
+	var tagList []string
+	for _, tStr := range []string{tags, tag} {
+		for t := range strings.SplitSeq(tStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" && !slices.Contains(tagList, t) {
+				tagList = append(tagList, t)
+			}
+		}
+	}
 
 	var s storage.Storage
 	if s3Bucket != "" {
@@ -88,7 +103,7 @@ func main() {
 		// Configure the storage server to use discovery for fetching
 		server.WithDiscovery(dClient)
 
-		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1", "batch-storage-v1"})
+		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1", "batch-storage-v1"}, tagList)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}

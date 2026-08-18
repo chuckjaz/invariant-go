@@ -39,6 +39,7 @@ func (u *UpstreamDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 				ID:        desc.ID,
 				Address:   desc.Address,
 				Protocols: desc.Protocols,
+				Tags:      desc.Tags,
 			})
 			return desc, true
 		}
@@ -85,6 +86,7 @@ func (u *UpstreamDiscovery) Find(ctx context.Context, protocol string, count int
 				ID:        pDesc.ID,
 				Address:   pDesc.Address,
 				Protocols: pDesc.Protocols,
+				Tags:      pDesc.Tags,
 			})
 		}
 	}

@@ -46,6 +46,7 @@ func (m *mockDiscovery) Register(ctx context.Context, reg discovery.ServiceRegis
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: reg.Protocols,
+		Tags:      reg.Tags,
 	}
 	return nil
 }

@@ -61,10 +61,18 @@ func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 	if !ok {
 		return ServiceDescription{}, false
 	}
+	protocolsCopy := make([]string, len(reg.Protocols))
+	copy(protocolsCopy, reg.Protocols)
+	var tagsCopy []string
+	if reg.Tags != nil {
+		tagsCopy = make([]string, len(reg.Tags))
+		copy(tagsCopy, reg.Tags)
+	}
 	return ServiceDescription{
 		ID:        reg.ID,
 		Address:   reg.Address,
-		Protocols: reg.Protocols,
+		Protocols: protocolsCopy,
+		Tags:      tagsCopy,
 	}, true
 }
 
@@ -75,10 +83,18 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int
 		hasProtocol := protocol == "" || slices.Contains(reg.Protocols, protocol)
 
 		if hasProtocol {
+			protocolsCopy := make([]string, len(reg.Protocols))
+			copy(protocolsCopy, reg.Protocols)
+			var tagsCopy []string
+			if reg.Tags != nil {
+				tagsCopy = make([]string, len(reg.Tags))
+				copy(tagsCopy, reg.Tags)
+			}
 			results = append(results, ServiceDescription{
 				ID:        reg.ID,
 				Address:   reg.Address,
-				Protocols: reg.Protocols,
+				Protocols: protocolsCopy,
+				Tags:      tagsCopy,
 			})
 		}
 	}
@@ -99,7 +115,19 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol string, count int
 func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.services[reg.ID] = reg
+	protocolsCopy := make([]string, len(reg.Protocols))
+	copy(protocolsCopy, reg.Protocols)
+	var tagsCopy []string
+	if reg.Tags != nil {
+		tagsCopy = make([]string, len(reg.Tags))
+		copy(tagsCopy, reg.Tags)
+	}
+	d.services[reg.ID] = ServiceRegistration{
+		ID:        reg.ID,
+		Address:   reg.Address,
+		Protocols: protocolsCopy,
+		Tags:      tagsCopy,
+	}
 	if d.tracker != nil {
 		d.tracker.MarkHealthy(reg.ID)
 	}

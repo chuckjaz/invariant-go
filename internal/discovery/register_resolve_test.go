@@ -12,8 +12,8 @@ func TestAdvertiseAndRegister(t *testing.T) {
 	ctx := context.Background()
 	disc := NewInMemoryDiscovery()
 
-	// 1. empty advertise address
-	err := AdvertiseAndRegister(ctx, disc, "srv1", "", 8080, []string{"http"})
+	// 1. empty advertise address with tags
+	err := AdvertiseAndRegister(ctx, disc, "srv1", "", 8080, []string{"http"}, []string{"cache", "source"})
 	if err != nil {
 		t.Fatalf("AdvertiseAndRegister failed: %v", err)
 	}
@@ -25,9 +25,12 @@ func TestAdvertiseAndRegister(t *testing.T) {
 	if desc.Address != "http://localhost:8080" {
 		t.Errorf("Expected address http://localhost:8080, got %q", desc.Address)
 	}
+	if len(desc.Tags) != 2 || desc.Tags[0] != "cache" || desc.Tags[1] != "source" {
+		t.Errorf("Expected tags [cache source], got %v", desc.Tags)
+	}
 
 	// 2. advertise address without port
-	err = AdvertiseAndRegister(ctx, disc, "srv2", "http://myhost", 9090, []string{"grpc"})
+	err = AdvertiseAndRegister(ctx, disc, "srv2", "http://myhost", 9090, []string{"grpc"}, []string{"cache"})
 	if err != nil {
 		t.Fatalf("AdvertiseAndRegister failed: %v", err)
 	}
@@ -39,9 +42,12 @@ func TestAdvertiseAndRegister(t *testing.T) {
 	if desc2.Address != "http://myhost:9090" {
 		t.Errorf("Expected address http://myhost:9090, got %q", desc2.Address)
 	}
+	if len(desc2.Tags) != 1 || desc2.Tags[0] != "cache" {
+		t.Errorf("Expected tags [cache], got %v", desc2.Tags)
+	}
 
 	// 3. invalid advertise address
-	err = AdvertiseAndRegister(ctx, disc, "srv3", "http://:invalid", 9090, []string{"grpc"})
+	err = AdvertiseAndRegister(ctx, disc, "srv3", "http://:invalid", 9090, []string{"grpc"}, nil)
 	if err == nil {
 		t.Error("Expected error for invalid advertise address, got nil")
 	}
