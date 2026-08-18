@@ -7,7 +7,7 @@ rule gen_dyndep
   description = GEN_DYNDEP $out
 
 rule go_test
-  command = go test $pkg && touch $out
+  command = output=$$(go test $pkg 2>&1) || (echo "$$output" >&2; exit 1) && touch $out
   description = GO TEST $pkg
 
 rule gen_dyndep_test
@@ -218,10 +218,17 @@ build bin/dd/test_internal_workspace.passed: go_test || bin/dd/test_internal_wor
   pkg = ./internal/workspace
   dyndep = bin/dd/test_internal_workspace.dd
 
+build bin/dd/test_internal_tags.dd: gen_dyndep_test | utils/build_dd.go
+  pkg = ./internal/tags
+
+build bin/dd/test_internal_tags.passed: go_test || bin/dd/test_internal_tags.dd
+  pkg = ./internal/tags
+  dyndep = bin/dd/test_internal_tags.dd
+
 default bin/discovery bin/distribute bin/files bin/finder bin/inv-go-build-cache bin/invariant bin/kv bin/names bin/slots bin/storage $
   bin/dd/test_cmd_invariant.passed bin/dd/test_internal_buildcache.passed bin/dd/test_internal_content.passed $
   bin/dd/test_internal_discovery.passed bin/dd/test_internal_distribute.passed bin/dd/test_internal_files.passed $
   bin/dd/test_internal_filetree.passed bin/dd/test_internal_finder.passed bin/dd/test_internal_fuse.passed $
   bin/dd/test_internal_kv.passed bin/dd/test_internal_names.passed bin/dd/test_internal_nfs.passed $
   bin/dd/test_internal_slots.passed bin/dd/test_internal_start.passed bin/dd/test_internal_storage.passed $
-  bin/dd/test_internal_storage_git.passed bin/dd/test_internal_storage_github.passed bin/dd/test_internal_workspace.passed
+  bin/dd/test_internal_storage_git.passed bin/dd/test_internal_storage_github.passed bin/dd/test_internal_tags.passed bin/dd/test_internal_workspace.passed

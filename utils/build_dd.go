@@ -51,9 +51,15 @@ func main() {
 	goArgs = append(goArgs, targetArgs...)
 
 	cmd := exec.Command("go", goArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running go list: %v\n", err)
+		if stderr.Len() > 0 {
+			fmt.Fprintf(os.Stderr, "Error running go list: %v\n%s", err, stderr.String())
+		} else {
+			fmt.Fprintf(os.Stderr, "Error running go list: %v\n", err)
+		}
 		os.Exit(1)
 	}
 
@@ -151,6 +157,4 @@ func main() {
 		fmt.Fprintf(file, " %s", dep)
 	}
 	fmt.Fprintln(file)
-
-	fmt.Printf("Successfully generated %s for target %s\n", outputFile, targetName)
 }
