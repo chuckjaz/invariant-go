@@ -22,8 +22,11 @@ import (
 func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags := flag.NewFlagSet("print", flag.ExitOnError)
 	var discoveryURL string
+	var isSlot bool
 	var cmFlags CommonMountFlags
 	fsFlags.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	fsFlags.BoolVar(&isSlot, "s", false, "Treat the hash code or name as a slot")
+	fsFlags.BoolVar(&isSlot, "slot", false, "Treat the hash code or name as a slot")
 	fsFlags.IntVar(&cmFlags.CacheSizeMB, "cache", 128, "In-memory caching size in MB for storage backend (0 to disable)")
 	fsFlags.IntVar(&cmFlags.DiskCacheSizeMB, "disk-cache", 1024, "Disk caching size in MB for storage backend (0 to disable)")
 	fsFlags.StringVar(&cmFlags.CacheDir, "cache-dir", "", "Directory to use for the disk cache (default: ~/.cache/invariant)")
@@ -105,11 +108,18 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		}
 		link.Address = targetAddr
 	}
+	if isSlot {
+		link.Slot = true
+	}
 
 	slotsAddr := servicesByProtocol["slots-v1"]
 	var slotsClient slots.Slots
 	if slotsAddr != "" {
 		slotsClient = slots.NewClient(slotsAddr, nil)
+	}
+	if link.Slot && slotsClient == nil {
+		fmt.Fprintf(os.Stderr, "Could not find slots-v1 service for slot lookup\n")
+		os.Exit(1)
 	}
 
 	if subPath != "" {

@@ -133,7 +133,7 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - `mount <directory>`: Parses the `.invariant-workspace` and mounts the virtual composite layered file system locally via FUSE natively inheriting standard disk caching (`~/.cache/invariant`) and offline overflow. Runs as a background daemon by default, or supports `-foreground`.
   - `unmount <directory>`: Unmounts the current layered workspace.
   - `pull [directory]`: Parses the workspace and caches all required source layer blocks directly into the local disk storage natively utilizing concurrency limits and `~/.cache/invariant/overflow` validation fallbacks.
-- `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe. Subpath traversal is also supported (e.g., `invariant print <content-link>/path/to/file`).
+- `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe. Subpath traversal is also supported (e.g., `invariant print <content-link>/path/to/file`). Supports `-s` to treat the target hash code or name as a mutable slot.
 
 ```bash
 # Start services defined in services.yaml
