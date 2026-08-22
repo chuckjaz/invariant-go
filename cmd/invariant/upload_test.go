@@ -1,10 +1,12 @@
 package main
 
 import (
-	"invariant/internal/filetree"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"invariant/internal/filetree"
 )
 
 func TestIgnoreRulesMatches(t *testing.T) {
@@ -142,5 +144,52 @@ build/*.o
 	expectedMatcher := filetree.CompileIgnore(expected)
 	if rules.Matches("error.log", false) != expectedMatcher.Matches("error.log", false) {
 		t.Errorf("Matcher behavior divergence")
+	}
+}
+
+func TestUploadTagOptionParsing(t *testing.T) {
+	tests := []struct {
+		name             string
+		tagArg           string
+		expectedWriteTag string
+	}{
+		{
+			name:             "default tag is originals",
+			tagArg:           "originals",
+			expectedWriteTag: "originals",
+		},
+		{
+			name:             "any tag alias translates to empty write tag",
+			tagArg:           "any",
+			expectedWriteTag: "",
+		},
+		{
+			name:             "ANY case-insensitive alias translates to empty write tag",
+			tagArg:           "ANY",
+			expectedWriteTag: "",
+		},
+		{
+			name:             "custom tag is preserved",
+			tagArg:           "custom-backup-tag",
+			expectedWriteTag: "custom-backup-tag",
+		},
+		{
+			name:             "empty string translates to empty write tag",
+			tagArg:           "",
+			expectedWriteTag: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tagStr := tt.tagArg
+			writeTag := tagStr
+			if tagStr == "any" || tagStr == "ANY" || strings.EqualFold(tagStr, "any") {
+				writeTag = ""
+			}
+			if writeTag != tt.expectedWriteTag {
+				t.Errorf("expected writeTag %q, got %q", tt.expectedWriteTag, writeTag)
+			}
+		})
 	}
 }

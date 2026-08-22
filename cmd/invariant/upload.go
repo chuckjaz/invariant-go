@@ -93,6 +93,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	var disableCache bool
 	var keyPolicyStr string
 	var keyStr string
+	var tagStr string
 	fsFlags.BoolVar(&compress, "compress", false, "Compress the uploaded content")
 	fsFlags.BoolVar(&encrypt, "encrypt", false, "Encrypt the uploaded content")
 	fsFlags.BoolVar(&disableCache, "no-cache", false, "Disable mtime caching")
@@ -102,6 +103,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	fsFlags.BoolVar(&dryRun, "dry-run", false, "Compute stats but upload to a storage that reports having all blocks (dry-run)")
 	fsFlags.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	fsFlags.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
+	fsFlags.StringVar(&tagStr, "tag", "originals", "Tag to restrict storage server writes (default \"originals\", use \"any\" for unrestricted)")
 
 	fsFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant upload [options] [directory]\n\n")
@@ -141,7 +143,15 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, nil)
 	var storageClient storage.Storage
-	storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	var aggregateOpts []storage.AggregateClientOption
+	writeTag := tagStr
+	if strings.EqualFold(writeTag, "any") {
+		writeTag = ""
+	}
+	if writeTag != "" {
+		aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
+	}
+	storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000, aggregateOpts...)
 
 	if dryRun {
 		storageClient = storage.NewDryRunStorage()
