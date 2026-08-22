@@ -2,9 +2,11 @@ package kv
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,12 +72,19 @@ type Journal struct {
 	syncedEpoch uint64
 	syncing     bool
 	syncCond    *sync.Cond
+
+	// Asynchronous background uploads
+	uploadCh chan string
+	uploadWg sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	j := &Journal{
 		baseDir:         baseDir,
 		storage:         store,
@@ -85,12 +94,90 @@ func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, s
 		previousJournal: previousJournal,
 		maxEntries:      maxEntries,
 		opts:            opts,
+		uploadCh:        make(chan string, 500),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	j.syncCond = sync.NewCond(&j.mu)
 	if err := j.openNewFile(); err != nil {
+		cancel()
 		return nil, err
 	}
+	go j.processUploads()
 	return j, nil
+}
+
+func (j *Journal) processUploads() {
+	for {
+		select {
+		case <-j.ctx.Done():
+			// Drain any remaining uploaded files before exiting
+			for {
+				select {
+				case path := <-j.uploadCh:
+					j.uploadSingleJournal(path)
+					j.uploadWg.Done()
+				default:
+					return
+				}
+			}
+		case path, ok := <-j.uploadCh:
+			if !ok {
+				return
+			}
+			j.uploadSingleJournal(path)
+			j.uploadWg.Done()
+		}
+	}
+}
+
+func (j *Journal) uploadSingleJournal(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	j.mu.Lock()
+	prev := j.previousJournal
+	j.mu.Unlock()
+
+	// Prepend header to file content for storage upload
+	var headerBuf bytes.Buffer
+	header := JournalEntry{Header: &JournalHeader{PreviousJournal: prev}}
+	if err := json.NewEncoder(&headerBuf).Encode(header); err != nil {
+		return
+	}
+
+	multiReader := io.MultiReader(&headerBuf, file)
+	link, err := content.Write(multiReader, j.storage, j.opts)
+	if err != nil {
+		return
+	}
+
+	linkBytes, err := json.Marshal(link)
+	if err != nil {
+		return
+	}
+	newJournalStr := string(linkBytes)
+
+	if prev == nil {
+		err = j.slotClient.Create(context.Background(), j.slotID, newJournalStr, "")
+		if err != nil {
+			currVal, _ := j.slotClient.Get(context.Background(), j.slotID)
+			err = j.slotClient.Update(context.Background(), j.slotID, newJournalStr, currVal, j.slotAuth)
+		}
+	} else {
+		oldLinkBytes, _ := json.Marshal(prev)
+		err = j.slotClient.Update(context.Background(), j.slotID, newJournalStr, string(oldLinkBytes), j.slotAuth)
+	}
+
+	if err == nil {
+		j.mu.Lock()
+		j.previousJournal = &link
+		j.mu.Unlock()
+		os.Remove(path)
+	}
 }
 
 func (j *Journal) openNewFile() error {
@@ -111,20 +198,10 @@ func (j *Journal) openNewFile() error {
 	j.syncedEpoch = 0
 	j.syncing = false
 
-	// Write header
-	header := JournalEntry{Header: &JournalHeader{PreviousJournal: j.previousJournal}}
-	if err := j.currentEncoder.Encode(header); err != nil {
-		file.Close()
-		return err
-	}
-	if err := j.currentWriter.Flush(); err != nil {
-		file.Close()
-		return err
-	}
-	return file.Sync()
+	return nil
 }
 
-// Append writes a new record to the local journal. Returns true if it was flushed.
+// Append writes a new record to the local journal. Returns true if it was rotated.
 // Crucial: For transactional commit records, this triggers a physical disk flush
 // (via file.Sync() with group commit batching) before returning to guarantee ACID durability.
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
@@ -180,7 +257,7 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.lastRecordType = rec.Type
 	j.entries++
 	if j.entries >= j.maxEntries {
-		if err := j.flushLocked(ctx); err != nil {
+		if err := j.rotateLocked(); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -195,60 +272,45 @@ func (j *Journal) LastRecordType() RecordType {
 	return j.lastRecordType
 }
 
-// flushLocked performs the actual flush, assumes j.mu is held.
-func (j *Journal) flushLocked(ctx context.Context) error {
+// rotateLocked rotates the local active journal file in microseconds and queues background upload.
+func (j *Journal) rotateLocked() error {
 	if j.currentFile == nil {
 		return nil
 	}
 	_ = j.currentWriter.Flush()
 	j.currentFile.Close()
+	rotatedPath := j.currentPath
 
-	// Read and upload to storage
-	file, err := os.Open(j.currentPath)
-	if err != nil {
+	if err := j.openNewFile(); err != nil {
 		return err
 	}
 
-	link, err := content.Write(file, j.storage, j.opts)
-	file.Close()
-	if err != nil {
-		return err
-	}
-
-	linkBytes, err := json.Marshal(link)
-	if err != nil {
-		return err
-	}
-	newJournalStr := string(linkBytes)
-
-	if j.previousJournal == nil {
-		err = j.slotClient.Create(ctx, j.slotID, newJournalStr, "")
-	} else {
-		oldLinkBytes, _ := json.Marshal(j.previousJournal)
-		err = j.slotClient.Update(ctx, j.slotID, newJournalStr, string(oldLinkBytes), j.slotAuth)
-	}
-	if err != nil {
-		return err
-	}
-
-	j.previousJournal = &link
-
-	// Delete the local file since it's uploaded
-	os.Remove(j.currentPath)
-
-	return j.openNewFile()
+	j.uploadWg.Add(1)
+	j.uploadCh <- rotatedPath
+	return nil
 }
 
-// Flush closes the current journal, uploads it to storage, updates the previousJournal pointer, and opens a new file.
+// Flush closes the current journal, queues it for upload, and waits for all uploads to finish.
 func (j *Journal) Flush(ctx context.Context) error {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.flushLocked(ctx)
+	if j.currentFile != nil && j.entries > 0 {
+		if err := j.rotateLocked(); err != nil {
+			j.mu.Unlock()
+			return err
+		}
+	}
+	j.mu.Unlock()
+
+	j.uploadWg.Wait()
+	return nil
 }
 
 func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.cancel != nil {
+		j.cancel()
+	}
 	if j.currentFile != nil {
 		_ = j.currentWriter.Flush()
 		return j.currentFile.Close()
@@ -257,6 +319,7 @@ func (j *Journal) Close() error {
 }
 
 func (j *Journal) PreviousJournal() *content.ContentLink {
+	j.uploadWg.Wait()
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.previousJournal
@@ -299,8 +362,14 @@ func (j *Journal) LoadLocalJournals() ([]Record, error) {
 // LoadRemoteJournals reads journal entries from storage, starting at the current previousJournal
 // and going backward until it hits stopAt (or nil). It returns the records in chronological order.
 func (j *Journal) LoadRemoteJournals(ctx context.Context, stopAt *content.ContentLink) ([]Record, error) {
-	var pages [][]Record
+	// Wait for any pending uploads to ensure remote storage is up to date
+	j.uploadWg.Wait()
+
+	j.mu.Lock()
 	curr := j.previousJournal
+	j.mu.Unlock()
+
+	var pages [][]Record
 
 	for curr != nil {
 		if stopAt != nil && curr.Address == stopAt.Address {

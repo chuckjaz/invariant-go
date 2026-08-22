@@ -212,7 +212,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | **ISSUE-PERF-01** | Medium | Fixed | `internal/files` | Global lock contention in `CreateEntry` and `WriteFile` during synchronous storage network I/O |
 | **ISSUE-PERF-02** | Low | Fixed | `internal/files` | Double memory buffering in `CreateEntry` via `io.ReadAll` |
 | **ISSUE-PERF-03** | Low | Fixed | `internal/files` | Synchronous remote storage upload on `PUT /:node/{name}` without local write-back staging |
-| **ISSUE-PERF-04** | Medium | Open | `internal/kv` | Synchronous remote storage upload and slot update on journal rotation blocking `POST /tx/commit` |
+| **ISSUE-PERF-04** | Medium | Fixed | `internal/kv` | Synchronous remote storage upload and slot update on journal rotation blocking `POST /tx/commit` |
 | **ISSUE-PERF-05** | Low | Fixed | `internal/kv` | Global store lock contention in `FileKeyValueStore.CommitTransaction` during physical disk sync |
 | **ISSUE-PERF-06** | Low | Fixed | `internal/kv` | Per-transaction `fsync` serialization in `kv.Journal` without group commit batching |
 

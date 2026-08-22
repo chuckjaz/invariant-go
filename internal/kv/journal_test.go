@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"invariant/internal/content"
 	"invariant/internal/slots"
@@ -93,7 +94,14 @@ func TestJournal_AutoFlush(t *testing.T) {
 	}
 
 	// The slots should have been updated with the new journal pointer
-	slotVal, err := slotClient.Get(ctx, "j-slot")
+	var slotVal string
+	for attempt := 0; attempt < 50; attempt++ {
+		slotVal, err = slotClient.Get(ctx, "j-slot")
+		if err == nil && slotVal != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatalf("Failed to retrieve slot: %v", err)
 	}
