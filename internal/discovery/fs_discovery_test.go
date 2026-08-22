@@ -78,8 +78,10 @@ func TestFileSystemDiscovery(t *testing.T) {
 		t.Fatalf("expected 0 results for non-matching tag, got %d", len(resultsNonMatch))
 	}
 
-	// Wait for snapshot
-	time.Sleep(time.Millisecond * 100)
+	// Take snapshot
+	if err := fsd.Snapshot(); err != nil {
+		t.Fatalf("Snapshot failed: %v", err)
+	}
 	fsd.Close()
 
 	// Check if snapshot.json exists

@@ -146,6 +146,12 @@ func (s *Store[K, V]) Close() error {
 	return nil
 }
 
+// Snapshot creates an immediate snapshot of the in-memory store and starts a new journal.
+func (s *Store[K, V]) Snapshot() error {
+	s.doSnapshot()
+	return nil
+}
+
 // Get safely retrieves a value from the store.
 func (s *Store[K, V]) Get(k K) (V, bool) {
 	s.mu.RLock()

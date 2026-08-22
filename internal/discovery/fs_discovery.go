@@ -64,6 +64,10 @@ func (d *FileSystemDiscovery) Close() error {
 	return d.store.Close()
 }
 
+func (d *FileSystemDiscovery) Snapshot() error {
+	return d.store.Snapshot()
+}
+
 func (d *FileSystemDiscovery) Get(ctx context.Context, id string) (ServiceDescription, bool) {
 	reg, ok := d.store.Get(id)
 	if !ok {

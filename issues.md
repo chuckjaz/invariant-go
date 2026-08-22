@@ -9,7 +9,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | **ISSUE-P1-01** | High | Fixed | `internal/content` | `blockListReader` in-flight fetch error swallowing and silent chunk dropping |
 | **ISSUE-P1-02** | High | Fixed | `internal/storage` | Path traversal vulnerability via unvalidated address paths in `FileSystemStorage` |
 | **ISSUE-P1-03** | Medium | Fixed | `internal/discovery` | `DiscoveryServer` queries with `count <= 0` default to `1` instead of returning all matching services |
-| **ISSUE-P1-04** | Medium | Open | `internal/discovery` | Timing flake in `TestFileSystemDiscovery` under race detector due to `time.Sleep` snapshotting |
+| **ISSUE-P1-04** | Medium | Fixed | `internal/discovery` | Timing flake in `TestFileSystemDiscovery` under race detector due to `time.Sleep` snapshotting |
 | **ISSUE-P1-05** | Low | Open | `internal/finder` | `reflect.DeepEqual` usage in `finder/server_test.go` violating `AGENTS.md` rules |
 | **ISSUE-P1-06** | Medium | Open | `internal/storage` | Unbuffered `io.Pipe()` in `CachingStorage` block promotion causes synchronous read blocking |
 | **ISSUE-P1-07** | Low | Open | `internal/notify` | Zero test coverage for `internal/notify` client |
