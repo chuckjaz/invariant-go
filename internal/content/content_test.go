@@ -197,3 +197,46 @@ func TestReadWriteZstd(t *testing.T) {
 		t.Errorf("Read data does not match original")
 	}
 }
+
+func TestBlockListMissingChunkError(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+
+	// Create two blocks, store only the first one
+	data1 := []byte("chunk 1 content")
+	link1, err := writeBlock(data1, store, WriterOptions{}, nil)
+	if err != nil {
+		t.Fatalf("writeBlock 1 failed: %v", err)
+	}
+
+	link2 := ContentLink{Address: "0000000000000000000000000000000000000000000000000000000000000000"}
+
+	// Construct a blocklist with both links
+	blockListLink, err := writeBlockList([]BlockListItem{
+		{Content: link1, Size: uint64(len(data1))},
+		{Content: link2, Size: 100},
+	}, store, WriterOptions{}, nil, "")
+	if err != nil {
+		t.Fatalf("writeBlockList failed: %v", err)
+	}
+
+	rc, err := Read(blockListLink, store, nil)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	defer rc.Close()
+
+	// Reading past chunk 1 must return an error, not EOF or silent skip
+	buf := make([]byte, 100)
+	n1, err := rc.Read(buf)
+	if err != nil {
+		t.Fatalf("First read failed: %v", err)
+	}
+	if !bytes.Equal(buf[:n1], data1) {
+		t.Fatalf("Expected chunk 1 content, got %q", buf[:n1])
+	}
+
+	_, err = rc.Read(buf)
+	if err == nil {
+		t.Fatal("Expected error on missing chunk 2, got nil")
+	}
+}

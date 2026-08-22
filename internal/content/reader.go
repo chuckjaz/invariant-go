@@ -230,72 +230,70 @@ func (r *blockListReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (r *blockListReader) loadBlock(targetIdx int) error {
-	r.mu.Lock()
-	if r.cache == nil {
-		r.mu.Unlock()
-		return io.ErrClosedPipe
-	}
-	if _, ok := r.cache[targetIdx]; ok {
-		r.updateLRU(targetIdx)
-		r.mu.Unlock()
-		return nil
-	}
-
-	if ch, active := r.inFlight[targetIdx]; active {
-		r.mu.Unlock()
-		<-ch // Wait safely for the existing background prefetch resolution natively
+	for {
 		r.mu.Lock()
-		r.updateLRU(targetIdx)
+		if r.cache == nil {
+			r.mu.Unlock()
+			return io.ErrClosedPipe
+		}
+		if _, ok := r.cache[targetIdx]; ok {
+			r.updateLRU(targetIdx)
+			r.mu.Unlock()
+			return nil
+		}
+
+		if ch, active := r.inFlight[targetIdx]; active {
+			r.mu.Unlock()
+			<-ch // Wait safely for the existing background prefetch resolution natively
+			continue
+		}
+
+		if targetIdx >= len(r.blocks) {
+			r.mu.Unlock()
+			return io.EOF
+		}
+
+		// Lock the current fetch mapping
+		ch := make(chan struct{})
+		r.inFlight[targetIdx] = ch
 		r.mu.Unlock()
-		return nil
-	}
 
-	// Lock the current fetch mapping
-	ch := make(chan struct{})
-	r.inFlight[targetIdx] = ch
-	r.mu.Unlock()
+		link := r.blocks[targetIdx].Content
+		rc, err := Read(link, r.store, r.slotService)
+		var data []byte
+		if err == nil {
+			data, err = io.ReadAll(rc)
+			rc.Close()
+		}
 
-	defer func() {
 		r.mu.Lock()
 		delete(r.inFlight, targetIdx)
 		close(ch)
+
+		if err != nil {
+			r.mu.Unlock()
+			return err
+		}
+
+		if r.cache == nil {
+			r.mu.Unlock()
+			return io.ErrClosedPipe
+		}
+
+		// Maximum 64 blocks internally mapped to explicitly blanket segment jumping overheads
+		// (64 blocks * ~2MB = ~128MB RAM max overhead per open file, entirely mitigating 15MB Go binary jumps)
+		if len(r.cacheKeys) >= 64 {
+			oldest := r.cacheKeys[0]
+			r.cacheKeys = r.cacheKeys[1:]
+			delete(r.cache, oldest)
+		}
+
+		r.cache[targetIdx] = data
+		r.updateLRU(targetIdx)
 		r.mu.Unlock()
-	}()
 
-	if targetIdx >= len(r.blocks) {
-		return io.EOF
+		return nil
 	}
-
-	link := r.blocks[targetIdx].Content
-	rc, err := Read(link, r.store, r.slotService)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-
-	data, err := io.ReadAll(rc)
-	if err != nil {
-		return err
-	}
-
-	r.mu.Lock()
-	if r.cache == nil {
-		r.mu.Unlock()
-		return io.ErrClosedPipe
-	}
-	// Maximum 64 blocks internally mapped to explicitly blanket segment jumping overheads
-	// (64 blocks * ~2MB = ~128MB RAM max overhead per open file, entirely mitigating 15MB Go binary jumps)
-	if len(r.cacheKeys) >= 64 {
-		oldest := r.cacheKeys[0]
-		r.cacheKeys = r.cacheKeys[1:]
-		delete(r.cache, oldest)
-	}
-
-	r.cache[targetIdx] = data
-	r.updateLRU(targetIdx)
-	r.mu.Unlock()
-
-	return nil
 }
 
 func (r *blockListReader) Read(p []byte) (int, error) {
