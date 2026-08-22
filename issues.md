@@ -164,7 +164,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | Issue ID | Severity | Status | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **ISSUE-P5-01** | Low | Fixed | `internal/config` | Zero test coverage for `internal/config` directory resolution and YAML loader |
-| **ISSUE-P5-02** | Low | Open | `internal/httputil` | Zero test coverage for `internal/httputil` diagnostic client transport wrapper |
+| **ISSUE-P5-02** | Low | Fixed | `internal/httputil` | Zero test coverage for `internal/httputil` diagnostic client transport wrapper |
 
 ---
 
