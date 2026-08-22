@@ -3,7 +3,7 @@ package names
 import (
 	"context"
 	"net"
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -114,7 +114,7 @@ func TestDNSClientGet(t *testing.T) {
 				t.Fatalf("expected error: %v, got: %v", tt.expectedErr, err)
 			}
 
-			if !reflect.DeepEqual(entry, tt.expected) {
+			if entry.Value != tt.expected.Value || !slices.Equal(entry.Tokens, tt.expected.Tokens) {
 				t.Errorf("expected entry: %+v, got: %+v", tt.expected, entry)
 			}
 		})

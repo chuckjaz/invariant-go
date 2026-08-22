@@ -66,3 +66,48 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Severity**: Low
 - **Description**: `docs/Content.md` documents only `inflate` and `gzip` decompression algorithms, omitting `zstd` which was added in `internal/content`.
 - **Resolution**: Update `docs/Content.md` to include `zstd` in the `DecompressTransform` specification.
+
+---
+
+## Phase 2: Mutable State, Naming, Journaling & Transactional KV Store
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-P2-01** | Low | Fixed | `internal/names` | `reflect.DeepEqual` and `"reflect"` import in `dns_client_test.go` violating `AGENTS.md` |
+| **ISSUE-P2-02** | Medium | Open | `internal/kv` | Missing `X-Transaction-ID` header on `POST /tx/start` and `POST /tx/checkpoint` responses |
+| **ISSUE-P2-03** | Medium | Open | `internal/kv` | `LoadLocalJournals` in `internal/kv/journal.go` reads non-journal files like `id` |
+| **ISSUE-P2-04** | Low | Open | `internal/identity` | Zero test coverage for `internal/identity` client package |
+| **ISSUE-P2-05** | Low | Open | `internal/slots` & `internal/names` | Missing `Snapshot() error` method on `FileSystemSlots` and `FileSystemNames` |
+
+---
+
+### [ISSUE-P2-01] Reflection Usage in `dns_client_test.go`
+- **Location**: `internal/names/dns_client_test.go`
+- **Severity**: Low
+- **Description**: `dns_client_test.go` imports `"reflect"` and calls `reflect.DeepEqual`, violating `AGENTS.md` rules against reflection.
+- **Resolution**: Replace with `slices.Equal` and direct struct field comparison.
+
+### [ISSUE-P2-02] Missing `X-Transaction-ID` Header in `POST /tx/start` and `POST /tx/checkpoint`
+- **Location**: `internal/kv/server.go`
+- **Severity**: Medium
+- **Description**: `docs/KeyValue.md` requires `POST /tx/start` and `POST /tx/checkpoint` to return the transaction ID in the `X-Transaction-ID` response header. Currently only returned in JSON body.
+- **Resolution**: Set `X-Transaction-ID` header on both transaction endpoints.
+
+### [ISSUE-P2-03] `LoadLocalJournals` Scanning Non-Journal Files
+- **Location**: `internal/kv/journal.go`
+- **Severity**: Medium
+- **Description**: `LoadLocalJournals` iterates over all directory entries in `j.baseDir` without verifying the filename pattern `journal-*.jsonl`.
+- **Resolution**: Add prefix and suffix validation to only parse valid journal files.
+
+### [ISSUE-P2-04] Zero Unit Test Coverage for `internal/identity`
+- **Location**: `internal/identity/`
+- **Severity**: Low
+- **Description**: Package `internal/identity` has 0 test files and 0% unit test coverage.
+- **Resolution**: Add `internal/identity/client_test.go` covering HTTP ID retrieval, URL scheme handling, and error conditions.
+
+### [ISSUE-P2-05] Missing `Snapshot() error` on `FileSystemSlots` and `FileSystemNames`
+- **Location**: `internal/slots/fs_slots.go`, `internal/names/fs_names.go`
+- **Severity**: Low
+- **Description**: `FileSystemSlots` and `FileSystemNames` wrap `journal.Store` but lacked explicit `Snapshot() error` delegation for clean synchronous snapshot triggers.
+- **Resolution**: Add `Snapshot() error` delegating to `store.Snapshot()`.
+
