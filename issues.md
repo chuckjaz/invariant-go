@@ -77,7 +77,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | **ISSUE-P2-02** | Medium | Fixed | `internal/kv` | Missing `X-Transaction-ID` header on `POST /tx/start` and `POST /tx/checkpoint` responses |
 | **ISSUE-P2-03** | Medium | Fixed | `internal/kv` | `LoadLocalJournals` in `internal/kv/journal.go` reads non-journal files like `id` |
 | **ISSUE-P2-04** | Low | Fixed | `internal/identity` | Zero test coverage for `internal/identity` client package |
-| **ISSUE-P2-05** | Low | Open | `internal/slots` & `internal/names` | Missing `Snapshot() error` method on `FileSystemSlots` and `FileSystemNames` |
+| **ISSUE-P2-05** | Low | Fixed | `internal/slots` & `internal/names` | Missing `Snapshot() error` method on `FileSystemSlots` and `FileSystemNames` |
 
 ---
 

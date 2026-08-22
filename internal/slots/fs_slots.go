@@ -63,6 +63,11 @@ func (s *FileSystemSlots) Close() error {
 	return s.store.Close()
 }
 
+// Snapshot creates an immediate snapshot of the in-memory store.
+func (s *FileSystemSlots) Snapshot() error {
+	return s.store.Snapshot()
+}
+
 // Get returns the address for the given slot ID.
 func (s *FileSystemSlots) Get(ctx context.Context, id string) (string, error) {
 	record, ok := s.store.Get(id)

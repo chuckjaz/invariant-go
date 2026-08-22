@@ -58,6 +58,11 @@ func (s *FileSystemNames) Close() error {
 	return s.store.Close()
 }
 
+// Snapshot creates an immediate snapshot of the in-memory store.
+func (s *FileSystemNames) Snapshot() error {
+	return s.store.Snapshot()
+}
+
 func (s *FileSystemNames) Get(ctx context.Context, name string) (NameEntry, error) {
 	entry, ok := s.store.Get(name)
 	if !ok {
