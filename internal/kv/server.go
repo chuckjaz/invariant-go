@@ -434,6 +434,7 @@ func (s *Server) handleTxStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("X-Transaction-ID", fmt.Sprint(id))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]uint64{"transaction_id": id})
 }
@@ -474,6 +475,7 @@ func (s *Server) handleTxCheckpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("X-Transaction-ID", fmt.Sprint(id))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]uint64{"transaction_id": id})
 }

@@ -192,3 +192,38 @@ func TestClient_NetworkAndUrlErrors(t *testing.T) {
 		t.Errorf("Expected error, got nil")
 	}
 }
+
+func TestServer_TransactionHeaders(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryKeyValueStore()
+	server := NewServer(store)
+	defer server.Close()
+
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+
+	// 1. POST /tx/start should return X-Transaction-ID header
+	resp, err := http.Post(ts.URL+"/tx/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("StartTransaction failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	txHeader := resp.Header.Get("X-Transaction-ID")
+	if txHeader == "" {
+		t.Errorf("Expected X-Transaction-ID header on /tx/start, got empty string")
+	}
+
+	// 2. POST /tx/checkpoint should return X-Transaction-ID header
+	respChk, err := http.Post(ts.URL+"/tx/checkpoint", "application/json", nil)
+	if err != nil {
+		t.Fatalf("CreateCheckpoint failed: %v", err)
+	}
+	defer respChk.Body.Close()
+
+	chkHeader := respChk.Header.Get("X-Transaction-ID")
+	if chkHeader == "" {
+		t.Errorf("Expected X-Transaction-ID header on /tx/checkpoint, got empty string")
+	}
+	_ = ctx
+}
