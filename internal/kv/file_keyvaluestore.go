@@ -379,10 +379,10 @@ func (s *FileKeyValueStore) AbortTransaction(ctx context.Context, txID uint64) e
 
 func (s *FileKeyValueStore) CommitTransaction(ctx context.Context, txID uint64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	tx, ok := s.transactions[txID]
 	if !ok || tx.State != TxActive {
+		s.mu.Unlock()
 		return fmt.Errorf("invalid or inactive transaction: %d", txID)
 	}
 
@@ -418,12 +418,13 @@ func (s *FileKeyValueStore) CommitTransaction(ctx context.Context, txID uint64) 
 			Type:          RecordTypeTxAbort,
 			TransactionID: txID,
 		}
-		s.journal.Append(ctx, rec)
 		tx.State = TxAborted
 		delete(s.activeTxs, txID)
 		for key := range tx.WriteSet {
 			s.cache.Invalidate(key, txID)
 		}
+		s.mu.Unlock()
+		s.journal.Append(ctx, rec)
 		return fmt.Errorf("transaction %d aborted due to conflicts on keys: %v", txID, conflicts)
 	}
 
@@ -431,17 +432,25 @@ func (s *FileKeyValueStore) CommitTransaction(ctx context.Context, txID uint64) 
 		Type:          RecordTypeTxCommit,
 		TransactionID: txID,
 	}
+	s.mu.Unlock()
+
 	flushed, err := s.journal.Append(ctx, rec)
 	if err != nil {
+		s.mu.Lock()
+		tx.State = TxAborted
+		delete(s.activeTxs, txID)
+		s.mu.Unlock()
 		return err
 	}
 
+	s.mu.Lock()
 	tx.State = TxCommitted
 	delete(s.activeTxs, txID)
 
 	if len(s.pendingRecords) >= s.bTreeMergeThreshold || flushed {
 		s.triggerAsyncMerge(ctx)
 	}
+	s.mu.Unlock()
 
 	return nil
 }
@@ -474,21 +483,20 @@ func (s *FileKeyValueStore) Put(ctx context.Context, txID *uint64, key string, v
 		Value:         value,
 	}
 
-	// 1. Write to local journal
-	flushed, err := s.journal.Append(ctx, rec)
-	if err != nil {
-		s.mu.Unlock()
-		return 0, err
-	}
-
 	tx.WriteSet[key] = struct{}{}
-
-	// 2. Add to cache and pending
 	s.cache.Add(rec, false)
 	s.pendingRecords = append(s.pendingRecords, rec)
 	s.pendingIndex[key] = append(s.pendingIndex[key], len(s.pendingRecords)-1)
+	s.mu.Unlock()
 
-	// 3. Merge to BTree if threshold reached
+	// 1. Write to local journal outside store lock
+	flushed, err := s.journal.Append(ctx, rec)
+	if err != nil {
+		return 0, err
+	}
+
+	s.mu.Lock()
+	// 2. Merge to BTree if threshold reached
 	if len(s.pendingRecords) >= s.bTreeMergeThreshold || flushed {
 		s.triggerAsyncMerge(ctx)
 	}

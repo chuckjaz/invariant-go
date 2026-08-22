@@ -116,7 +116,7 @@ func (j *Journal) openNewFile() error {
 }
 
 // Append writes a new record to the local journal. Returns true if it was flushed.
-// Crucial: For transactional commit records, this must trigger a physical disk flush
+// Crucial: For transactional commit records, this triggers a physical disk flush
 // (via file.Sync()) before returning to guarantee ACID durability.
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.mu.Lock()

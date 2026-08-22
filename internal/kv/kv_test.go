@@ -650,3 +650,75 @@ func TestStore_NewFileKeyValueStore_Errors(t *testing.T) {
 		t.Errorf("Expected store creation to succeed even if B-Tree root fails to load, but got: %v", err)
 	}
 }
+
+func BenchmarkCommitTransaction(b *testing.B) {
+	ctx := context.Background()
+	storeClient := newInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	kvStore, err := NewFileKeyValueStore(ctx, slotClient, "btree-bench", nil, "journal-bench", nil, storeClient, b.TempDir(), 1000000, 1000, 1000, content.WriterOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer kvStore.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		txID, err := kvStore.StartTransaction(ctx, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+		key := fmt.Sprintf("bench-key-%d", i)
+		val := []byte(fmt.Sprintf("bench-val-%d", i))
+		if _, err := kvStore.Put(ctx, &txID, key, val); err != nil {
+			b.Fatal(err)
+		}
+		if err := kvStore.CommitTransaction(ctx, txID); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestStore_ConcurrentCommitTransaction(t *testing.T) {
+	ctx := context.Background()
+	storeClient := newInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+
+	kvStore, err := NewFileKeyValueStore(ctx, slotClient, "btree-conc", nil, "journal-conc", nil, storeClient, t.TempDir(), 1000000, 500, 500, content.WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kvStore.Close()
+
+	const numWorkers = 20
+	errCh := make(chan error, numWorkers)
+
+	for i := 0; i < numWorkers; i++ {
+		go func(workerID int) {
+			txID, err := kvStore.StartTransaction(ctx, false)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			key := fmt.Sprintf("worker-key-%d", workerID)
+			val := []byte(fmt.Sprintf("worker-val-%d", workerID))
+			if _, err := kvStore.Put(ctx, &txID, key, val); err != nil {
+				errCh <- err
+				return
+			}
+			if err := kvStore.CommitTransaction(ctx, txID); err != nil {
+				errCh <- err
+				return
+			}
+			errCh <- nil
+		}(i)
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("Concurrent commit worker %d failed: %v", i, err)
+		}
+	}
+}

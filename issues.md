@@ -212,6 +212,9 @@ This file tracks issues and defects identified during code reviews of the Invari
 | **ISSUE-PERF-01** | Medium | Fixed | `internal/files` | Global lock contention in `CreateEntry` and `WriteFile` during synchronous storage network I/O |
 | **ISSUE-PERF-02** | Low | Fixed | `internal/files` | Double memory buffering in `CreateEntry` via `io.ReadAll` |
 | **ISSUE-PERF-03** | Low | Fixed | `internal/files` | Synchronous remote storage upload on `PUT /:node/{name}` without local write-back staging |
+| **ISSUE-PERF-04** | Medium | Open | `internal/kv` | Synchronous remote storage upload and slot update on journal rotation blocking `POST /tx/commit` |
+| **ISSUE-PERF-05** | Low | Fixed | `internal/kv` | Global store lock contention in `FileKeyValueStore.CommitTransaction` during physical disk sync |
+| **ISSUE-PERF-06** | Low | Open | `internal/kv` | Per-transaction `fsync` serialization in `kv.Journal` without group commit batching |
 
 ---
 
@@ -232,6 +235,25 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Severity**: Low
 - **Description**: Every file write immediately uploads blocks to remote storage over HTTP before returning 201 Created.
 - **Resolution**: Support writing to local memory/disk cache first and deferring remote storage replication to background sync.
+
+### [ISSUE-PERF-04] Synchronous Remote Storage and Slot Upload on Journal Rotation
+- **Location**: `internal/kv/journal.go`
+- **Severity**: Medium
+- **Description**: When a journal file reaches `maxEntries`, `flushLocked` synchronously reads the journal file, chunks and uploads it over HTTP to Storage, and updates Slots before `Append` returns, causing commit latency spikes up to 20ms+.
+- **Resolution**: Rotate active journal file locally in microseconds and upload completed journal files asynchronously in a background worker queue.
+
+### [ISSUE-PERF-05] Global Store Lock Contention in `FileKeyValueStore.CommitTransaction`
+- **Location**: `internal/kv/file_keyvaluestore.go`
+- **Severity**: Low
+- **Description**: `CommitTransaction` holds global mutex `s.mu` while executing `file.Sync()` on the journal file, blocking concurrent `Get` and `Put` requests.
+- **Resolution**: Perform journal disk append and `file.Sync()` under journal-specific mutex, holding store `s.mu` only for state validation and conflict checking.
+
+### [ISSUE-PERF-06] Per-Transaction `fsync` Serialization in `kv.Journal`
+- **Location**: `internal/kv/journal.go`
+- **Severity**: Low
+- **Description**: Every individual commit triggers a dedicated `file.Sync()` call, limiting throughput under high concurrency.
+- **Resolution**: Implement group commit batching so concurrent commits share a single physical disk `fsync`.
+
 
 
 
