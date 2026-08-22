@@ -180,6 +180,30 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Description**: `internal/httputil/client.go` wraps HTTP transports with diagnostic logging for long requests, but lacked unit tests.
 - **Resolution**: Add unit tests in `internal/httputil/client_test.go`.
 
+---
+
+## Phase 6: Protocol Specifications & Documentation
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-P6-01** | Low | Fixed | `docs/` | Title typographical errors (`intervariant`, `invarient`) in specification documents |
+| **ISSUE-P6-02** | Low | Open | `docs/` | Missing `docs/BuildCache.md` and `docs/Tags.md` specification references |
+
+---
+
+### [ISSUE-P6-01] Documentation Title Typographical Errors in `docs/`
+- **Location**: `docs/Discovery.md`, `docs/Distribute.md`, `docs/Files.md`
+- **Severity**: Low
+- **Description**: Document titles in specification files contained typos (`intervariant`, `invarient`).
+- **Resolution**: Correct titles to `# The invariant project`.
+
+### [ISSUE-P6-02] Missing `docs/BuildCache.md` and `docs/Tags.md` Specification References
+- **Location**: `docs/`
+- **Severity**: Low
+- **Description**: Missing reference documentation for Go build cache protocol daemon and configuration tags.
+- **Resolution**: Create `docs/BuildCache.md` and `docs/Tags.md`.
+
+
 
 
 

@@ -1,4 +1,4 @@
-# The intervariant project - Discovery Protocol
+# The invariant project - Discovery Protocol
 
 The Discovery Protocol is a simple HTTP-based protocol for discovering Invariant services.
 

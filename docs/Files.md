@@ -1,4 +1,4 @@
-# The invarient project - files protocol
+# The invariant project - files protocol
 
 The files protocol is a file system protocol that creates and updates a file trees as specified by the [FileTree](docs/FileTree.md) specification. This system is intended to be used in conjunction with a FUSE to enable mounting a file tree into a directory.
 

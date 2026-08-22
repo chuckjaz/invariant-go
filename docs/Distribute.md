@@ -1,4 +1,4 @@
-# The intervariant project - Distribute Protocol
+# The invariant project - Distribute Protocol
 
 The Distribute Protocol is a simple protocol for distributing blobs between storage services.
 
