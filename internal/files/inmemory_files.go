@@ -1641,11 +1641,17 @@ func (s *InMemoryFiles) resolveLayerRulesLocked(rules []string) []string {
 // getStorageForLayer returns the storage client for the given layer.
 func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
 	if layerIdx < 0 || layerIdx >= len(s.opts.Layers) {
+		if s.opts.LocalStorage != nil && s.opts.LocalStorage != s.opts.Storage {
+			return storage.NewJoinedStorage(s.opts.LocalStorage, s.opts.Storage)
+		}
 		return s.opts.Storage
 	}
 
 	dest := s.opts.Layers[layerIdx].StorageDestination
 	if dest == "" || s.opts.Discovery == nil {
+		if s.opts.LocalStorage != nil && s.opts.LocalStorage != s.opts.Storage {
+			return storage.NewJoinedStorage(s.opts.LocalStorage, s.opts.Storage)
+		}
 		return s.opts.Storage
 	}
 

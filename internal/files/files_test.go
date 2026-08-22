@@ -903,3 +903,59 @@ func BenchmarkCreateEntry(b *testing.B) {
 		}
 	}
 }
+
+func TestFilesService_LocalStorageStaging(t *testing.T) {
+	remoteStore := storage.NewInMemoryStorage()
+	localStore := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-staging")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), remoteStore, content.WriterOptions{})
+	_ = memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:      remoteStore,
+		LocalStorage: localStore,
+		Slots:        memSlots,
+		RootLink: content.ContentLink{
+			Address: "test-slot",
+			Slot:    true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+	testData := []byte("staged local payload data")
+	err = filesService.CreateEntry(ctx, 1, "staged.txt", filetree.FileKind, "", nil, bytes.NewReader(testData))
+	if err != nil {
+		t.Fatalf("CreateEntry failed: %v", err)
+	}
+
+	// Verify block exists in localStore immediately
+	info, err := filesService.Lookup(ctx, 1, "staged.txt")
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	link, err := filesService.GetContent(ctx, info.Node)
+	if err != nil {
+		t.Fatalf("GetContent failed: %v", err)
+	}
+
+	if !localStore.Has(ctx, link.Address) {
+		t.Errorf("Expected block %s to be in LocalStorage", link.Address)
+	}
+
+	// Read content back
+	r, err := filesService.ReadFile(ctx, info.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	if err != nil || !bytes.Equal(data, testData) {
+		t.Errorf("Data mismatch: got %s, want %s", data, testData)
+	}
+}
