@@ -141,7 +141,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | Issue ID | Severity | Status | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **ISSUE-P4-01** | Medium | Fixed | `internal/buildcache` | Incomplete/empty `ContentLink` written to KV store when storage upload fails in `handlePut` |
-| **ISSUE-P4-02** | Low | Open | `internal/fuse` | Minimal unit test coverage for `internal/fuse` filesystem operations |
+| **ISSUE-P4-02** | Low | Fixed | `internal/fuse` | Minimal unit test coverage for `internal/fuse` filesystem operations |
 
 ---
 
