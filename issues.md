@@ -118,7 +118,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | Issue ID | Severity | Status | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **ISSUE-P3-01** | Medium | Fixed | `internal/filetree` | Missing duplicate entry name validation in `Directory.Validate()` |
-| **ISSUE-P3-02** | Low | Open | `internal/files` | Context cancellation ignored in `handleSync` using `context.Background()` instead of `r.Context()` |
+| **ISSUE-P3-02** | Low | Fixed | `internal/files` | Context cancellation ignored in `handleSync` using `context.Background()` instead of `r.Context()` |
 
 ---
 

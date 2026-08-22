@@ -1,7 +1,6 @@
 package files
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -409,7 +408,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	wait := r.URL.Query().Get("wait") != "false"
 
-	err := s.files.Sync(context.Background(), nodeID, wait)
+	err := s.files.Sync(r.Context(), nodeID, wait)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
