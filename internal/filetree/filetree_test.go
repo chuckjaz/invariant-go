@@ -187,3 +187,28 @@ func TestDirectoryMarshalUnmarshal(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectoryValidation_DuplicateNames(t *testing.T) {
+	dir := Directory{
+		&FileEntry{
+			BaseEntry: BaseEntry{
+				Kind: FileKind,
+				Name: "duplicate.txt",
+			},
+			Content: content.ContentLink{Address: "addr1"},
+			Size:    10,
+		},
+		&FileEntry{
+			BaseEntry: BaseEntry{
+				Kind: FileKind,
+				Name: "duplicate.txt",
+			},
+			Content: content.ContentLink{Address: "addr2"},
+			Size:    20,
+		},
+	}
+
+	if err := dir.Validate(); err == nil {
+		t.Errorf("Expected validation error for directory with duplicate entry names, got nil")
+	}
+}

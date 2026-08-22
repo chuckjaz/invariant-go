@@ -111,3 +111,27 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Description**: `FileSystemSlots` and `FileSystemNames` wrap `journal.Store` but lacked explicit `Snapshot() error` delegation for clean synchronous snapshot triggers.
 - **Resolution**: Add `Snapshot() error` delegating to `store.Snapshot()`.
 
+---
+
+## Phase 3: File System Abstractions, Workspace & File Trees
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-P3-01** | Medium | Fixed | `internal/filetree` | Missing duplicate entry name validation in `Directory.Validate()` |
+| **ISSUE-P3-02** | Low | Open | `internal/files` | Context cancellation ignored in `handleSync` using `context.Background()` instead of `r.Context()` |
+
+---
+
+### [ISSUE-P3-01] Missing Duplicate Entry Name Validation in `Directory.Validate()`
+- **Location**: `internal/filetree/filetree.go`
+- **Severity**: Medium
+- **Description**: `Directory.Validate()` validates individual entries but fails to check whether multiple entries in the same directory share the same name.
+- **Resolution**: Track seen names in `Directory.Validate()` and return an error on duplicates. Add unit test in `filetree_test.go`.
+
+### [ISSUE-P3-02] Context Cancellation Ignored in `handleSync`
+- **Location**: `internal/files/server.go`
+- **Severity**: Low
+- **Description**: In `handleSync`, `s.files.Sync(context.Background(), nodeID, wait)` ignores the incoming HTTP request context, preventing cancellation propagation.
+- **Resolution**: Pass `r.Context()` to `s.files.Sync`.
+
+

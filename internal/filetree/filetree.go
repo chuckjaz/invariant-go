@@ -205,10 +205,15 @@ func (d Directory) MarshalJSON() ([]byte, error) {
 
 // Validate traverses the directory and validates all entries.
 func (d Directory) Validate() error {
+	seen := make(map[string]bool, len(d))
 	for i, entry := range d {
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("entry %d (%q) invalid: %w", i, entry.GetName(), err)
 		}
+		if seen[entry.GetName()] {
+			return fmt.Errorf("duplicate entry name: %q", entry.GetName())
+		}
+		seen[entry.GetName()] = true
 	}
 	return nil
 }
