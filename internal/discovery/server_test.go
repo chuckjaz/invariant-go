@@ -195,4 +195,31 @@ func TestDiscoveryServer(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 OK, got %d", res.StatusCode)
 	}
+
+	// 10. Register second service and query with count=0 (unlimited)
+	reg2 := ServiceRegistration{
+		ID:        "test-service-id-2",
+		Address:   "http://localhost:8081",
+		Protocols: []string{"http"},
+	}
+	reqBody2, _ := json.Marshal(reg2)
+	req2, _ := http.NewRequest(http.MethodPut, ts.URL+"/test-service-id-2", bytes.NewReader(reqBody2))
+	res2, err := client.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2.Body.Close()
+
+	res, err = http.Get(ts.URL + "/?protocol=http&count=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var allHttp []ServiceDescription
+	if err := json.NewDecoder(res.Body).Decode(&allHttp); err != nil {
+		t.Fatal(err)
+	}
+	if len(allHttp) != 2 {
+		t.Fatalf("expected 2 results for count=0, got %d", len(allHttp))
+	}
 }
