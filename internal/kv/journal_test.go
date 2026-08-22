@@ -2,6 +2,8 @@ package kv
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"invariant/internal/content"
@@ -181,5 +183,46 @@ func TestJournal_AppendWithUserInfo(t *testing.T) {
 
 	if records[0].UserID != "userid:98765" {
 		t.Errorf("Expected UserID to be 'userid:98765', got %q", records[0].UserID)
+	}
+}
+
+func TestJournal_LoadLocalJournals_IgnoresNonJournalFiles(t *testing.T) {
+	ctx := context.Background()
+	store := newInMemoryStorage()
+	slotClient := slots.NewMemorySlots("test-slot")
+	tempDir := t.TempDir()
+
+	j, err := NewJournal(tempDir, store, slotClient, "j-slot", nil, nil, 10, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create journal: %v", err)
+	}
+	defer j.Close()
+
+	// Append valid record
+	rec := Record{Type: RecordTypePut, Key: "validKey", Value: []byte("validVal"), TransactionID: 1}
+	if _, err := j.Append(ctx, rec); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	// Create non-journal files in baseDir (e.g. "id", "notes.txt", "journal.bak")
+	os.WriteFile(filepath.Join(tempDir, "id"), []byte("non-json-id-data"), 0644)
+	os.WriteFile(filepath.Join(tempDir, "notes.txt"), []byte("some arbitrary text"), 0644)
+	os.WriteFile(filepath.Join(tempDir, "journal.bak"), []byte("backup"), 0644)
+
+	// Flush buffer by closing
+	if err := j.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	records, err := j.LoadLocalJournals()
+	if err != nil {
+		t.Fatalf("LoadLocalJournals failed: %v", err)
+	}
+
+	if len(records) != 1 {
+		t.Fatalf("Expected 1 record, got %d", len(records))
+	}
+	if records[0].Key != "validKey" {
+		t.Errorf("Expected key 'validKey', got %q", records[0].Key)
 	}
 }

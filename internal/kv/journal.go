@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -239,7 +240,7 @@ func (j *Journal) LoadLocalJournals() ([]Record, error) {
 	}
 	var records []Record
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "journal-") && strings.HasSuffix(e.Name(), ".jsonl") {
 			path := filepath.Join(j.baseDir, e.Name())
 			file, err := os.Open(path)
 			if err != nil {
