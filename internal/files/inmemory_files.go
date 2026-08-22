@@ -394,23 +394,34 @@ func (s *InMemoryFiles) deleteNodeRecursively(id uint64, parentID uint64) {
 	delete(s.dirtyNodes, id)
 }
 
+func (s *InMemoryFiles) getStorageForMembership(membership map[int]bool) storage.Storage {
+	layerIdx := -1
+	for idx, val := range membership {
+		if val && idx > layerIdx {
+			layerIdx = idx
+		}
+	}
+	return s.getStorageForLayer(layerIdx)
+}
+
 func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name string, kind filetree.EntryKind, target string, contentLink *content.ContentLink, contentReader io.Reader) error {
 	if !s.isWritable() {
 		return errors.New("file system is read-only")
 	}
 
+	// 1. Evaluate layer membership and resolve parent under lock
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if err := s.ensureLoaded(parentID); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
-	parentNode := s.nodes[parentID]
-	childID := s.getNextID()
-	now := uint64(time.Now().Unix())
+	parentNode, ok := s.nodes[parentID]
+	if !ok {
+		s.mu.Unlock()
+		return errors.New("invalid parent node")
+	}
 
-	layerMembership := make(map[int]bool)
 	childPath := s.getFullPath(parentID)
 	if childPath == "" || childPath == "/" {
 		childPath = "/" + name
@@ -418,6 +429,7 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		childPath = childPath + "/" + name
 	}
 
+	layerMembership := make(map[int]bool)
 	alreadyIncluded := false
 	for i, layer := range s.opts.Layers {
 		if layer.ReadOnly {
@@ -464,6 +476,53 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		}
 	}
 
+	targetStorage := s.getStorageForMembership(layerMembership)
+	s.mu.Unlock()
+
+	// 2. Perform Content I/O outside of mutex lock
+	var link content.ContentLink
+	var dataLen uint64
+	switch kind {
+	case filetree.FileKind, filetree.DirectoryKind:
+		if contentLink != nil {
+			link = *contentLink
+		} else {
+			if contentReader == nil {
+				contentReader = io.LimitReader(nil, 0)
+			}
+			data, err := io.ReadAll(contentReader)
+			if err != nil {
+				return fmt.Errorf("failed to read content: %v", err)
+			}
+			if kind == filetree.FileKind {
+				dataLen = uint64(len(data))
+			}
+			opts := s.opts.WriterOptions
+			opts.Filename = name
+			uploadedLink, err := content.Write(bytes.NewReader(data), targetStorage, opts)
+			if err != nil {
+				return fmt.Errorf("failed to save file: %v", err)
+			}
+			link = uploadedLink
+		}
+
+	case filetree.SymbolicLinkKind:
+		if target == "" {
+			return errors.New("target is required for SymbolicLink")
+		}
+	}
+
+	// 3. Re-acquire lock to insert new node
+	s.mu.Lock()
+	parentNode, ok = s.nodes[parentID]
+	if !ok {
+		s.mu.Unlock()
+		return errors.New("parent node no longer exists")
+	}
+
+	childID := s.getNextID()
+	now := uint64(time.Now().Unix())
+
 	childNode := &Node{
 		ID:              childID,
 		Name:            name,
@@ -474,47 +533,21 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 		LayerMembership: layerMembership,
 		LayerContents:   make(map[int]content.ContentLink),
 		IsDirty:         true,
+		Content:         link,
+		Size:            dataLen,
 	}
 
-	switch kind {
-	case filetree.FileKind, filetree.DirectoryKind:
-		if contentLink != nil {
-			childNode.Content = *contentLink
-		} else {
-			if contentReader == nil {
-				contentReader = io.LimitReader(nil, 0)
-			}
-			data, err := io.ReadAll(contentReader)
-			if err != nil {
-				return fmt.Errorf("failed to read content: %v", err)
-			}
-			if kind == filetree.FileKind {
-				childNode.Size = uint64(len(data))
-			}
-			opts := s.opts.WriterOptions
-			opts.Filename = name
-			link, err := content.Write(bytes.NewReader(data), s.getStorageForNode(childNode), opts)
-			if err != nil {
-				return fmt.Errorf("failed to save file: %v", err)
-			}
-			childNode.Content = link
-		}
-
-		if kind == filetree.DirectoryKind {
-			childNode.Children = make(map[string]uint64)
-			childNode.IsLoaded = true
-		}
-
-	case filetree.SymbolicLinkKind:
-		if target == "" {
-			return errors.New("target is required for SymbolicLink")
-		}
+	if kind == filetree.DirectoryKind {
+		childNode.Children = make(map[string]uint64)
+		childNode.IsLoaded = true
+	} else if kind == filetree.SymbolicLinkKind {
 		childNode.Target = target
 	}
 
 	s.nodes[childID] = childNode
 	parentNode.Children[name] = childID
 	s.markDirty(parentID)
+	s.mu.Unlock()
 
 	go s.checkAndReload(parentID, name)
 
@@ -621,17 +654,23 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 		return errors.New("file system is read-only")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// 1. Fetch node metadata under read lock
+	s.mu.RLock()
 	node, ok := s.nodes[nodeID]
 	if !ok || node.Kind != filetree.FileKind {
+		s.mu.RUnlock()
 		return errors.New("invalid file node")
 	}
 
+	nodeName := node.Name
+	nodeContent := node.Content
+	nodeSize := node.Size
+	targetStorage := s.getStorageForNode(node)
+	s.mu.RUnlock()
+
 	var startOffset int64
 	if appendFlag {
-		startOffset = int64(node.Size)
+		startOffset = int64(nodeSize)
 	} else if offset > 0 {
 		startOffset = offset
 	} else {
@@ -639,9 +678,9 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	}
 
 	var existingReader io.ReadCloser
-	if node.Content.Address != "" {
+	if nodeContent.Address != "" {
 		var err error
-		existingReader, err = content.Read(node.Content, s.getStorageForNode(node), s.opts.Slots)
+		existingReader, err = content.Read(nodeContent, targetStorage, s.opts.Slots)
 		if err != nil {
 			return fmt.Errorf("failed to read existing content: %w", err)
 		}
@@ -651,11 +690,11 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	var parts []io.Reader
 
 	if existingReader != nil {
-		if startOffset <= int64(node.Size) {
+		if startOffset <= int64(nodeSize) {
 			parts = append(parts, io.LimitReader(existingReader, startOffset))
 		} else {
 			parts = append(parts, existingReader)
-			parts = append(parts, io.LimitReader(zeroReader{}, startOffset-int64(node.Size)))
+			parts = append(parts, io.LimitReader(zeroReader{}, startOffset-int64(nodeSize)))
 		}
 	} else if startOffset > 0 {
 		parts = append(parts, io.LimitReader(zeroReader{}, startOffset))
@@ -674,10 +713,18 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	}
 
 	opts := s.opts.WriterOptions
-	opts.Filename = node.Name
-	link, err := content.Write(io.MultiReader(parts...), s.getStorageForNode(node), opts)
+	opts.Filename = nodeName
+	link, err := content.Write(io.MultiReader(parts...), targetStorage, opts)
 	if err != nil {
 		return err
+	}
+
+	// 2. Update node metadata under write lock
+	s.mu.Lock()
+	node, ok = s.nodes[nodeID]
+	if !ok || node.Kind != filetree.FileKind {
+		s.mu.Unlock()
+		return errors.New("file node was deleted during write")
 	}
 
 	node.Content = link
@@ -688,6 +735,7 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 	}
 	node.Size = uint64(max(int64(node.Size), startOffset+cr.n))
 	s.markDirty(nodeID)
+	s.mu.Unlock()
 
 	go s.checkAndReloadNode(nodeID)
 

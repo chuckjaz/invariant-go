@@ -796,3 +796,75 @@ func TestFilesService_MountConfigPseudoFile(t *testing.T) {
 		t.Errorf("Expected .invariant-mount.json in ReadDirectory entries")
 	}
 }
+
+func TestFilesService_ConcurrentCreateEntry(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-concurrent")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, err := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = memSlots.Create(context.Background(), "test-slot", initLink.Address, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage: store,
+		Slots:   memSlots,
+		RootLink: content.ContentLink{
+			Address: "test-slot",
+			Slot:    true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+	const numFiles = 50
+	errCh := make(chan error, numFiles)
+
+	for i := 0; i < numFiles; i++ {
+		go func(idx int) {
+			name := fmt.Sprintf("concurrent-file-%d.txt", idx)
+			data := []byte(fmt.Sprintf("Concurrent file data content #%d", idx))
+			err := filesService.CreateEntry(ctx, 1, name, filetree.FileKind, "", nil, bytes.NewReader(data))
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			// Concurrent lookup
+			info, err := filesService.Lookup(ctx, 1, name)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			// Concurrent read
+			r, err := filesService.ReadFile(ctx, info.Node, 0, 0)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer r.Close()
+			readData, err := io.ReadAll(r)
+			if err != nil || !bytes.Equal(readData, data) {
+				errCh <- fmt.Errorf("data mismatch for %s", name)
+				return
+			}
+
+			errCh <- nil
+		}(i)
+	}
+
+	for i := 0; i < numFiles; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("Concurrent operation failed: %v", err)
+		}
+	}
+}

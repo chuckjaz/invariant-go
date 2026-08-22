@@ -203,6 +203,37 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Description**: Missing reference documentation for Go build cache protocol daemon and configuration tags.
 - **Resolution**: Create `docs/BuildCache.md` and `docs/Tags.md`.
 
+---
+
+## Phase 7: Performance Optimizations
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-PERF-01** | Medium | Fixed | `internal/files` | Global lock contention in `CreateEntry` and `WriteFile` during synchronous storage network I/O |
+| **ISSUE-PERF-02** | Low | Open | `internal/files` | Double memory buffering in `CreateEntry` via `io.ReadAll` |
+| **ISSUE-PERF-03** | Low | Open | `internal/files` | Synchronous remote storage upload on `PUT /:node/{name}` without local write-back staging |
+
+---
+
+### [ISSUE-PERF-01] Global Lock Contention in `CreateEntry` and `WriteFile` during Storage Network I/O
+- **Location**: `internal/files/inmemory_files.go`
+- **Severity**: Medium
+- **Description**: `InMemoryFiles.CreateEntry` and `WriteFile` hold `s.mu.Lock()` while performing synchronous network I/O (`content.Write` and `content.Read`), blocking all concurrent lookups and reads across the entire filesystem instance.
+- **Resolution**: Compute block hashes and perform storage writes outside the global mutex, acquiring `s.mu.Lock()` only for node map attachment and metadata updates.
+
+### [ISSUE-PERF-02] Double Memory Buffering in `CreateEntry` via `io.ReadAll`
+- **Location**: `internal/files/inmemory_files.go`
+- **Severity**: Low
+- **Description**: `CreateEntry` reads the entire body with `io.ReadAll` into memory, then re-wraps it in `bytes.NewReader(data)` for `content.Write`.
+- **Resolution**: Stream `contentReader` directly or use pooled chunk buffers to reduce heap allocations and GC pauses.
+
+### [ISSUE-PERF-03] Synchronous Remote Storage Upload on `PUT /:node/{name}`
+- **Location**: `internal/files/inmemory_files.go`
+- **Severity**: Low
+- **Description**: Every file write immediately uploads blocks to remote storage over HTTP before returning 201 Created.
+- **Resolution**: Support writing to local memory/disk cache first and deferring remote storage replication to background sync.
+
+
 
 
 
