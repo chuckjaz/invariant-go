@@ -2,7 +2,6 @@ package kv
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,6 +64,12 @@ type Journal struct {
 	maxEntries      int
 	opts            content.WriterOptions
 	lastRecordType  RecordType
+
+	// Group commit coordination
+	syncEpoch   uint64
+	syncedEpoch uint64
+	syncing     bool
+	syncCond    *sync.Cond
 }
 
 func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, slotID string, slotAuth []byte, previousJournal *content.ContentLink, maxEntries int, opts content.WriterOptions) (*Journal, error) {
@@ -81,6 +86,7 @@ func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, s
 		maxEntries:      maxEntries,
 		opts:            opts,
 	}
+	j.syncCond = sync.NewCond(&j.mu)
 	if err := j.openNewFile(); err != nil {
 		return nil, err
 	}
@@ -101,6 +107,9 @@ func (j *Journal) openNewFile() error {
 	j.currentWriter = bufio.NewWriter(file)
 	j.currentEncoder = json.NewEncoder(j.currentWriter)
 	j.entries = 0
+	j.syncEpoch = 0
+	j.syncedEpoch = 0
+	j.syncing = false
 
 	// Write header
 	header := JournalEntry{Header: &JournalHeader{PreviousJournal: j.previousJournal}}
@@ -117,7 +126,7 @@ func (j *Journal) openNewFile() error {
 
 // Append writes a new record to the local journal. Returns true if it was flushed.
 // Crucial: For transactional commit records, this triggers a physical disk flush
-// (via file.Sync()) before returning to guarantee ACID durability.
+// (via file.Sync() with group commit batching) before returning to guarantee ACID durability.
 func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -130,14 +139,41 @@ func (j *Journal) Append(ctx context.Context, rec Record) (bool, error) {
 	if err := j.currentEncoder.Encode(entry); err != nil {
 		return false, err
 	}
-	// ACID Durability Rule: Only sync to disk synchronously for commit or checkpoint records.
-	// This ensures previously buffered updates are safely persisted at commit time.
+
+	// ACID Durability Rule: Sync to disk for commit or checkpoint records using Group Commit.
 	if rec.Type == RecordTypeTxCommit || rec.Type == RecordTypeTxCheckpoint {
 		if err := j.currentWriter.Flush(); err != nil {
 			return false, err
 		}
-		if err := j.currentFile.Sync(); err != nil {
-			return false, err
+		myEpoch := j.syncEpoch + 1
+		j.syncEpoch = myEpoch
+
+		// Wait while another goroutine is actively syncing
+		for j.syncing && j.syncedEpoch < myEpoch {
+			j.syncCond.Wait()
+		}
+
+		if j.syncedEpoch < myEpoch {
+			j.syncing = true
+			targetFile := j.currentFile
+			targetEpoch := j.syncEpoch
+			j.mu.Unlock()
+
+			// Perform physical disk sync without holding j.mu
+			syncErr := targetFile.Sync()
+
+			j.mu.Lock()
+			j.syncing = false
+			if syncErr == nil {
+				if targetEpoch > j.syncedEpoch {
+					j.syncedEpoch = targetEpoch
+				}
+			}
+			j.syncCond.Broadcast()
+
+			if syncErr != nil {
+				return false, syncErr
+			}
 		}
 	}
 
@@ -168,12 +204,13 @@ func (j *Journal) flushLocked(ctx context.Context) error {
 	j.currentFile.Close()
 
 	// Read and upload to storage
-	data, err := os.ReadFile(j.currentPath)
+	file, err := os.Open(j.currentPath)
 	if err != nil {
 		return err
 	}
 
-	link, err := content.Write(bytes.NewReader(data), j.storage, j.opts)
+	link, err := content.Write(file, j.storage, j.opts)
+	file.Close()
 	if err != nil {
 		return err
 	}
