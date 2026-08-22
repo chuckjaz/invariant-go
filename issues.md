@@ -187,7 +187,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | Issue ID | Severity | Status | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **ISSUE-P6-01** | Low | Fixed | `docs/` | Title typographical errors (`intervariant`, `invarient`) in specification documents |
-| **ISSUE-P6-02** | Low | Open | `docs/` | Missing `docs/BuildCache.md` and `docs/Tags.md` specification references |
+| **ISSUE-P6-02** | Low | Fixed | `docs/` | Missing `docs/BuildCache.md` and `docs/Tags.md` specification references |
 
 ---
 
