@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"errors"
@@ -164,26 +165,75 @@ func (s *CachingStorage) addUsed(address string, size int64) {
 	s.checkEviction()
 }
 
-type trackingReadCloser struct {
-	c  io.ReadCloser
-	pw *io.PipeWriter
+type asyncTeeReadCloser struct {
+	c      io.ReadCloser
+	ch     chan []byte
+	done   chan struct{}
+	err    error
+	closed bool
+	mu     sync.Mutex
 }
 
-func (t *trackingReadCloser) Read(p []byte) (n int, err error) {
+func newAsyncTeeReadCloser(c io.ReadCloser, ctx context.Context, onComplete func(r io.Reader)) *asyncTeeReadCloser {
+	t := &asyncTeeReadCloser{
+		c:    c,
+		ch:   make(chan []byte, 64),
+		done: make(chan struct{}),
+	}
+
+	go func() {
+		defer close(t.done)
+		var buf bytes.Buffer
+		for chunk := range t.ch {
+			buf.Write(chunk)
+		}
+		t.mu.Lock()
+		readErr := t.err
+		t.mu.Unlock()
+
+		if (readErr == nil || readErr == io.EOF) && onComplete != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				onComplete(bytes.NewReader(buf.Bytes()))
+			}
+		}
+	}()
+
+	return t
+}
+
+func (t *asyncTeeReadCloser) Read(p []byte) (n int, err error) {
 	n, err = t.c.Read(p)
 	if n > 0 {
-		_, _ = t.pw.Write(p[:n])
+		chunk := append([]byte(nil), p[:n]...)
+		t.mu.Lock()
+		if !t.closed {
+			t.ch <- chunk
+		}
+		t.mu.Unlock()
 	}
-	if err == io.EOF {
-		t.pw.Close()
-	} else if err != nil {
-		t.pw.CloseWithError(err)
+	if err != nil {
+		t.mu.Lock()
+		if !t.closed {
+			t.err = err
+			t.closed = true
+			close(t.ch)
+		}
+		t.mu.Unlock()
 	}
 	return n, err
 }
 
-func (t *trackingReadCloser) Close() error {
-	t.pw.CloseWithError(io.ErrClosedPipe)
+func (t *asyncTeeReadCloser) Close() error {
+	t.mu.Lock()
+	if !t.closed {
+		t.closed = true
+		t.err = io.ErrClosedPipe
+		close(t.ch)
+	}
+	t.mu.Unlock()
 	return t.c.Close()
 }
 
@@ -235,22 +285,15 @@ func (s *CachingStorage) Get(ctx context.Context, address string) (io.ReadCloser
 				s.mu.Unlock()
 
 				if hasRoom {
-					pr, pw := io.Pipe()
-					go func() {
-						defer pr.Close()
-						okL, errL := s.local.StoreAt(context.Background(), address, pr)
+					return newAsyncTeeReadCloser(rcSrc, s.ctx, func(r io.Reader) {
+						okL, errL := s.local.StoreAt(s.ctx, address, r)
 						if errL == nil && okL {
-							actualSize, hasSizeL := s.local.Size(context.Background(), address)
+							actualSize, hasSizeL := s.local.Size(s.ctx, address)
 							if hasSizeL {
 								s.addUsed(address, actualSize)
 							}
 						}
-					}()
-
-					return &trackingReadCloser{
-						c:  rcSrc,
-						pw: pw,
-					}, true
+					}), true
 				}
 			}
 			return rcSrc, true
