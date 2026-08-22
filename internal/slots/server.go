@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"invariant/internal/trace"
 )
 
 // Server wraps a Slots implementation and provides HTTP endpoints.
 type Server struct {
-	id    string
-	slots Slots
+	id     string
+	slots  Slots
+	tracer *trace.Tracer
 }
 
 // NewServer creates a new Slots HTTP server.
@@ -21,6 +24,12 @@ func NewServer(slots Slots) *Server {
 		id:    slots.ID(),
 		slots: slots,
 	}
+}
+
+// WithTracer attaches a Tracer to the slots server.
+func (s *Server) WithTracer(t *trace.Tracer) *Server {
+	s.tracer = t
+	return s
 }
 
 // NotifyClient represents a client that can notify a service about known items.
@@ -92,7 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /{id}", s.handleUpdateSlot)
 	mux.HandleFunc("POST /{id}", s.handleCreateSlot)
 
-	return mux
+	return trace.Middleware("slots", s.tracer)(mux)
 }
 
 // ServeHTTP implements the http.Handler interface.

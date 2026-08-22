@@ -17,6 +17,7 @@ import (
 	"invariant/internal/notify"
 	"invariant/internal/slots"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func generateID() string {
@@ -47,6 +48,8 @@ func main() {
 	flag.DurationVar(&notifyBatchDuration, "notify-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new slot notifications")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	if id == "" {
@@ -99,6 +102,9 @@ func main() {
 	}
 
 	server := slots.NewServer(s)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	var notifyClients []slots.NotifyClient
 	if disc != nil {

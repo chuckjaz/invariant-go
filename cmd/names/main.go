@@ -13,6 +13,7 @@ import (
 	"invariant/internal/identity"
 	"invariant/internal/names"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func main() {
@@ -29,6 +30,8 @@ func main() {
 	flag.StringVar(&upstreamURL, "upstream", "", "Upstream name service URL to delegate queries to")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	var n names.Names
@@ -50,6 +53,9 @@ func main() {
 	}
 
 	server := names.NewNamesServer(n)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", addr)

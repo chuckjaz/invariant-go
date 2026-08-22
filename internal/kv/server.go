@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"invariant/internal/trace"
+
 	"tailscale.com/client/local"
 	"tailscale.com/client/tailscale/apitype"
 )
@@ -26,6 +28,7 @@ type Server struct {
 	WhoIsTTL  time.Duration
 	cache     *whoIsCache
 	cacheOnce sync.Once
+	tracer    *trace.Tracer
 }
 
 func NewServer(store KeyValueStore) *Server {
@@ -43,6 +46,13 @@ func NewServer(store KeyValueStore) *Server {
 		store:    store,
 		WhoIsTTL: 1 * time.Minute,
 	}
+	s.handler = s.Handler()
+	return s
+}
+
+// WithTracer attaches a Tracer to the key-value server.
+func (s *Server) WithTracer(t *trace.Tracer) *Server {
+	s.tracer = t
 	s.handler = s.Handler()
 	return s
 }
@@ -75,7 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /batch_get", s.handleBatchGet)
 	mux.HandleFunc("POST /batch_history", s.handleBatchGetHistory)
 
-	return mux
+	return trace.Middleware("kv", s.tracer)(mux)
 }
 
 func (s *Server) handleGetID(w http.ResponseWriter, r *http.Request) {

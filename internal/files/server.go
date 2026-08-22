@@ -10,16 +10,24 @@ import (
 
 	"invariant/internal/content"
 	"invariant/internal/filetree"
+	"invariant/internal/trace"
 )
 
 // Server exposes a Files interface over HTTP
 type Server struct {
-	files Files
+	files  Files
+	tracer *trace.Tracer
 }
 
 // NewServer creates a new HTTP server wrapper for the Files interface
 func NewServer(files Files) *Server {
 	return &Server{files: files}
+}
+
+// WithTracer attaches a Tracer to the files server.
+func (s *Server) WithTracer(t *trace.Tracer) *Server {
+	s.tracer = t
+	return s
 }
 
 // Handler returns the http.Handler for the files service
@@ -46,7 +54,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("PUT /sync", s.handleSync)
 
-	return mux
+	return trace.Middleware("files", s.tracer)(mux)
 }
 
 func parseNodeID(nodeStr string) (uint64, error) {

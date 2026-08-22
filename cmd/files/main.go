@@ -15,6 +15,7 @@ import (
 	"invariant/internal/finder"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
+	"invariant/internal/trace"
 )
 
 func main() {
@@ -26,6 +27,8 @@ func main() {
 	flag.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	var dClient discovery.Discovery
@@ -76,6 +79,9 @@ func main() {
 	defer f.Close()
 
 	server := files.NewServer(f)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", addr)

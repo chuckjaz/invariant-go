@@ -17,6 +17,7 @@ import (
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func generateID() string {
@@ -63,6 +64,8 @@ func main() {
 	flag.StringVar(&keyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	var keyStr string
 	flag.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 
 	flag.Parse()
 
@@ -172,6 +175,9 @@ func main() {
 	defer store.Close()
 
 	server := kv.NewServer(store)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", addr)

@@ -6,16 +6,24 @@ import (
 	"strings"
 
 	"invariant/internal/identity"
+	"invariant/internal/trace"
 )
 
 type NamesServer struct {
-	names Names
+	names  Names
+	tracer *trace.Tracer
 }
 
 func NewNamesServer(names Names) *NamesServer {
 	return &NamesServer{
 		names: names,
 	}
+}
+
+// WithTracer attaches a Tracer to the names server.
+func (s *NamesServer) WithTracer(t *trace.Tracer) *NamesServer {
+	s.tracer = t
+	return s
 }
 
 func (s *NamesServer) Handler() http.Handler {
@@ -27,7 +35,7 @@ func (s *NamesServer) Handler() http.Handler {
 	mux.HandleFunc("PUT /{name}", s.handlePut)
 	mux.HandleFunc("DELETE /{name}", s.handleDelete)
 
-	return mux
+	return trace.Middleware("names", s.tracer)(mux)
 }
 
 func (s *NamesServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
