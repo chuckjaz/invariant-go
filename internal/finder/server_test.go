@@ -8,7 +8,6 @@ import (
 	"invariant/internal/notify"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -109,7 +108,7 @@ func TestFinderHasAndFindBlock(t *testing.T) {
 		ID:       storageID,
 		Protocol: "storage-v1",
 	}
-	if !reflect.DeepEqual(res[0], expected) {
+	if res[0] != expected {
 		t.Errorf("Expected %v, got %v", expected, res[0])
 	}
 }
