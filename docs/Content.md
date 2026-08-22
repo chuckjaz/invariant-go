@@ -51,7 +51,7 @@ interface AesCbcDecipherTransform {
 
 interface DecompressTransform {
     kind: "Decompress"
-    algorithm: "inflate" | "gzip"
+    algorithm: "inflate" | "gzip" | "zstd"
 }
 ```
 
@@ -90,7 +90,7 @@ This transform is used to decrypt content that has been encrypted with AES-256-C
 
 #### Decompress
 
-This transform is used to decompress content that has been compressed with deflate, brotli, or unzip. Other compression algorithms may be supported in the future.
+This transform is used to decompress content that has been compressed with deflate (`inflate`), gzip (`gzip`), or Zstandard (`zstd`). Other compression algorithms may be supported in the future.
 
 ## Writing a `:content-link`
 

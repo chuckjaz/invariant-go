@@ -13,7 +13,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | **ISSUE-P1-05** | Low | Fixed | `internal/finder` | `reflect.DeepEqual` usage in `finder/server_test.go` violating `AGENTS.md` rules |
 | **ISSUE-P1-06** | Medium | Fixed | `internal/storage` | Unbuffered `io.Pipe()` in `CachingStorage` block promotion causes synchronous read blocking |
 | **ISSUE-P1-07** | Low | Fixed | `internal/notify` | Zero test coverage for `internal/notify` client |
-| **ISSUE-P1-08** | Low | Open | `docs` / `content` | Missing `zstd` algorithm specification in `docs/Content.md` |
+| **ISSUE-P1-08** | Low | Fixed | `docs` / `content` | Missing `zstd` algorithm specification in `docs/Content.md` |
 
 ---
 
