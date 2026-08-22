@@ -55,28 +55,58 @@ func (s *FileSystemStorage) ID() string {
 	return s.id
 }
 
+func isValidHexAddress(address string) bool {
+	if len(address) == 0 {
+		return false
+	}
+	for i := range len(address) {
+		c := address[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // addressToPath converts an address (e.g., "aabbcc...") to a structured path
-// like "aa/bb/cc...".
-func (s *FileSystemStorage) addressToPath(address string) string {
-	if len(address) < 4 {
-		return filepath.Join(s.baseDir, address)
+// like "aa/bb/cc...". Returns false if address format is invalid or attempts path traversal.
+func (s *FileSystemStorage) addressToPath(address string) (string, bool) {
+	if !isValidHexAddress(address) {
+		return "", false
 	}
 
-	dir1 := address[0:2]
-	dir2 := address[2:4]
-	filename := address[4:]
+	var fullPath string
+	if len(address) < 4 {
+		fullPath = filepath.Join(s.baseDir, address)
+	} else {
+		dir1 := address[0:2]
+		dir2 := address[2:4]
+		filename := address[4:]
+		fullPath = filepath.Join(s.baseDir, dir1, dir2, filename)
+	}
 
-	return filepath.Join(s.baseDir, dir1, dir2, filename)
+	rel, err := filepath.Rel(s.baseDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return "", false
+	}
+
+	return fullPath, true
 }
 
 func (s *FileSystemStorage) Has(ctx context.Context, address string) bool {
-	path := s.addressToPath(address)
+	path, ok := s.addressToPath(address)
+	if !ok {
+		return false
+	}
 	_, err := os.Stat(path)
 	return err == nil
 }
 
 func (s *FileSystemStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
-	path := s.addressToPath(address)
+	path, ok := s.addressToPath(address)
+	if !ok {
+		return nil, false
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, false
@@ -109,7 +139,7 @@ func (s *FileSystemStorage) Store(ctx context.Context, r io.Reader) (string, err
 	address := hex.EncodeToString(hashBytes)
 
 	// 3. Move the temporary file to its final destination
-	finalPath := s.addressToPath(address)
+	finalPath, _ := s.addressToPath(address)
 
 	// Ensure the destination directories exist (e.g., dir/aa/bb/)
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
@@ -130,6 +160,10 @@ func (s *FileSystemStorage) Store(ctx context.Context, r io.Reader) (string, err
 }
 
 func (s *FileSystemStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	if !isValidHexAddress(address) {
+		return false, nil
+	}
+
 	// 1. Create a temporary file to read the stream and calculate the hash
 	tmpFile, err := os.CreateTemp(s.baseDir, "upload-*")
 	if err != nil {
@@ -155,7 +189,10 @@ func (s *FileSystemStorage) StoreAt(ctx context.Context, address string, r io.Re
 	}
 
 	// 3. Move the file
-	finalPath := s.addressToPath(address)
+	finalPath, ok := s.addressToPath(address)
+	if !ok {
+		return false, nil
+	}
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
 		return false, err
 	}
@@ -170,7 +207,10 @@ func (s *FileSystemStorage) StoreAt(ctx context.Context, address string, r io.Re
 }
 
 func (s *FileSystemStorage) Size(ctx context.Context, address string) (int64, bool) {
-	path := s.addressToPath(address)
+	path, ok := s.addressToPath(address)
+	if !ok {
+		return 0, false
+	}
 	stat, err := os.Stat(path)
 	if err != nil {
 		return 0, false
@@ -254,7 +294,10 @@ func (s *FileSystemStorage) notifySubscribers(address string) {
 }
 
 func (s *FileSystemStorage) Remove(ctx context.Context, address string) (bool, error) {
-	path := s.addressToPath(address)
+	path, ok := s.addressToPath(address)
+	if !ok {
+		return false, nil
+	}
 	err := os.Remove(path)
 	if err != nil {
 		if os.IsNotExist(err) {

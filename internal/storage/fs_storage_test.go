@@ -186,3 +186,41 @@ func TestFileSystemStorageExtra(t *testing.T) {
 		t.Errorf("Expected missing addresses to be ['b3'], got %v", missing)
 	}
 }
+
+func TestFileSystemStorage_PathTraversalProtection(t *testing.T) {
+	tmpDir := t.TempDir()
+	fs := NewFileSystemStorage(tmpDir)
+	ctx := context.Background()
+
+	// Outside file creation to test unauthorized access
+	secretFile := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("super secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	traversalAddresses := []string{
+		"../../../../etc/passwd",
+		"../secret.txt",
+		"00/../../etc/shadow",
+		"invalid_non_hex_address!",
+		"",
+	}
+
+	for _, addr := range traversalAddresses {
+		if fs.Has(ctx, addr) {
+			t.Errorf("Has should return false for traversal address %q", addr)
+		}
+		if _, ok := fs.Get(ctx, addr); ok {
+			t.Errorf("Get should return false for traversal address %q", addr)
+		}
+		if _, ok := fs.Size(ctx, addr); ok {
+			t.Errorf("Size should return false for traversal address %q", addr)
+		}
+		if removed, err := fs.Remove(ctx, addr); removed || err != nil {
+			t.Errorf("Remove should return false, nil for traversal address %q; got removed=%t, err=%v", addr, removed, err)
+		}
+		if success, _ := fs.StoreAt(ctx, addr, bytes.NewReader([]byte("data"))); success {
+			t.Errorf("StoreAt should return false for traversal address %q", addr)
+		}
+	}
+}
