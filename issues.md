@@ -157,5 +157,29 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Description**: `internal/fuse/fuse_test.go` only tests root node creation and initial `Getattr`, leaving core filesystem operations untested.
 - **Resolution**: Add unit tests for `Create`, `Write`, `Read`, `Mkdir`, `Symlink`, `Readlink`, `Rename`, `Setattr`, and `Unlink`.
 
+---
+
+## Phase 5: CLI, Daemons, Cluster & Distribution
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-P5-01** | Low | Fixed | `internal/config` | Zero test coverage for `internal/config` directory resolution and YAML loader |
+| **ISSUE-P5-02** | Low | Open | `internal/httputil` | Zero test coverage for `internal/httputil` diagnostic client transport wrapper |
+
+---
+
+### [ISSUE-P5-01] Zero Test Coverage for `internal/config`
+- **Location**: `internal/config/`
+- **Severity**: Low
+- **Description**: `internal/config` manages config and cache directories and global configuration loading, but lacked automated test coverage.
+- **Resolution**: Add unit tests in `internal/config/config_test.go`.
+
+### [ISSUE-P5-02] Zero Test Coverage for `internal/httputil`
+- **Location**: `internal/httputil/`
+- **Severity**: Low
+- **Description**: `internal/httputil/client.go` wraps HTTP transports with diagnostic logging for long requests, but lacked unit tests.
+- **Resolution**: Add unit tests in `internal/httputil/client_test.go`.
+
+
 
 
