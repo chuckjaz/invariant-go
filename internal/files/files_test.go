@@ -868,3 +868,38 @@ func TestFilesService_ConcurrentCreateEntry(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkCreateEntry(b *testing.B) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("bench-slot")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	_ = memSlots.Create(context.Background(), "bench-slot", initLink.Address, "")
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage: store,
+		Slots:   memSlots,
+		RootLink: content.ContentLink{
+			Address: "bench-slot",
+			Slot:    true,
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+	payload := bytes.Repeat([]byte("A"), 64*1024) // 64 KB
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		name := fmt.Sprintf("bench-file-%d.dat", i)
+		if err := filesService.CreateEntry(ctx, 1, name, filetree.FileKind, "", nil, bytes.NewReader(payload)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

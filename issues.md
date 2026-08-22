@@ -210,7 +210,7 @@ This file tracks issues and defects identified during code reviews of the Invari
 | Issue ID | Severity | Status | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **ISSUE-PERF-01** | Medium | Fixed | `internal/files` | Global lock contention in `CreateEntry` and `WriteFile` during synchronous storage network I/O |
-| **ISSUE-PERF-02** | Low | Open | `internal/files` | Double memory buffering in `CreateEntry` via `io.ReadAll` |
+| **ISSUE-PERF-02** | Low | Fixed | `internal/files` | Double memory buffering in `CreateEntry` via `io.ReadAll` |
 | **ISSUE-PERF-03** | Low | Open | `internal/files` | Synchronous remote storage upload on `PUT /:node/{name}` without local write-back staging |
 
 ---

@@ -490,20 +490,17 @@ func (s *InMemoryFiles) CreateEntry(ctx context.Context, parentID uint64, name s
 			if contentReader == nil {
 				contentReader = io.LimitReader(nil, 0)
 			}
-			data, err := io.ReadAll(contentReader)
-			if err != nil {
-				return fmt.Errorf("failed to read content: %v", err)
-			}
-			if kind == filetree.FileKind {
-				dataLen = uint64(len(data))
-			}
+			cr := &countReader{r: contentReader}
 			opts := s.opts.WriterOptions
 			opts.Filename = name
-			uploadedLink, err := content.Write(bytes.NewReader(data), targetStorage, opts)
+			uploadedLink, err := content.Write(cr, targetStorage, opts)
 			if err != nil {
 				return fmt.Errorf("failed to save file: %v", err)
 			}
 			link = uploadedLink
+			if kind == filetree.FileKind {
+				dataLen = uint64(cr.n)
+			}
 		}
 
 	case filetree.SymbolicLinkKind:
