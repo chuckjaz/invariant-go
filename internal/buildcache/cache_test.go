@@ -3,8 +3,11 @@ package buildcache
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -391,5 +394,64 @@ func TestHandler_LRUEvictionAndKVBackup(t *testing.T) {
 	// Item 1 should now be back in memory
 	if _, ok := handler.getMemory(item1Key); !ok {
 		t.Errorf("expected item 1 to be brought into memory after get")
+	}
+}
+
+type failingStorage struct {
+	storage.Storage
+}
+
+func (f *failingStorage) Store(ctx context.Context, r io.Reader) (string, error) {
+	return "", fmt.Errorf("simulated storage failure")
+}
+
+func (f *failingStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	return false, fmt.Errorf("simulated storage failure")
+}
+
+func TestHandler_StorageFailureDoesNotPoisonKV(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "build-cache")
+
+	memoryKV := kv.NewMemoryKeyValueStore()
+	badStorage := &failingStorage{Storage: storage.NewInMemoryStorage()}
+
+	cfg := CacheConfig{
+		CacheDir: cacheDir,
+		KVStore:  memoryKV,
+		Storage:  badStorage,
+	}
+
+	handler, err := NewHandler(cfg)
+	if err != nil {
+		t.Fatalf("NewHandler failed: %v", err)
+	}
+
+	actionID := []byte("failing-storage-action")
+	outputID := []byte("failing-storage-output")
+	body := []byte("data")
+
+	req := Request{
+		ID:       1,
+		Command:  CmdPut,
+		ActionID: actionID,
+		OutputID: outputID,
+		BodySize: int64(len(body)),
+	}
+
+	// Put locally succeeds
+	resp := handler.handlePut(context.Background(), req, body)
+	if resp.Err != "" {
+		t.Fatalf("handlePut failed locally: %s", resp.Err)
+	}
+
+	// Wait for background upload/KV put
+	handler.Wait()
+
+	// Verify that the failed storage put did not insert an empty-link entry in the KV store
+	kvKey := fmt.Sprintf("go-build-cache:%x", actionID)
+	val, _, err := memoryKV.Get(context.Background(), nil, kvKey)
+	if err == nil && len(val) > 0 {
+		t.Errorf("expected KV store to NOT contain record after storage failure, but found %s", string(val))
 	}
 }

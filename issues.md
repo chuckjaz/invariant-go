@@ -134,4 +134,28 @@ This file tracks issues and defects identified during code reviews of the Invari
 - **Description**: In `handleSync`, `s.files.Sync(context.Background(), nodeID, wait)` ignores the incoming HTTP request context, preventing cancellation propagation.
 - **Resolution**: Pass `r.Context()` to `s.files.Sync`.
 
+---
+
+## Phase 4: Mount Drivers, FUSE, NFS & Build Cache Integration
+
+| Issue ID | Severity | Status | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **ISSUE-P4-01** | Medium | Fixed | `internal/buildcache` | Incomplete/empty `ContentLink` written to KV store when storage upload fails in `handlePut` |
+| **ISSUE-P4-02** | Low | Open | `internal/fuse` | Minimal unit test coverage for `internal/fuse` filesystem operations |
+
+---
+
+### [ISSUE-P4-01] BuildCache Background Worker Poisons KV Store on Storage Upload Failures
+- **Location**: `internal/buildcache/cache.go`
+- **Severity**: Medium
+- **Description**: In `Handler.handlePut`, if `content.Write` fails to upload to storage, the background worker proceeds to store an entry with an empty `ContentLink` in the KV store.
+- **Resolution**: Check the return error of `content.Write` and skip writing to `h.cfg.KVStore` if the storage upload failed.
+
+### [ISSUE-P4-02] Minimal Unit Test Coverage for `internal/fuse` File Operations
+- **Location**: `internal/fuse/fuse_test.go`
+- **Severity**: Low
+- **Description**: `internal/fuse/fuse_test.go` only tests root node creation and initial `Getattr`, leaving core filesystem operations untested.
+- **Resolution**: Add unit tests for `Create`, `Write`, `Read`, `Mkdir`, `Symlink`, `Readlink`, `Rename`, `Setattr`, and `Unlink`.
+
+
 

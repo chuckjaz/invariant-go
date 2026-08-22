@@ -372,10 +372,11 @@ func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) R
 		var link content.ContentLink
 		if h.cfg.Storage != nil {
 			l, err := content.Write(bytes.NewReader(body), h.cfg.Storage, h.cfg.WriterOptions)
-			if err == nil {
-				link = l
-				h.updateMemoryContentLink(keyName, link)
+			if err != nil {
+				return
 			}
+			link = l
+			h.updateMemoryContentLink(keyName, link)
 		}
 
 		if h.cfg.KVStore != nil {
