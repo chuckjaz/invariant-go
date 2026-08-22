@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"invariant/internal/notify"
+	"invariant/internal/trace"
 )
 
 // DistributeServer provides an HTTP interface for the Distribute service.
@@ -14,6 +15,7 @@ type DistributeServer struct {
 	id         string
 	distribute Distribute
 	handler    http.Handler
+	tracer     *trace.Tracer
 }
 
 // NewDistributeServer creates a new Distribute HTTP server.
@@ -29,13 +31,25 @@ func NewDistributeServer(id string, distribute Distribute) *DistributeServer {
 		distribute: distribute,
 	}
 
+	s.handler = s.Handler()
+	return s
+}
+
+// WithTracer attaches a Tracer to the distribute server.
+func (s *DistributeServer) WithTracer(t *trace.Tracer) *DistributeServer {
+	s.tracer = t
+	s.handler = s.Handler()
+	return s
+}
+
+// Handler returns the http.Handler for the distribute service.
+func (s *DistributeServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /id", s.handleGetID)
 	mux.HandleFunc("PUT /register/{id}", s.handleRegister)
 	mux.HandleFunc("PUT /notify/{id}", s.handleNotify)
 
-	s.handler = mux
-	return s
+	return trace.Middleware("distribute", s.tracer)(mux)
 }
 
 // ID returns the server's generated or provided ID.

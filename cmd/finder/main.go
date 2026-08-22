@@ -14,6 +14,7 @@ import (
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func generateID() string {
@@ -36,6 +37,8 @@ func main() {
 	flag.IntVar(&port, "port", 3004, "Port to listen on (using 3004 to not conflict with storage/discovery)")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	if id == "" {
@@ -85,6 +88,9 @@ func main() {
 	}
 
 	server := finder.NewFinderServer(f, disc)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	log.Printf("Finder service (ID %s) listening on %s...", id, addr)
 	log.Printf("Using In-Memory routing and storage mapping")

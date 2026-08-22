@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"invariant/internal/discovery"
+	"invariant/internal/trace"
 )
 
 func main() {
@@ -23,6 +24,8 @@ func main() {
 	flag.DurationVar(&healthInterval, "health-interval", 30*time.Second, "Interval for active health checks")
 	var healthTimeout time.Duration
 	flag.DurationVar(&healthTimeout, "health-timeout", 5*time.Minute, "Time before a continuously unhealthy node is evicted")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	var localD discovery.Discovery
@@ -59,6 +62,9 @@ func main() {
 	}
 
 	server := discovery.NewDiscoveryServer(d)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("Discovery service listening on %s...", addr)

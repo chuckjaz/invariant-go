@@ -3,10 +3,11 @@ package finder
 import (
 	"context"
 	"encoding/json"
-	"invariant/internal/discovery"
 	"net/http"
 
+	"invariant/internal/discovery"
 	"invariant/internal/notify"
+	"invariant/internal/trace"
 )
 
 // FinderServer wraps a Finder implementation and provides HTTP endpoints.
@@ -14,6 +15,7 @@ type FinderServer struct {
 	finder    Finder
 	discovery discovery.Discovery
 	handler   http.Handler
+	tracer    *trace.Tracer
 }
 
 // NewFinderServer creates a new Finder HTTP server.
@@ -26,6 +28,13 @@ func NewFinderServer(finder Finder, disc discovery.Discovery) *FinderServer {
 	return s
 }
 
+// WithTracer attaches a Tracer to the finder server.
+func (s *FinderServer) WithTracer(t *trace.Tracer) *FinderServer {
+	s.tracer = t
+	s.handler = s.Handler()
+	return s
+}
+
 func (s *FinderServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -34,7 +43,7 @@ func (s *FinderServer) Handler() http.Handler {
 	mux.HandleFunc("PUT /notify/{id}", s.handleNotify)
 	mux.HandleFunc("PUT /peer/{id}", s.handlePeer)
 
-	return mux
+	return trace.Middleware("finder", s.tracer)(mux)
 }
 
 func (s *FinderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

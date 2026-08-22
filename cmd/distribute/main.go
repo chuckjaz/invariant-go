@@ -12,6 +12,7 @@ import (
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func main() {
@@ -32,6 +33,8 @@ func main() {
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	var disc discovery.Discovery
@@ -56,6 +59,9 @@ func main() {
 	}
 
 	server := distribute.NewDistributeServer(id, d)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", addr)

@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"invariant/internal/trace"
 )
 
 type DiscoveryServer struct {
 	id        string
 	discovery Discovery
 	handler   http.Handler
+	tracer    *trace.Tracer
 }
 
 func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
@@ -27,6 +30,13 @@ func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
 	return s
 }
 
+// WithTracer attaches a Tracer to the discovery server.
+func (s *DiscoveryServer) WithTracer(t *trace.Tracer) *DiscoveryServer {
+	s.tracer = t
+	s.handler = s.Handler()
+	return s
+}
+
 func (s *DiscoveryServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -35,7 +45,7 @@ func (s *DiscoveryServer) Handler() http.Handler {
 	mux.HandleFunc("GET /", s.handleFind)
 	mux.HandleFunc("PUT /{id}", s.handlePut)
 
-	return mux
+	return trace.Middleware("discovery", s.tracer)(mux)
 }
 
 func (s *DiscoveryServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

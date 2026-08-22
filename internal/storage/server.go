@@ -6,13 +6,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
 	"io"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"invariant/internal/discovery"
+	"invariant/internal/identity"
+	"invariant/internal/trace"
 )
 
 type StorageServer struct {
@@ -22,6 +24,7 @@ type StorageServer struct {
 	cacheMu   sync.RWMutex
 	devCache  map[string]discovery.ServiceDescription
 	handler   http.Handler
+	tracer    *trace.Tracer
 }
 
 func NewStorageServer(storage Storage) *StorageServer {
@@ -39,6 +42,13 @@ func NewStorageServer(storage Storage) *StorageServer {
 		storage:  storage,
 		devCache: make(map[string]discovery.ServiceDescription),
 	}
+	s.handler = s.Handler()
+	return s
+}
+
+// WithTracer attaches a Tracer to the storage server.
+func (s *StorageServer) WithTracer(t *trace.Tracer) *StorageServer {
+	s.tracer = t
 	s.handler = s.Handler()
 	return s
 }
@@ -137,7 +147,7 @@ func (s *StorageServer) Handler() http.Handler {
 	})
 	mux.HandleFunc("PUT /{address}", s.handlePut)
 
-	return mux
+	return trace.Middleware("storage", s.tracer)(mux)
 }
 
 func (s *StorageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

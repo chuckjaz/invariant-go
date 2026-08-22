@@ -16,6 +16,7 @@ import (
 	"invariant/internal/notify"
 	"invariant/internal/storage"
 	"invariant/internal/tags"
+	"invariant/internal/trace"
 )
 
 func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay time.Duration) (string, error) {
@@ -57,6 +58,8 @@ func main() {
 	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
+	var enableTrace bool
+	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
 	var s storage.Storage
@@ -165,6 +168,10 @@ func main() {
 
 	if len(notifyClients) > 0 {
 		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
+	}
+
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
 	}
 
 	log.Printf("Listening on :%d...", actualPort)
