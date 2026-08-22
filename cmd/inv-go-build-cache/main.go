@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"invariant/internal/buildcache"
 	"invariant/internal/config"
@@ -24,6 +25,9 @@ func main() {
 
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service (overrides configuration)")
+
+	var tagStr string
+	flag.StringVar(&tagStr, "tag", "generated", "Tag to restrict storage server writes (default \"generated\", use \"any\" for unrestricted)")
 
 	var compress bool
 	flag.BoolVar(&compress, "compress", false, "Compress written content")
@@ -77,7 +81,15 @@ func main() {
 
 		if finderAddr := findService("finder-v1"); finderAddr != "" {
 			finderClient := finder.NewClient(finderAddr, nil)
-			storageClient = storage.NewAggregateClient(finderClient, disc, 3, 1000)
+			var aggregateOpts []storage.AggregateClientOption
+			writeTag := tagStr
+			if strings.EqualFold(writeTag, "any") {
+				writeTag = ""
+			}
+			if writeTag != "" {
+				aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
+			}
+			storageClient = storage.NewAggregateClient(finderClient, disc, 3, 1000, aggregateOpts...)
 		}
 
 		if slotsAddr := findService("slots-v1"); slotsAddr != "" {
@@ -140,6 +152,7 @@ func main() {
 		Storage:       storageClient,
 		Slots:         slotsClient,
 		WriterOptions: writerOpts,
+		WriteTag:      tagStr,
 	}
 
 	handler, err := buildcache.NewHandler(cfg)

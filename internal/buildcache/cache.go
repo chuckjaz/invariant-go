@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,6 +69,7 @@ type CacheConfig struct {
 	Slots            slots.Slots
 	WriterOptions    content.WriterOptions
 	InMemoryCapacity int
+	WriteTag         string
 }
 
 type lruItem struct {
@@ -104,6 +106,19 @@ func NewHandler(cfg CacheConfig) (*Handler, error) {
 	capacity := cfg.InMemoryCapacity
 	if capacity <= 0 {
 		capacity = DefaultInMemoryCapacity
+	}
+
+	writeTag := cfg.WriteTag
+	if writeTag == "" {
+		writeTag = "generated"
+	}
+	if strings.EqualFold(writeTag, "any") {
+		writeTag = ""
+	}
+	if cfg.Storage != nil {
+		if tagged, ok := cfg.Storage.(storage.TaggedStorage); ok {
+			cfg.Storage = tagged.WithWriteTag(writeTag)
+		}
 	}
 
 	return &Handler{

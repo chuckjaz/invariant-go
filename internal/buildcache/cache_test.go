@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"invariant/internal/content"
+	"invariant/internal/discovery"
 	"invariant/internal/kv"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -453,5 +455,140 @@ func TestHandler_StorageFailureDoesNotPoisonKV(t *testing.T) {
 	val, _, err := memoryKV.Get(context.Background(), nil, kvKey)
 	if err == nil && len(val) > 0 {
 		t.Errorf("expected KV store to NOT contain record after storage failure, but found %s", string(val))
+	}
+}
+
+func TestHandler_WriteTag(t *testing.T) {
+	ctx := context.Background()
+	d := discovery.NewInMemoryDiscovery()
+
+	memGen := storage.NewInMemoryStorage()
+	srvGen := storage.NewStorageServer(memGen)
+	tsGen := httptest.NewServer(srvGen.Handler())
+	defer tsGen.Close()
+
+	memOther := storage.NewInMemoryStorage()
+	srvOther := storage.NewStorageServer(memOther)
+	tsOther := httptest.NewServer(srvOther.Handler())
+	defer tsOther.Close()
+
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "storage-generated",
+		Address:   tsGen.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"generated"},
+	})
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "storage-other",
+		Address:   tsOther.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"other"},
+	})
+
+	aggStorage := storage.NewAggregateClient(nil, d, 2, 100)
+
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "build-cache")
+	memoryKV := kv.NewMemoryKeyValueStore()
+
+	// 1. Test default write tag (should default to "generated")
+	cfg := CacheConfig{
+		CacheDir: cacheDir,
+		KVStore:  memoryKV,
+		Storage:  aggStorage,
+		// WriteTag empty -> defaults to "generated"
+	}
+
+	handler, err := NewHandler(cfg)
+	if err != nil {
+		t.Fatalf("NewHandler failed: %v", err)
+	}
+
+	actionID := []byte("action-default-tag")
+	outputID := []byte("output-default-tag")
+	body := []byte("data for generated build cache")
+
+	req := Request{
+		ID:       1,
+		Command:  CmdPut,
+		ActionID: actionID,
+		OutputID: outputID,
+		BodySize: int64(len(body)),
+	}
+
+	resp := handler.handlePut(ctx, req, body)
+	if resp.Err != "" {
+		t.Fatalf("handlePut failed: %s", resp.Err)
+	}
+
+	handler.Wait()
+
+	// Verify entry was written to KV and block to memGen (and NOT memOther)
+	kvKey := fmt.Sprintf("go-build-cache:%x", actionID)
+	val, _, err := memoryKV.Get(ctx, nil, kvKey)
+	if err != nil || len(val) == 0 {
+		t.Fatalf("expected KV store to contain record, got err: %v", err)
+	}
+
+	var entry ActionEntry
+	if err := json.Unmarshal(val, &entry); err != nil {
+		t.Fatalf("failed to unmarshal action entry: %v", err)
+	}
+
+	if !memGen.Has(ctx, entry.ContentLink.Address) {
+		t.Errorf("expected block %s to be written to 'generated' storage", entry.ContentLink.Address)
+	}
+	if memOther.Has(ctx, entry.ContentLink.Address) {
+		t.Errorf("expected block %s NOT to be written to 'other' storage", entry.ContentLink.Address)
+	}
+
+	// 2. Test explicit custom write tag "other"
+	cfgCustom := CacheConfig{
+		CacheDir: cacheDir,
+		KVStore:  memoryKV,
+		Storage:  aggStorage,
+		WriteTag: "other",
+	}
+
+	handlerCustom, err := NewHandler(cfgCustom)
+	if err != nil {
+		t.Fatalf("NewHandler with custom tag failed: %v", err)
+	}
+
+	actionID2 := []byte("action-custom-tag")
+	outputID2 := []byte("output-custom-tag")
+	body2 := []byte("data for other tag build cache")
+
+	req2 := Request{
+		ID:       2,
+		Command:  CmdPut,
+		ActionID: actionID2,
+		OutputID: outputID2,
+		BodySize: int64(len(body2)),
+	}
+
+	resp2 := handlerCustom.handlePut(ctx, req2, body2)
+	if resp2.Err != "" {
+		t.Fatalf("handlePut failed: %s", resp2.Err)
+	}
+
+	handlerCustom.Wait()
+
+	kvKey2 := fmt.Sprintf("go-build-cache:%x", actionID2)
+	val2, _, err := memoryKV.Get(ctx, nil, kvKey2)
+	if err != nil || len(val2) == 0 {
+		t.Fatalf("expected KV store to contain record 2, got err: %v", err)
+	}
+
+	var entry2 ActionEntry
+	if err := json.Unmarshal(val2, &entry2); err != nil {
+		t.Fatalf("failed to unmarshal action entry 2: %v", err)
+	}
+
+	if !memOther.Has(ctx, entry2.ContentLink.Address) {
+		t.Errorf("expected block %s to be written to 'other' storage", entry2.ContentLink.Address)
+	}
+	if memGen.Has(ctx, entry2.ContentLink.Address) {
+		t.Errorf("expected block %s NOT to be written to 'generated' storage", entry2.ContentLink.Address)
 	}
 }
