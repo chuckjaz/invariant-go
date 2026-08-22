@@ -336,3 +336,105 @@ func TestAggregateClient_Batch(t *testing.T) {
 		t.Errorf("Expected missing to be ['b3'], got %v", missing2)
 	}
 }
+
+func TestAggregateClient_WriteTagRestriction(t *testing.T) {
+	ctx := context.Background()
+	d := discovery.NewInMemoryDiscovery()
+
+	tsFast, memFast := setupTestServer()
+	defer tsFast.Close()
+
+	tsSlow, memSlow := setupTestServer()
+	defer tsSlow.Close()
+
+	// Register two storage servers: one with tag "fast" and one with tag "slow"
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "node-fast",
+		Address:   tsFast.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"fast"},
+	})
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "node-slow",
+		Address:   tsSlow.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"slow"},
+	})
+
+	// Pre-populate a block directly on slow server
+	slowOnlyContent := []byte("slow-only-data")
+	slowHash := sha256.Sum256(slowOnlyContent)
+	slowAddr := hex.EncodeToString(slowHash[:])
+	_, _ = memSlow.StoreAt(ctx, slowAddr, bytes.NewReader(slowOnlyContent))
+
+	// 1. Create client restricted to writeTag "fast"
+	client := NewAggregateClient(nil, d, 2, 10, WithWriteTagOption("fast"))
+	if client.WriteTag() != "fast" {
+		t.Errorf("expected WriteTag to be 'fast', got %q", client.WriteTag())
+	}
+
+	// Write data using Store
+	fastContent := []byte("fast-data-1")
+	addr1, err := client.Store(ctx, bytes.NewReader(fastContent))
+	if err != nil {
+		t.Fatalf("Store failed with writeTag 'fast': %v", err)
+	}
+
+	// Verify data was written to memFast and NOT to memSlow
+	if !memFast.Has(ctx, addr1) {
+		t.Errorf("expected block %s to be written to fast server", addr1)
+	}
+	if memSlow.Has(ctx, addr1) {
+		t.Errorf("expected block %s NOT to be written to slow server", addr1)
+	}
+
+	// Verify reads work for both:
+	// - fast data on fast server
+	if !client.Has(ctx, addr1) {
+		t.Errorf("expected client.Has to find block on fast server")
+	}
+	// - slow data on slow server (reads are not restricted by write tag)
+	if !client.Has(ctx, slowAddr) {
+		t.Errorf("expected client.Has to find pre-existing block on slow server")
+	}
+
+	// 2. Test BatchStore with writeTag "fast"
+	batchContent := []byte("batch-fast-data")
+	batchHash := sha256.Sum256(batchContent)
+	batchAddr := hex.EncodeToString(batchHash[:])
+	err = client.BatchStore(ctx, map[string]io.Reader{batchAddr: bytes.NewReader(batchContent)})
+	if err != nil {
+		t.Fatalf("BatchStore failed with writeTag 'fast': %v", err)
+	}
+	if !memFast.Has(ctx, batchAddr) {
+		t.Errorf("expected batch block to be written to fast server")
+	}
+	if memSlow.Has(ctx, batchAddr) {
+		t.Errorf("expected batch block NOT to be written to slow server")
+	}
+
+	// 3. Switch write tag dynamically using SetWriteTag / WithWriteTag
+	client.SetWriteTag("slow")
+	if client.WriteTag() != "slow" {
+		t.Errorf("expected WriteTag to be 'slow', got %q", client.WriteTag())
+	}
+
+	slowContent2 := []byte("slow-data-2")
+	addr2, err := client.Store(ctx, bytes.NewReader(slowContent2))
+	if err != nil {
+		t.Fatalf("Store failed after switching writeTag to 'slow': %v", err)
+	}
+	if !memSlow.Has(ctx, addr2) {
+		t.Errorf("expected block %s to be written to slow server", addr2)
+	}
+	if memFast.Has(ctx, addr2) {
+		t.Errorf("expected block %s NOT to be written to fast server", addr2)
+	}
+
+	// 4. Test nonexistent tag: writes should fail with ErrNoLiveServers
+	client.SetWriteTag("nonexistent-tag")
+	_, err = client.Store(ctx, bytes.NewReader([]byte("should-fail")))
+	if err == nil {
+		t.Errorf("expected Store to fail with nonexistent writeTag, got nil")
+	}
+}

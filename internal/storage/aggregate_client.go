@@ -52,17 +52,32 @@ type liveServerEntry struct {
 	supportsBatch bool
 }
 
+// AggregateClientOption configures an AggregateClient.
+type AggregateClientOption func(*AggregateClient)
+
+// WithWriteTagOption configures the AggregateClient to restrict writes to servers with the specified tag.
+func WithWriteTagOption(tag string) AggregateClientOption {
+	return func(c *AggregateClient) {
+		c.writeTag = tag
+	}
+}
+
 // AggregateClient aggregates a finder, discovery service, and standard storage clients.
 type AggregateClient struct {
 	finder          finder.Finder
 	discovery       discovery.Discovery
 	numStoreServers int
+	writeTag        string
 
 	// Live servers cache
-	liveMu      sync.RWMutex
-	liveServers map[string]liveServerEntry // Server ID -> Storage client
-	liveIDs     []string                   // For round-robin access
-	liveCounter uint64
+	liveMu          sync.RWMutex
+	liveServers     map[string]liveServerEntry // Server ID -> Storage client
+	liveIDs         []string                   // For round-robin read fallback
+	writeIDs        []string                   // For round-robin write access (tagged if writeTag != "")
+	discoveredAll   bool
+	discoveredWrite bool
+	liveCounter     uint64
+	writeCounter    uint64
 
 	// LRU Cache for block locations
 	maxBlocks int
@@ -75,11 +90,11 @@ type AggregateClient struct {
 }
 
 // NewAggregateClient creates a new Storage client that aggregates multiple services.
-func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers, maxBlocks int) *AggregateClient {
+func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers, maxBlocks int, opts ...AggregateClientOption) *AggregateClient {
 	if maxBlocks <= 0 {
 		maxBlocks = -1 // No limit
 	}
-	return &AggregateClient{
+	c := &AggregateClient{
 		finder:          f,
 		discovery:       d,
 		numStoreServers: numStoreServers,
@@ -89,6 +104,32 @@ func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers,
 		lruMap:          make(map[string]*list.Element),
 		writtenServers:  make(map[string]struct{}),
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// SetWriteTag updates the write tag restriction and clears cached write server IDs.
+func (c *AggregateClient) SetWriteTag(tag string) {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	c.writeTag = tag
+	c.writeIDs = nil
+	c.discoveredWrite = false
+}
+
+// WithWriteTag sets the write tag restriction and returns the client.
+func (c *AggregateClient) WithWriteTag(tag string) *AggregateClient {
+	c.SetWriteTag(tag)
+	return c
+}
+
+// WriteTag returns the current write tag restriction.
+func (c *AggregateClient) WriteTag() string {
+	c.liveMu.RLock()
+	defer c.liveMu.RUnlock()
+	return c.writeTag
 }
 
 // removeLiveServer removes a server from the live list and LRU.
@@ -107,6 +148,21 @@ func (c *AggregateClient) removeLiveServer(serverID string) {
 		}
 	}
 	c.liveIDs = newIDs
+
+	var newWriteIDs []string
+	for _, id := range c.writeIDs {
+		if id != serverID {
+			newWriteIDs = append(newWriteIDs, id)
+		}
+	}
+	c.writeIDs = newWriteIDs
+
+	if len(c.liveIDs) == 0 {
+		c.discoveredAll = false
+	}
+	if len(c.writeIDs) == 0 {
+		c.discoveredWrite = false
+	}
 	c.liveMu.Unlock()
 
 	// Also remove from LRU
@@ -345,14 +401,20 @@ func (c *AggregateClient) Size(ctx context.Context, address string) (int64, bool
 // ensureLiveServers queries discovery if we have no live servers.
 func (c *AggregateClient) ensureLiveServers() error {
 	c.liveMu.RLock()
-	count := len(c.liveIDs)
+	done := c.discoveredAll && len(c.liveIDs) > 0
 	c.liveMu.RUnlock()
 
-	if count > 0 {
+	if done {
 		return nil
 	}
 
 	if c.discovery == nil {
+		c.liveMu.RLock()
+		count := len(c.liveIDs)
+		c.liveMu.RUnlock()
+		if count > 0 {
+			return nil
+		}
 		return ErrNoLiveServers
 	}
 
@@ -362,6 +424,12 @@ func (c *AggregateClient) ensureLiveServers() error {
 	}
 
 	if len(services) == 0 {
+		c.liveMu.RLock()
+		count := len(c.liveIDs)
+		c.liveMu.RUnlock()
+		if count > 0 {
+			return nil
+		}
 		return ErrNoLiveServers
 	}
 
@@ -369,30 +437,91 @@ func (c *AggregateClient) ensureLiveServers() error {
 		c.addLiveServer(svc.ID)
 	}
 
+	c.liveMu.Lock()
+	c.discoveredAll = true
+	c.liveMu.Unlock()
+
+	return nil
+}
+
+// ensureLiveWriteServers queries discovery for write-capable servers matching writeTag (if specified).
+func (c *AggregateClient) ensureLiveWriteServers() error {
+	if c.writeTag == "" {
+		return c.ensureLiveServers()
+	}
+
 	c.liveMu.RLock()
-	count = len(c.liveIDs)
+	done := c.discoveredWrite && len(c.writeIDs) > 0
 	c.liveMu.RUnlock()
 
-	if count == 0 {
+	if done {
+		return nil
+	}
+
+	if c.discovery == nil {
+		c.liveMu.RLock()
+		count := len(c.writeIDs)
+		c.liveMu.RUnlock()
+		if count > 0 {
+			return nil
+		}
 		return ErrNoLiveServers
 	}
+
+	tag := c.writeTag
+	services, err := c.discovery.Find(context.Background(), "storage-v1", tag, c.numStoreServers)
+	if err != nil {
+		return fmt.Errorf("failed to discover storage services: %w", err)
+	}
+
+	if len(services) == 0 {
+		c.liveMu.RLock()
+		count := len(c.writeIDs)
+		c.liveMu.RUnlock()
+		if count > 0 {
+			return nil
+		}
+		return ErrNoLiveServers
+	}
+
+	for _, svc := range services {
+		c.addLiveServer(svc.ID)
+		c.liveMu.Lock()
+		if !slices.Contains(c.writeIDs, svc.ID) {
+			c.writeIDs = append(c.writeIDs, svc.ID)
+		}
+		c.liveMu.Unlock()
+	}
+
+	c.liveMu.Lock()
+	c.discoveredWrite = true
+	c.liveMu.Unlock()
 
 	return nil
 }
 
 // writeOperation selects a set of live servers and executes a write operation.
 func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client Storage, supportsBatch bool) (any, error)) (any, error) {
-	err := c.ensureLiveServers()
+	err := c.ensureLiveWriteServers()
 	if err != nil {
 		return nil, err
 	}
 
 	c.liveMu.RLock()
-	ids := append([]string(nil), c.liveIDs...)
+	var ids []string
+	if c.writeTag != "" {
+		ids = append([]string(nil), c.writeIDs...)
+	} else {
+		ids = append([]string(nil), c.liveIDs...)
+	}
 	c.liveMu.RUnlock()
 
+	if len(ids) == 0 {
+		return nil, ErrNoLiveServers
+	}
+
 	// Round robin through them until one succeeds
-	startIdx := atomic.AddUint64(&c.liveCounter, 1)
+	startIdx := atomic.AddUint64(&c.writeCounter, 1)
 
 	for i := range ids {
 		idx := (startIdx + uint64(i)) % uint64(len(ids))
