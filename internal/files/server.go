@@ -57,6 +57,10 @@ func (s *Server) Handler() http.Handler {
 	return trace.Middleware("files", s.tracer)(mux)
 }
 
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.Handler().ServeHTTP(w, r)
+}
+
 func parseNodeID(nodeStr string) (uint64, error) {
 	nodeStr = strings.TrimPrefix(nodeStr, "/")
 	nodeID, err := strconv.ParseUint(nodeStr, 10, 64)
