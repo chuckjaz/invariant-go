@@ -62,6 +62,7 @@ type Layer struct {
 	Excludes           []string
 	StorageDestination string `json:"storageDestination,omitempty"`
 	ReadOnly           bool   `json:"readOnly,omitempty"`
+	WriteTag           string `json:"writeTag,omitempty"`
 
 	includesMatcher *filetree.IgnoreMatcher
 	excludesMatcher *filetree.IgnoreMatcher
@@ -73,6 +74,8 @@ type rawLayer struct {
 	Excludes           []string        `json:"excludes,omitempty"`
 	StorageDestination string          `json:"storageDestination,omitempty"`
 	ReadOnly           bool            `json:"readOnly,omitempty"`
+	WriteTag           string          `json:"writeTag,omitempty"`
+	Tag                string          `json:"tag,omitempty"`
 }
 
 func (l *Layer) UnmarshalJSON(data []byte) error {
@@ -84,6 +87,10 @@ func (l *Layer) UnmarshalJSON(data []byte) error {
 	l.Excludes = raw.Excludes
 	l.StorageDestination = raw.StorageDestination
 	l.ReadOnly = raw.ReadOnly
+	l.WriteTag = raw.WriteTag
+	if l.WriteTag == "" && raw.Tag != "" {
+		l.WriteTag = raw.Tag
+	}
 
 	if len(raw.RootLink) > 0 {
 		var s string
@@ -104,6 +111,7 @@ func (l Layer) MarshalJSON() ([]byte, error) {
 		Excludes:           l.Excludes,
 		StorageDestination: l.StorageDestination,
 		ReadOnly:           l.ReadOnly,
+		WriteTag:           l.WriteTag,
 	}
 	if l.RootLink.Address == "" && l.RootLink.Slot {
 		raw.RootLink = json.RawMessage(`"temporary"`)

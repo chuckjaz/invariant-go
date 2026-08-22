@@ -114,3 +114,20 @@ func (j *JoinedStorage) BatchStore(ctx context.Context, blocks map[string]io.Rea
 	}
 	return nil
 }
+
+// WithWriteTag propagates write tag restriction to underlying storage backends.
+func (j *JoinedStorage) WithWriteTag(tag string) Storage {
+	newPrimary := j.primary
+	if ts, ok := j.primary.(TaggedStorage); ok {
+		newPrimary = ts.WithWriteTag(tag)
+	}
+	newSecondary := j.secondary
+	if ts, ok := j.secondary.(TaggedStorage); ok {
+		newSecondary = ts.WithWriteTag(tag)
+	}
+	return NewJoinedStorage(newPrimary, newSecondary)
+}
+
+var _ Storage = (*JoinedStorage)(nil)
+var _ BatchStorage = (*JoinedStorage)(nil)
+var _ TaggedStorage = (*JoinedStorage)(nil)

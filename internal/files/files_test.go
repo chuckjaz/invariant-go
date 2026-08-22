@@ -423,6 +423,7 @@ func TestLayerJSON(t *testing.T) {
 		Excludes:           []string{"*.log"},
 		StorageDestination: "dest1",
 		ReadOnly:           true,
+		WriteTag:           "custom-tag",
 	}
 
 	data, err := json.Marshal(l1)
@@ -436,11 +437,21 @@ func TestLayerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if l1.StorageDestination != l2.StorageDestination || l1.ReadOnly != l2.ReadOnly || l2.RootLink.Address != "addr1" {
+	if l1.StorageDestination != l2.StorageDestination || l1.ReadOnly != l2.ReadOnly || l2.RootLink.Address != "addr1" || l2.WriteTag != "custom-tag" {
 		t.Errorf("Unexpected unmarshal result: %+v", l2)
 	}
 
-	// 2. Marshal/Unmarshal temporary slot RootLink
+	// 2. Unmarshal with 'tag' alias
+	var lTag Layer
+	err = json.Unmarshal([]byte(`{"tag": "alias-tag"}`), &lTag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lTag.WriteTag != "alias-tag" {
+		t.Errorf("Expected WriteTag to be 'alias-tag', got %q", lTag.WriteTag)
+	}
+
+	// 3. Marshal/Unmarshal temporary slot RootLink
 	lTemp := Layer{
 		RootLink: content.ContentLink{Slot: true},
 	}
@@ -458,7 +469,7 @@ func TestLayerJSON(t *testing.T) {
 		t.Errorf("Expected temporary slot RootLink, got %+v", lTempDecoded.RootLink)
 	}
 
-	// 3. UnmarshalJSON errors
+	// 4. UnmarshalJSON errors
 	var l3 Layer
 	err = json.Unmarshal([]byte("123"), &l3)
 	if err == nil {
@@ -957,5 +968,150 @@ func TestFilesService_LocalStorageStaging(t *testing.T) {
 	data, err := io.ReadAll(r)
 	if err != nil || !bytes.Equal(data, testData) {
 		t.Errorf("Data mismatch: got %s, want %s", data, testData)
+	}
+}
+
+func TestFilesService_LayerWriteTag(t *testing.T) {
+	ctx := context.Background()
+	d := discovery.NewInMemoryDiscovery()
+
+	memOriginals := storage.NewInMemoryStorage()
+	srvOriginals := storage.NewStorageServer(memOriginals)
+	tsOriginals := httptest.NewServer(srvOriginals.Handler())
+	defer tsOriginals.Close()
+
+	memScratch := storage.NewInMemoryStorage()
+	srvScratch := storage.NewStorageServer(memScratch)
+	tsScratch := httptest.NewServer(srvScratch.Handler())
+	defer tsScratch.Close()
+
+	// Register storage servers with distinct tags
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "storage-originals",
+		Address:   tsOriginals.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"originals"},
+	})
+	d.Register(ctx, discovery.ServiceRegistration{
+		ID:        "storage-scratch",
+		Address:   tsScratch.URL,
+		Protocols: []string{"storage-v1", "batch-storage-v1"},
+		Tags:      []string{"scratch"},
+	})
+
+	aggStorage := storage.NewAggregateClient(nil, d, 2, 100)
+
+	// Create root directory content in memOriginals
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, err := content.Write(bytes.NewReader(dirData), memOriginals, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("failed to write initial dir: %v", err)
+	}
+
+	memSlots := slots.NewMemorySlots("test-slot-tag")
+	_ = memSlots.Create(ctx, "slot-orig", initLink.Address, "")
+	_ = memSlots.Create(ctx, "slot-scratch", initLink.Address, "")
+
+	// Layer 0: default tag (should be "originals")
+	// Layer 1: explicit tag "scratch"
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:   aggStorage,
+		Discovery: d,
+		Slots:     memSlots,
+		RootLink: content.ContentLink{
+			Address: "slot-orig",
+			Slot:    true,
+		},
+		Layers: []Layer{
+			{
+				RootLink: content.ContentLink{
+					Address: "slot-orig",
+					Slot:    true,
+				},
+				Includes: []string{"*.orig"},
+				// WriteTag left empty to test default "originals"
+			},
+			{
+				RootLink: content.ContentLink{
+					Address: "slot-scratch",
+					Slot:    true,
+				},
+				Includes: []string{"*.scratch"},
+				WriteTag: "scratch",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create InMemoryFiles: %v", err)
+	}
+	defer filesService.Close()
+
+	// 1. Create file matching Layer 0 (default "originals" tag)
+	origPayload := []byte("payload for originals layer")
+	err = filesService.CreateEntry(ctx, 1, "test.orig", filetree.FileKind, "", nil, bytes.NewReader(origPayload))
+	if err != nil {
+		t.Fatalf("CreateEntry for test.orig failed: %v", err)
+	}
+
+	infoOrig, err := filesService.Lookup(ctx, 1, "test.orig")
+	if err != nil {
+		t.Fatalf("Lookup test.orig failed: %v", err)
+	}
+	linkOrig, err := filesService.GetContent(ctx, infoOrig.Node)
+	if err != nil {
+		t.Fatalf("GetContent test.orig failed: %v", err)
+	}
+
+	// Verify block was written to memOriginals and NOT to memScratch
+	if !memOriginals.Has(ctx, linkOrig.Address) {
+		t.Errorf("Expected test.orig block %s to be written to originals storage", linkOrig.Address)
+	}
+	if memScratch.Has(ctx, linkOrig.Address) {
+		t.Errorf("Expected test.orig block %s NOT to be written to scratch storage", linkOrig.Address)
+	}
+
+	// 2. Create file matching Layer 1 ("scratch" tag)
+	scratchPayload := []byte("payload for scratch layer")
+	err = filesService.CreateEntry(ctx, 1, "temp.scratch", filetree.FileKind, "", nil, bytes.NewReader(scratchPayload))
+	if err != nil {
+		t.Fatalf("CreateEntry for temp.scratch failed: %v", err)
+	}
+
+	infoScratch, err := filesService.Lookup(ctx, 1, "temp.scratch")
+	if err != nil {
+		t.Fatalf("Lookup temp.scratch failed: %v", err)
+	}
+	linkScratch, err := filesService.GetContent(ctx, infoScratch.Node)
+	if err != nil {
+		t.Fatalf("GetContent temp.scratch failed: %v", err)
+	}
+
+	// Verify block was written to memScratch and NOT to memOriginals
+	if !memScratch.Has(ctx, linkScratch.Address) {
+		t.Errorf("Expected temp.scratch block %s to be written to scratch storage", linkScratch.Address)
+	}
+	if memOriginals.Has(ctx, linkScratch.Address) {
+		t.Errorf("Expected temp.scratch block %s NOT to be written to originals storage", linkScratch.Address)
+	}
+
+	// 3. Verify reads work for both files
+	rOrig, err := filesService.ReadFile(ctx, infoOrig.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadFile test.orig failed: %v", err)
+	}
+	defer rOrig.Close()
+	dataOrig, _ := io.ReadAll(rOrig)
+	if !bytes.Equal(dataOrig, origPayload) {
+		t.Errorf("Data mismatch for test.orig: got %s, want %s", dataOrig, origPayload)
+	}
+
+	rScratch, err := filesService.ReadFile(ctx, infoScratch.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadFile temp.scratch failed: %v", err)
+	}
+	defer rScratch.Close()
+	dataScratch, _ := io.ReadAll(rScratch)
+	if !bytes.Equal(dataScratch, scratchPayload) {
+		t.Errorf("Data mismatch for temp.scratch: got %s, want %s", dataScratch, scratchPayload)
 	}
 }

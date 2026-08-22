@@ -36,6 +36,9 @@ type InMemoryFiles struct {
 	destClientsMu sync.RWMutex
 	destClients   map[string]storage.Storage
 
+	layerStorageMu sync.RWMutex
+	layerStorage   map[int]storage.Storage
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -96,6 +99,7 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 		layerDependencies: make(map[string]bool),
 		lastSlotAddresses: make(map[int]string),
 		destClients:       make(map[string]storage.Storage),
+		layerStorage:      make(map[int]storage.Storage),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -1472,6 +1476,10 @@ func (s *InMemoryFiles) applyNewLayers(layers []Layer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.layerStorageMu.Lock()
+	s.layerStorage = make(map[int]storage.Storage)
+	s.layerStorageMu.Unlock()
+
 	var newLayers []Layer
 	if s.opts.RootLink.Address != "" || s.opts.RootLink.Slot {
 		newLayers = append(newLayers, Layer{
@@ -1640,59 +1648,81 @@ func (s *InMemoryFiles) resolveLayerRulesLocked(rules []string) []string {
 
 // getStorageForLayer returns the storage client for the given layer.
 func (s *InMemoryFiles) getStorageForLayer(layerIdx int) storage.Storage {
-	if layerIdx < 0 || layerIdx >= len(s.opts.Layers) {
-		if s.opts.LocalStorage != nil && s.opts.LocalStorage != s.opts.Storage {
-			return storage.NewJoinedStorage(s.opts.LocalStorage, s.opts.Storage)
-		}
-		return s.opts.Storage
+	s.layerStorageMu.RLock()
+	cached, ok := s.layerStorage[layerIdx]
+	s.layerStorageMu.RUnlock()
+	if ok {
+		return cached
 	}
 
-	dest := s.opts.Layers[layerIdx].StorageDestination
-	if dest == "" || s.opts.Discovery == nil {
-		if s.opts.LocalStorage != nil && s.opts.LocalStorage != s.opts.Storage {
-			return storage.NewJoinedStorage(s.opts.LocalStorage, s.opts.Storage)
-		}
-		return s.opts.Storage
+	s.layerStorageMu.Lock()
+	defer s.layerStorageMu.Unlock()
+	if cached, ok := s.layerStorage[layerIdx]; ok {
+		return cached
 	}
+
+	writeTag := "originals"
+	dest := ""
+	if layerIdx >= 0 && layerIdx < len(s.opts.Layers) {
+		dest = s.opts.Layers[layerIdx].StorageDestination
+		if s.opts.Layers[layerIdx].WriteTag != "" {
+			writeTag = s.opts.Layers[layerIdx].WriteTag
+		}
+	}
+	if strings.EqualFold(writeTag, "any") {
+		writeTag = ""
+	}
+
+	var baseStorage storage.Storage = s.opts.Storage
 
 	if dest == "local" {
 		if s.opts.LocalStorage != nil {
+			s.layerStorage[layerIdx] = s.opts.LocalStorage
 			return s.opts.LocalStorage
 		}
+		s.layerStorage[layerIdx] = s.opts.Storage
 		return s.opts.Storage
+	} else if dest != "" && s.opts.Discovery != nil {
+		s.destClientsMu.RLock()
+		client, ok := s.destClients[dest]
+		s.destClientsMu.RUnlock()
+		if ok {
+			baseStorage = client
+		} else {
+			desc, err := discovery.Resolve(s.ctx, s.opts.Discovery, dest)
+			if err != nil {
+				log.Printf("Warning: storage destination %s not found in discovery for layer %d: %v. Falling back to default storage.", dest, layerIdx, err)
+			} else {
+				s.destClientsMu.Lock()
+				if client, ok := s.destClients[dest]; ok {
+					baseStorage = client
+				} else {
+					newClient := storage.NewClient(desc.Address, nil)
+					s.destClients[dest] = newClient
+					baseStorage = newClient
+				}
+				s.destClientsMu.Unlock()
+			}
+		}
 	}
 
-	s.destClientsMu.RLock()
-	client, ok := s.destClients[dest]
-	s.destClientsMu.RUnlock()
-	if ok {
-		return storage.NewJoinedStorage(client, s.opts.Storage)
+	if tagged, ok := baseStorage.(storage.TaggedStorage); ok {
+		baseStorage = tagged.WithWriteTag(writeTag)
 	}
 
-	// Not cached, lookup in discovery
-	desc, err := discovery.Resolve(s.ctx, s.opts.Discovery, dest)
-	if err != nil {
-		log.Printf("Warning: storage destination %s not found in discovery for layer %d: %v. Falling back to default storage.", dest, layerIdx, err)
-		return s.opts.Storage
+	var result storage.Storage = baseStorage
+	if s.opts.LocalStorage != nil && s.opts.LocalStorage != baseStorage {
+		result = storage.NewJoinedStorage(s.opts.LocalStorage, baseStorage)
 	}
 
-	s.destClientsMu.Lock()
-	defer s.destClientsMu.Unlock()
-
-	// Check again in case another goroutine just added it
-	if client, ok := s.destClients[dest]; ok {
-		return storage.NewJoinedStorage(client, s.opts.Storage)
-	}
-
-	newClient := storage.NewClient(desc.Address, nil)
-	s.destClients[dest] = newClient
-	return storage.NewJoinedStorage(newClient, s.opts.Storage)
+	s.layerStorage[layerIdx] = result
+	return result
 }
 
 // getStorageForNode returns the storage client for the most specific layer a node belongs to.
 func (s *InMemoryFiles) getStorageForNode(node *Node) storage.Storage {
 	if node == nil {
-		return s.opts.Storage
+		return s.getStorageForLayer(-1)
 	}
 
 	layerIdx := -1

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -110,6 +111,30 @@ func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers,
 	return c
 }
 
+// Clone creates an AggregateClient sharing the same finder, discovery, numStoreServers, and maxBlocks.
+func (c *AggregateClient) Clone(opts ...AggregateClientOption) *AggregateClient {
+	c.liveMu.RLock()
+	currentTag := c.writeTag
+	c.liveMu.RUnlock()
+
+	client := NewAggregateClient(c.finder, c.discovery, c.numStoreServers, c.maxBlocks)
+	if currentTag != "" {
+		client.writeTag = currentTag
+	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	return client
+}
+
+// WithWriteTag returns an AggregateClient configured with the specified write tag.
+func (c *AggregateClient) WithWriteTag(tag string) Storage {
+	if strings.EqualFold(tag, "any") {
+		tag = ""
+	}
+	return c.Clone(WithWriteTagOption(tag))
+}
+
 // SetWriteTag updates the write tag restriction and clears cached write server IDs.
 func (c *AggregateClient) SetWriteTag(tag string) {
 	c.liveMu.Lock()
@@ -117,12 +142,6 @@ func (c *AggregateClient) SetWriteTag(tag string) {
 	c.writeTag = tag
 	c.writeIDs = nil
 	c.discoveredWrite = false
-}
-
-// WithWriteTag sets the write tag restriction and returns the client.
-func (c *AggregateClient) WithWriteTag(tag string) *AggregateClient {
-	c.SetWriteTag(tag)
-	return c
 }
 
 // WriteTag returns the current write tag restriction.
@@ -616,6 +635,7 @@ func (c *AggregateClient) Sync(ctx context.Context) error {
 var _ Storage = (*AggregateClient)(nil)
 var _ SyncStorage = (*AggregateClient)(nil)
 var _ BatchStorage = (*AggregateClient)(nil)
+var _ TaggedStorage = (*AggregateClient)(nil)
 
 func (c *AggregateClient) BatchHas(ctx context.Context, addresses []string) ([]string, error) {
 	if len(addresses) == 0 {

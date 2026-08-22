@@ -40,3 +40,9 @@ type BatchStorage interface {
 	BatchHas(ctx context.Context, addresses []string) ([]string, error)
 	BatchStore(ctx context.Context, blocks map[string]io.Reader) error
 }
+
+// TaggedStorage allows creating a storage view restricted to a specific write tag.
+type TaggedStorage interface {
+	Storage
+	WithWriteTag(tag string) Storage
+}
