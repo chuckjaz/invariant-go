@@ -235,7 +235,12 @@ func ImportGitRepository(
 		}
 	}
 
-	// 3. Collect Git commits in topological order (roots to HEAD)
+	kvIdx := NewGitKVIndex(kvClient)
+	gitToInvCommit := make(map[string]string)
+	var rootCommit string
+	var headCommit string
+
+	// 3. Collect Git commits in topological order (roots to HEAD), stopping at already-imported commits
 	var gitCommits []*object.Commit
 	visited := make(map[plumbing.Hash]bool)
 
@@ -253,6 +258,20 @@ func ImportGitRepository(
 			continue
 		}
 		visited[item.hash] = true
+
+		itemHashStr := item.hash.String()
+		// Check if commit has already been imported into Invariant
+		if existingInv, err := kvIdx.GetCommitInvariantHash(ctx, itemHashStr); err == nil && existingInv != "" {
+			if _, err := commitSvc.GetCommit(ctx, existingInv); err == nil {
+				gitToInvCommit[itemHashStr] = existingInv
+				if headCommit == "" && item.hash == *targetHash {
+					headCommit = existingInv
+					rootCommit = existingInv
+				}
+				// Assume all predecessor commits are already converted and imported; stop walking this ancestor path!
+				continue
+			}
+		}
 
 		c, err := gitRepo.CommitObject(item.hash)
 		if err != nil {
@@ -273,18 +292,13 @@ func ImportGitRepository(
 	}
 
 	var tracker *GitImportProgressTracker
-	if opts.ShowProgress || opts.ProgressWriter != nil {
+	if len(gitCommits) > 0 && (opts.ShowProgress || opts.ProgressWriter != nil) {
 		tracker = &GitImportProgressTracker{}
 		stopProgress := tracker.Start(ctx, opts.ProgressWriter)
 		defer stopProgress()
 	}
 
-	kvIdx := NewGitKVIndex(kvClient)
-	gitToInvCommit := make(map[string]string)
-	var rootCommit string
-	var headCommit string
-
-	// 4. Import commits and trees into CAS
+	// 4. Import new commits and trees into CAS
 	for i, gc := range gitCommits {
 		gHashStr := gc.Hash.String()
 		if tracker != nil {
@@ -354,20 +368,27 @@ func ImportGitRepository(
 	}
 
 	// 5. Update workspace if target workspace directory is specified
-	if opts.TargetWorkspaceDir != "" {
+	if opts.TargetWorkspaceDir != "" && headCommit != "" {
 		wsRoot, meta, err := FindWorkspaceRoot(opts.TargetWorkspaceDir)
 		if err == nil && meta != nil {
+			needMaterialize := meta.CommitHash != headCommit
 			if meta.SlotID != "" {
 				currentAddr, _ := slotsClient.Get(ctx, meta.SlotID)
-				_ = slotsClient.Update(ctx, meta.SlotID, headCommit, currentAddr, nil)
+				if currentAddr != headCommit {
+					_ = slotsClient.Update(ctx, meta.SlotID, headCommit, currentAddr, nil)
+				}
 			}
-			meta.CommitHash = headCommit
-			_ = WriteWorkspaceMetadata(wsRoot, meta)
+			if meta.CommitHash != headCommit {
+				meta.CommitHash = headCommit
+				_ = WriteWorkspaceMetadata(wsRoot, meta)
+			}
 
-			// Materialize files in workspace
-			headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
-			if err == nil {
-				_ = MaterializeTree(ctx, headCommitObj.Tree, wsRoot, store)
+			// Materialize files in workspace only if commit changed
+			if needMaterialize {
+				headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+				if err == nil {
+					_ = MaterializeTree(ctx, headCommitObj.Tree, wsRoot, store)
+				}
 			}
 		}
 	}

@@ -254,8 +254,8 @@ func TestGitImport_AlreadyImported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second ImportGitRepository failed: %v", err)
 	}
-	if res2.ImportedCommits != 2 {
-		t.Errorf("Expected 2 commits total, got %d", res2.ImportedCommits)
+	if res2.ImportedCommits != 0 {
+		t.Errorf("Expected 0 new commits on re-import, got %d", res2.ImportedCommits)
 	}
 	if res2.HeadCommit != res1.HeadCommit {
 		t.Errorf("HEAD commit changed on re-import: %s vs %s", res2.HeadCommit, res1.HeadCommit)
@@ -288,8 +288,8 @@ func TestGitImport_AlreadyImported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Third ImportGitRepository failed: %v", err)
 	}
-	if res3.ImportedCommits != 3 {
-		t.Errorf("Expected 3 commits total, got %d", res3.ImportedCommits)
+	if res3.ImportedCommits != 1 {
+		t.Errorf("Expected 1 newly imported commit, got %d", res3.ImportedCommits)
 	}
 
 	// Verify new commit parent is the previous Invariant HEAD
