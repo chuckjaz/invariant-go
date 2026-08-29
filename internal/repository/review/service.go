@@ -5,7 +5,7 @@ package review
 import (
 	"context"
 
-	"invariant/internal/repository"
+	"invariant/internal/repository/identity"
 )
 
 // Comment represents a single comment entry in a review thread.
@@ -54,20 +54,20 @@ type Record struct {
 // Service defines the interface for managing code reviews, tokens, and comment threads.
 type Service interface {
 	// RequestReview creates a review record for a change branch and emits a unique review token.
-	RequestReview(ctx context.Context, repoName, branchName string, author repository.Identity) (*Record, error)
+	RequestReview(ctx context.Context, repoName, branchName string, author identity.Identity) (*Record, error)
 
 	// GetReview retrieves review metadata and comment threads by token, commit hash, or branch name.
 	GetReview(ctx context.Context, identifier string) (*Record, error)
 
 	// AddComments appends or updates structured comments on a review.
-	AddComments(ctx context.Context, token string, comments []ReviewComment, author repository.Identity) error
+	AddComments(ctx context.Context, token string, comments []ReviewComment, author identity.Identity) error
 
 	// ApproveReview marks the review as approved.
-	ApproveReview(ctx context.Context, token string, reviewer repository.Identity) error
+	ApproveReview(ctx context.Context, token string, reviewer identity.Identity) error
 
 	// RejectReview marks the review as rejected.
-	RejectReview(ctx context.Context, token string, reviewer repository.Identity) error
+	RejectReview(ctx context.Context, token string, reviewer identity.Identity) error
 
 	// AbandonReview marks the review as abandoned.
-	AbandonReview(ctx context.Context, token string, author repository.Identity) error
+	AbandonReview(ctx context.Context, token string, author identity.Identity) error
 }

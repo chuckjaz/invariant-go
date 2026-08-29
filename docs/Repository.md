@@ -104,7 +104,7 @@ Branches are subdirectories of the repository directory. To switch branches, sim
 ## Commands
 
 ### `ir create <name> [<content>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Create a new repository by the given name. The repository is opened in a subdirectory of the current directory.
 
@@ -136,7 +136,7 @@ The workspace is opened as `-writable` instead of read-only.
 ---
 
 ### `ir change <name>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Create a change workspace.
 
@@ -170,7 +170,7 @@ The SHA commit hash (or a unique prefix) to cherry-pick. If two commits are prov
 ---
 
 ### `ir commit`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Commit all added, removed, and modified files in the workspace to its corresponding branch. If neither `-m` nor `-no-edit` is provided, or if `-e` is used, a text editor is opened to edit the message.
 
@@ -194,7 +194,7 @@ Directly fold changes into an earlier commit in the change set.
 ---
 
 ### `ir clean`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Purge uncommitted temporary and ignored files from the local workspace overlay layer without affecting tracked source modifications.
 
@@ -212,7 +212,7 @@ Also remove ignored files.
 ---
 
 ### `ir diff`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Produce a unified diff of the files that have changed. Supports diffing working tree vs HEAD, working tree vs arbitrary commit, `<commit1>` vs `<commit2>`, or 3-dot branch diff against upstream.
 
@@ -592,14 +592,14 @@ The directory of the workspace branch being reviewed. If not supplied, it is inf
 ---
 
 ### `ir status`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Produces a list of files that have been changed, added, or removed in the workspace relative to the current branch commit.
 
 ---
 
 ### `ir submit [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Submit the current changes in the change workspace to the associated upstream branch and close/retire the workspace.
 
@@ -613,7 +613,7 @@ The directory of the workspace branch being submitted. If not supplied, it is in
 ---
 
 ### `ir sync [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Synchronize and rebase the change workspace with the latest commits in the upstream branch, performing a 3-way tree merge and reporting any merge conflicts.
 

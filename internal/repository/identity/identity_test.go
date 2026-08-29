@@ -1,4 +1,4 @@
-package repository
+package identity
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestEnvironmentIdentityProvider(t *testing.T) {
+func TestEnvironmentProvider(t *testing.T) {
 	ctx := context.Background()
 	os.Setenv("GIT_AUTHOR_NAME", "Env Author")
 	os.Setenv("GIT_AUTHOR_EMAIL", "env.author@example.com")
@@ -17,7 +17,7 @@ func TestEnvironmentIdentityProvider(t *testing.T) {
 		os.Unsetenv("INVARIANT_AUTH_TOKEN")
 	}()
 
-	provider := NewEnvironmentIdentityProvider()
+	provider := NewEnvironmentProvider()
 	id, err := provider.CurrentIdentity(ctx)
 	if err != nil {
 		t.Fatalf("CurrentIdentity failed: %v", err)
@@ -33,7 +33,7 @@ func TestEnvironmentIdentityProvider(t *testing.T) {
 	}
 }
 
-func TestMultiIdentityProviderFallback(t *testing.T) {
+func TestMultiProviderFallback(t *testing.T) {
 	ctx := context.Background()
 	os.Setenv("GIT_AUTHOR_NAME", "Fallback Author")
 	os.Setenv("GIT_AUTHOR_EMAIL", "fallback@example.com")
@@ -43,13 +43,13 @@ func TestMultiIdentityProviderFallback(t *testing.T) {
 	}()
 
 	mockTS := &mockTailscaleClient{statusResp: nil}
-	tsProvider := NewTailscaleIdentityProvider(mockTS)
-	envProvider := NewEnvironmentIdentityProvider()
+	tsProvider := NewTailscaleProvider(mockTS)
+	envProvider := NewEnvironmentProvider()
 
-	multi := NewMultiIdentityProvider(tsProvider, envProvider)
+	multi := NewMultiProvider(tsProvider, envProvider)
 	id, err := multi.CurrentIdentity(ctx)
 	if err != nil {
-		t.Fatalf("MultiIdentityProvider failed: %v", err)
+		t.Fatalf("MultiProvider failed: %v", err)
 	}
 	if id.Name != "Fallback Author" {
 		t.Errorf("Expected fallback name 'Fallback Author', got %q", id.Name)

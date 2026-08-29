@@ -1,4 +1,4 @@
-package repository
+package identity
 
 import (
 	"context"
@@ -16,22 +16,22 @@ type TailscaleClient interface {
 	Status(ctx context.Context) (*ipnstate.Status, error)
 }
 
-// TailscaleIdentityProvider implements IdentityProvider using the local Tailscale daemon.
-type TailscaleIdentityProvider struct {
+// TailscaleProvider implements Provider using the local Tailscale daemon.
+type TailscaleProvider struct {
 	client TailscaleClient
 }
 
-// NewTailscaleIdentityProvider creates a TailscaleIdentityProvider with the specified client.
+// NewTailscaleProvider creates a TailscaleProvider with the specified client.
 // If client is nil, the standard local.Client is used.
-func NewTailscaleIdentityProvider(client TailscaleClient) *TailscaleIdentityProvider {
+func NewTailscaleProvider(client TailscaleClient) *TailscaleProvider {
 	if client == nil {
 		client = &local.Client{}
 	}
-	return &TailscaleIdentityProvider{client: client}
+	return &TailscaleProvider{client: client}
 }
 
 // CurrentIdentity resolves the local user's identity from Tailscale Status.
-func (t *TailscaleIdentityProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
+func (t *TailscaleProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
 	status, err := t.client.Status(ctx)
 	if err != nil {
 		return Identity{}, fmt.Errorf("tailscale status check failed: %w", err)
@@ -63,7 +63,7 @@ func (t *TailscaleIdentityProvider) CurrentIdentity(ctx context.Context) (Identi
 }
 
 // IdentityFromRemote resolves caller identity using Tailscale WhoIs.
-func (t *TailscaleIdentityProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
+func (t *TailscaleProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		host = remoteAddr

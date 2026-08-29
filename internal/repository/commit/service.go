@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"invariant/internal/content"
-	"invariant/internal/repository"
+	"invariant/internal/repository/identity"
 )
 
 // CreateRequest specifies parameters to create an immutable commit.
@@ -16,19 +16,19 @@ type CreateRequest struct {
 	TreeLink   content.ContentLink `json:"treeLink"`
 	Parents    []string            `json:"parents"`
 	Message    string              `json:"message"`
-	Author     repository.Identity `json:"author"`
-	Committer  repository.Identity `json:"committer,omitempty"`
+	Author     identity.Identity   `json:"author"`
+	Committer  identity.Identity   `json:"committer,omitempty"`
 	Tags       map[string]string   `json:"tags,omitempty"`
 	Refs       map[string]string   `json:"refs,omitempty"`
 }
 
 // SubmitRequest specifies parameters for submitting a change set to an upstream branch.
 type SubmitRequest struct {
-	RepoName       string              `json:"repoName"`
-	ChangeBranch   string              `json:"changeBranch"`
-	TargetBranch   string              `json:"targetBranch"`
-	ExpectedTarget string              `json:"expectedTarget,omitempty"`
-	Author         repository.Identity `json:"author"`
+	RepoName       string            `json:"repoName"`
+	ChangeBranch   string            `json:"changeBranch"`
+	TargetBranch   string            `json:"targetBranch"`
+	ExpectedTarget string            `json:"expectedTarget,omitempty"`
+	Author         identity.Identity `json:"author"`
 }
 
 // SubmitResponse returns the result of a submitted change.
@@ -40,11 +40,11 @@ type SubmitResponse struct {
 
 // BlameLine captures line-by-line commit attribution.
 type BlameLine struct {
-	LineNumber int                 `json:"lineNumber"`
-	Content    string              `json:"content"`
-	CommitHash string              `json:"commitHash"`
-	Author     repository.Identity `json:"author"`
-	Timestamp  int64               `json:"timestamp"`
+	LineNumber int               `json:"lineNumber"`
+	Content    string            `json:"content"`
+	CommitHash string            `json:"commitHash"`
+	Author     identity.Identity `json:"author"`
+	Timestamp  int64             `json:"timestamp"`
 }
 
 // DiffStat summarizes the count of files changed and lines inserted or deleted.
@@ -77,13 +77,13 @@ type RebaseAction struct {
 // history querying, diff computation, sync, submit, blame, and bisect.
 type Service interface {
 	// GetCommit retrieves a commit by its SHA256 hash.
-	GetCommit(ctx context.Context, commitHash string) (*repository.Commit, error)
+	GetCommit(ctx context.Context, commitHash string) (*Commit, error)
 
 	// CreateCommit creates an immutable commit in CAS and updates the branch slot via CAS.
-	CreateCommit(ctx context.Context, req CreateRequest) (*repository.Commit, string, error)
+	CreateCommit(ctx context.Context, req CreateRequest) (*Commit, string, error)
 
 	// GetHistory returns commit history along the first-parent spine or full DAG, optionally filtered by path.
-	GetHistory(ctx context.Context, headHash string, spineOnly bool, pathFilter string) ([]*repository.Commit, []string, error)
+	GetHistory(ctx context.Context, headHash string, spineOnly bool, pathFilter string) ([]*Commit, []string, error)
 
 	// ComputeDiff calculates unified diff and statistics between two commit trees or workspace against a commit.
 	ComputeDiff(ctx context.Context, fromTree, toTree content.ContentLink) (string, DiffStat, error)

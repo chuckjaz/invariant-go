@@ -441,25 +441,25 @@ sequenceDiagram
     CLI->>FS: Unmount and retire feat-x workspace
 ```
 
-- [ ] **Step 2.1: `CommitService` Local & HTTP Implementation (`internal/repository/commit_service.go`, `internal/repository/commit_server.go`, `internal/repository/commit_client.go`)**
-  - Implement `LocalCommitService` executing commit operations directly against CAS and Slots.
-  - Implement HTTP handlers (`POST /api/v1/commit`, `GET /api/v1/commit/{sha}`, `GET /api/v1/history`, `POST /api/v1/sync`, `POST /api/v1/submit`).
-  - Implement `RemoteCommitClient` implementing `CommitService` over HTTP.
+- [x] **Step 2.1: `CommitService` Local & HTTP Implementation (`internal/repository/commit/`)**
+  - Implement `LocalService` executing commit operations directly against CAS and Slots.
+  - Implement HTTP handlers (`POST /api/v1/commit`, `GET /api/v1/commit/{sha}`, `GET /api/v1/history`, `POST /api/v1/sync`, `POST /api/v1/submit`, `POST /api/v1/diff`, `GET /api/v1/blame`, `POST /api/v1/bisect`, `POST /api/v1/rebase`).
+  - Implement `Client` implementing `commit.Service` over HTTP.
 
-- [ ] **Step 2.2: `ir create <name> [<content>]` (`internal/repository/create.go`, `cmd/invariant/repository.go`)**
+- [x] **Step 2.2: `ir create <name> [<content>]` (`internal/repository/create.go`, `cmd/invariant/repository.go`)**
   - Parse CLI arguments: `<name>`, initial content or `-d=<path>`, `-create-only`, `-encrypt`, `-compress`, `-writable`.
-  - Create initial commit, main branch slot, and Names registration via `CommitService`.
+  - Create initial commit, main branch slot, and Names registration via `commit.Service`.
   - Mount workspace directory `<name>/main` (read-only by default, or writable if `-writable`).
   - Update `docs/Repository.md`: mark `ir create` as `**Status:** Implemented`.
 
-- [ ] **Step 2.3: `ir change <name>` (`internal/repository/change.go`)**
+- [x] **Step 2.3: `ir change <name>` (`internal/repository/change.go`)**
   - Flag: `-private`.
   - Allocate change slot pointing to upstream HEAD commit.
   - Register `:<user>:<repo_name>:<name>` in Names service unless `-private`.
   - Mount writable workspace at `<repo_root>/<name>`.
   - Update `docs/Repository.md`: mark `ir change` as `**Status:** Implemented`.
 
-- [ ] **Step 2.4: `ir status`, `ir diff` & `ir clean` (`internal/repository/status.go`, `internal/repository/diff.go`, `internal/repository/clean.go`)**
+- [x] **Step 2.4: `ir status`, `ir diff` & `ir clean` (`internal/repository/status.go`, `internal/repository/diff.go`, `internal/repository/clean.go`)**
   - `status`: Compare workspace active tree to HEAD commit tree; show Added, Modified, Deleted files.
   - `diff [<commit1>] [<commit2>] [--stat]`:
     - Diffs working tree vs HEAD, working tree vs arbitrary commit, or `<commit1>` vs `<commit2>`.
@@ -469,7 +469,7 @@ sequenceDiagram
     - Resets and purges uncommitted temporary/ignored files in the local workspace overlay layer without modifying tracked source edits.
   - Update `docs/Repository.md`: mark `ir status`, `ir diff`, and `ir clean` as `**Status:** Implemented`.
 
-- [ ] **Step 2.5: `ir commit` (`internal/repository/commit_cmd.go`)**
+- [x] **Step 2.5: `ir commit` (`internal/repository/commit_cmd.go`)**
   - Options: `-m <msg>` (repeatable, newline concatenated), `-e` / `-edit`, `-no-edit`, `-amend`.
   - Snapshot working tree; launch editor if no `-m` and not `-no-edit`.
   - Call `CommitService.CreateCommit`:
@@ -478,7 +478,7 @@ sequenceDiagram
     - Update change branch slot via CAS.
   - Update `docs/Repository.md`: mark `ir commit` as `**Status:** Implemented`.
 
-- [ ] **Step 2.6: `ir sync` with Conflict Lifecycle Controls (`internal/repository/sync.go`)**
+- [x] **Step 2.6: `ir sync` with Conflict Lifecycle Controls (`internal/repository/sync.go`)**
   - Route through `CommitService.SyncBranch`.
   - Perform 3-way merge on file trees using [`workspace.MergeTrees`](file:///home/chuckjaz/src/invariant-go/internal/workspace/workspace.go#L300-L440).
   - Write standard conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) if conflicts exist.
@@ -486,14 +486,14 @@ sequenceDiagram
   - Support `ir sync --continue`: verify all conflict markers are resolved, snapshot tree, and finalize rebased commit.
   - Update `docs/Repository.md`: mark `ir sync` as `**Status:** Implemented`.
 
-- [ ] **Step 2.7: `ir submit [<directory>]` (`internal/repository/submit.go`)**
+- [x] **Step 2.7: `ir submit [<directory>]` (`internal/repository/submit.go`)**
   - Route through `CommitService.SubmitChange`.
   - Validate branch criteria (e.g. check approved review status if required).
   - Fast-forward or rebase onto upstream branch.
   - Unmount and retire `<repo_root>/<name>` workspace.
   - Update `docs/Repository.md`: mark `ir submit` as `**Status:** Implemented`.
 
-- [ ] **Phase 2 Quality & Verification Gate**
+- [x] **Phase 2 Quality & Verification Gate**
   - End-to-end integration test in `internal/repository/workflow_test.go` covering `create` $\to$ `change` $\to$ `clean` $\to$ `diff --stat` $\to$ `commit` $\to$ conflict resolution with `--continue`/`--abort` $\to$ `submit`.
   - Verify compliance with `go fmt`, `go vet`, and `go fix`.
   - Full Go doc comments on all new exported APIs.

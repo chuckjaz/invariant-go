@@ -1,4 +1,6 @@
-package repository
+// Package identity provides user identity models and extensible identity provider
+// interfaces and implementations (e.g. Tailscale, Environment/OS).
+package identity
 
 import (
 	"context"
@@ -9,9 +11,15 @@ import (
 	"sync"
 )
 
-// IdentityProvider abstracts user identity and authorization lookup across different backends
-// (such as Tailscale, Environment/OS, LDAP, OAuth, or SSH keys).
-type IdentityProvider interface {
+// Identity captures user identity and authorization credentials.
+type Identity struct {
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+	Token string `json:"token,omitempty"`
+}
+
+// Provider abstracts user identity and authorization lookup across different backends.
+type Provider interface {
 	// CurrentIdentity resolves the local active user's identity.
 	CurrentIdentity(ctx context.Context) (Identity, error)
 
@@ -19,16 +27,16 @@ type IdentityProvider interface {
 	IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error)
 }
 
-// EnvironmentIdentityProvider resolves user identity from environment variables and OS user information.
-type EnvironmentIdentityProvider struct{}
+// EnvironmentProvider resolves user identity from environment variables and OS user information.
+type EnvironmentProvider struct{}
 
-// NewEnvironmentIdentityProvider creates an IdentityProvider based on local OS and environment variables.
-func NewEnvironmentIdentityProvider() *EnvironmentIdentityProvider {
-	return &EnvironmentIdentityProvider{}
+// NewEnvironmentProvider creates a Provider based on local OS and environment variables.
+func NewEnvironmentProvider() *EnvironmentProvider {
+	return &EnvironmentProvider{}
 }
 
 // CurrentIdentity resolves identity from GIT_AUTHOR_NAME/EMAIL, USER, and os/user.Current.
-func (p *EnvironmentIdentityProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
+func (p *EnvironmentProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
 	name := os.Getenv("GIT_AUTHOR_NAME")
 	if name == "" {
 		name = os.Getenv("USER")
@@ -63,23 +71,23 @@ func (p *EnvironmentIdentityProvider) CurrentIdentity(ctx context.Context) (Iden
 	}, nil
 }
 
-// IdentityFromRemote returns an error as EnvironmentIdentityProvider does not resolve remote network callers.
-func (p *EnvironmentIdentityProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
+// IdentityFromRemote returns an error as EnvironmentProvider does not resolve remote network callers.
+func (p *EnvironmentProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
 	return nil, fmt.Errorf("environment identity provider does not support remote address resolution")
 }
 
-// MultiIdentityProvider chains multiple IdentityProviders in priority order.
-type MultiIdentityProvider struct {
-	providers []IdentityProvider
+// MultiProvider chains multiple Providers in priority order.
+type MultiProvider struct {
+	providers []Provider
 }
 
-// NewMultiIdentityProvider creates a provider that evaluates the given providers in sequence.
-func NewMultiIdentityProvider(providers ...IdentityProvider) *MultiIdentityProvider {
-	return &MultiIdentityProvider{providers: providers}
+// NewMultiProvider creates a provider that evaluates the given providers in sequence.
+func NewMultiProvider(providers ...Provider) *MultiProvider {
+	return &MultiProvider{providers: providers}
 }
 
 // CurrentIdentity queries providers in order until one returns a non-empty identity with name.
-func (m *MultiIdentityProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
+func (m *MultiProvider) CurrentIdentity(ctx context.Context) (Identity, error) {
 	var lastErr error
 	for _, p := range m.providers {
 		id, err := p.CurrentIdentity(ctx)
@@ -90,7 +98,6 @@ func (m *MultiIdentityProvider) CurrentIdentity(ctx context.Context) (Identity, 
 			lastErr = err
 		}
 	}
-	// If all returned unknown/error, try fallback
 	for _, p := range m.providers {
 		id, err := p.CurrentIdentity(ctx)
 		if err == nil && id.Name != "" {
@@ -104,7 +111,7 @@ func (m *MultiIdentityProvider) CurrentIdentity(ctx context.Context) (Identity, 
 }
 
 // IdentityFromRemote queries providers in order until one resolves the remote address.
-func (m *MultiIdentityProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
+func (m *MultiProvider) IdentityFromRemote(ctx context.Context, remoteAddr string) (*Identity, error) {
 	var lastErr error
 	for _, p := range m.providers {
 		id, err := p.IdentityFromRemote(ctx, remoteAddr)
@@ -123,25 +130,25 @@ func (m *MultiIdentityProvider) IdentityFromRemote(ctx context.Context, remoteAd
 
 var (
 	defaultProviderMu sync.RWMutex
-	defaultProvider   IdentityProvider
+	defaultProvider   Provider
 )
 
 func init() {
-	defaultProvider = NewMultiIdentityProvider(
-		NewTailscaleIdentityProvider(nil),
-		NewEnvironmentIdentityProvider(),
+	defaultProvider = NewMultiProvider(
+		NewTailscaleProvider(nil),
+		NewEnvironmentProvider(),
 	)
 }
 
-// DefaultIdentityProvider returns the current global IdentityProvider.
-func DefaultIdentityProvider() IdentityProvider {
+// DefaultProvider returns the current global Provider.
+func DefaultProvider() Provider {
 	defaultProviderMu.RLock()
 	defer defaultProviderMu.RUnlock()
 	return defaultProvider
 }
 
-// SetDefaultIdentityProvider sets the global IdentityProvider.
-func SetDefaultIdentityProvider(p IdentityProvider) {
+// SetDefaultProvider sets the global Provider.
+func SetDefaultProvider(p Provider) {
 	defaultProviderMu.Lock()
 	defer defaultProviderMu.Unlock()
 	defaultProvider = p
@@ -149,7 +156,7 @@ func SetDefaultIdentityProvider(p IdentityProvider) {
 
 // CurrentIdentity resolves the active user's identity using the default provider chain.
 func CurrentIdentity(ctx context.Context) Identity {
-	id, err := DefaultIdentityProvider().CurrentIdentity(ctx)
+	id, err := DefaultProvider().CurrentIdentity(ctx)
 	if err != nil {
 		return Identity{Name: "unknown"}
 	}

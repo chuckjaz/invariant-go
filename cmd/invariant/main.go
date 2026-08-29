@@ -23,6 +23,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  status    Query the discovery service and verify node health directly\n")
 	fmt.Fprintf(os.Stderr, "  workspace Manage layered workspaces\n")
 	fmt.Fprintf(os.Stderr, "  scan-repo Scan a Git repository and index mappings to KV service\n")
+	fmt.Fprintf(os.Stderr, "  repository (ir) Manage Invariant version control repositories\n")
 	os.Exit(1)
 }
 
@@ -64,6 +65,8 @@ func main() {
 		runWorkspace(cfg, os.Args[2:])
 	case "scan-repo":
 		runScanRepo(cfg, os.Args[2:])
+	case "repository", "repo", "ir":
+		runRepository(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()

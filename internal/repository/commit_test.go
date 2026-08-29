@@ -166,19 +166,19 @@ func TestCommitSortTagsAndRefs(t *testing.T) {
 		},
 	}
 
-	tags := c.SortTags()
+	tags := SortTags(c.Tags)
 	expectedTags := []string{"apple", "middle", "zebra"}
 	for i, tag := range tags {
-		if tag != expectedTags[i] {
-			t.Errorf("Tag order mismatch at %d: got %s, want %s", i, tag, expectedTags[i])
+		if tag.Key != expectedTags[i] {
+			t.Errorf("Tag order mismatch at %d: got %s, want %s", i, tag.Key, expectedTags[i])
 		}
 	}
 
-	refs := c.SortRefs()
+	refs := SortRefs(c.Refs)
 	expectedRefs := []string{"ref-a", "ref-b", "ref-c"}
 	for i, ref := range refs {
-		if ref != expectedRefs[i] {
-			t.Errorf("Ref order mismatch at %d: got %s, want %s", i, ref, expectedRefs[i])
+		if ref.Name != expectedRefs[i] {
+			t.Errorf("Ref order mismatch at %d: got %s, want %s", i, ref.Name, expectedRefs[i])
 		}
 	}
 }
