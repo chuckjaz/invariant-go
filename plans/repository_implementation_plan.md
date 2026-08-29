@@ -366,9 +366,10 @@ Establish core domain models (`Commit` with `Tags` and `Refs`, `Identity` with T
   - Implement canonical JSON serialization and deterministic SHA-256 commit address hashing.
   - Implement CAS read/write encoders.
 
-- [x] **Step 1.2: Identity & Tailscale Authentication (`internal/repository/identity.go`)**
-  - Implement Tailscale WhoIs lookup using `tailscale.com/client/local` to automatically extract logged-in user name, email, and authentication token.
-  - Implement fallback to OS user and environment identity when Tailscale is inactive.
+- [x] **Step 1.2: Extensible Identity Providers (`internal/repository/identity.go`, `internal/repository/identity_tailscale.go`)**
+  - Implement generic `IdentityProvider` interface and `EnvironmentIdentityProvider` with `MultiIdentityProvider` chaining.
+  - Implement `TailscaleIdentityProvider` using `tailscale.com/client/local` to extract logged-in user name, email, and authentication token.
+  - Support easy extension for future identity backends.
 
 - [x] **Step 1.3: Slot & Name Management (`internal/repository/naming.go`)**
   - Implement naming conventions:
@@ -377,9 +378,10 @@ Establish core domain models (`Commit` with `Tags` and `Refs`, `Identity` with T
     - Release tag: `<repo_name>:tags:<tag_name>`
   - Implement slot allocation, registration, and Compare-And-Swap (CAS) update helpers.
 
-- [x] **Step 1.4: Service Interface Definitions (`internal/repository/service.go`)**
-  - Define `CommitService`, `ReviewService`, and `ConfigService` interfaces.
-  - Define request/response payload structs.
+- [x] **Step 1.4: Service Interface Submodules (`internal/repository/commit/service.go`, `internal/repository/review/service.go`, `internal/repository/config/service.go`)**
+  - Define `commit.Service` and request/response payload structs in sub-module `internal/repository/commit/`.
+  - Define `review.Service` and review data structs in sub-module `internal/repository/review/`.
+  - Define `config.Service` in sub-module `internal/repository/config/`.
 
 - [x] **Step 1.5: Plan Persistence & `Repository.md` Baseline Audit**
   - Create directory `plans/` and write master plan to `plans/repository_implementation_plan.md`.
