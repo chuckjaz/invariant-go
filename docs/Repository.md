@@ -106,7 +106,7 @@ Branches are subdirectories of the repository directory. To switch branches, sim
 ### `ir create <name> [<content>]`
 **Status:** Implemented
 
-Create a new repository by the given name. The repository is opened in a subdirectory of the current directory.
+Create a new repository by the given name. The repository is opened in a subdirectory of the current directory, and the current working directory changes to the newly created `main` workspace.
 
 #### Arguments
 
@@ -119,7 +119,7 @@ The name, address, or content link for the initial content. A directory can be i
 #### Options
 
 ##### `-create-only`
-Creates the repository without opening and mounting it.
+Creates the repository without opening, mounting it, or changing directory.
 
 ##### `-d=<path>`, `-directory=<path>`
 Uses the content of `<path>` as the initial content of the repository. This becomes the content of the `main` branch of the repository. This option cannot be combined with a `<content>` argument.
@@ -138,7 +138,7 @@ The workspace is opened as `-writable` instead of read-only.
 ### `ir change <name>`
 **Status:** Implemented
 
-Create a change workspace.
+Create a change workspace and change the current working directory to the newly created workspace.
 
 The name is registered with the Names Service as `:<user>:<repository name>:<name>` unless `-private` is used.
 
@@ -398,7 +398,7 @@ Display the full DAG commit graph including merge branches.
 ### `ir mount [<directory>]`
 **Status:** Implemented
 
-Mount a repository in the given directory. If no `<directory>` argument is provided, the current directory is used.
+Mount a repository in the given directory and switch the current working directory to the mounted workspace. If no `<directory>` argument is provided, the current directory is used.
 
 #### Arguments
 
@@ -601,7 +601,7 @@ Produces a list of files that have been changed, added, or removed in the worksp
 ### `ir submit [<directory>]`
 **Status:** Implemented
 
-Submit the current changes in the change workspace to the associated upstream branch and close/retire the workspace.
+Submit the current changes in the change workspace to the associated upstream branch, close/retire the workspace, and switch the current working directory to the repository root directory.
 
 If the upstream branch requires review approval, the associated review must be approved before submission can succeed.
 
@@ -635,7 +635,7 @@ Abort the sync operation and restore the workspace to the clean pre-sync commit 
 ### `ir unmount <directory>`
 **Status:** Implemented
 
-Unmount the repository and all nested workspaces.
+Unmount the repository and all nested workspaces, switching the working directory to the parent directory if currently inside the unmounted workspace.
 
 #### Arguments
 

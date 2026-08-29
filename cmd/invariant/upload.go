@@ -270,10 +270,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	os.MkdirAll(cacheDir, 0755)
 	cachePath := filepath.Join(cacheDir, "cache.json")
 
-	numWorkers := max(runtime.NumCPU()*4, 32)
-	if numWorkers > 128 {
-		numWorkers = 128
-	}
+	numWorkers := min(max(runtime.NumCPU()*4, 32), 128)
 
 	up := &uploader{
 		cache:        make(map[string]UploadCacheEntry),

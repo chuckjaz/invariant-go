@@ -231,7 +231,7 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 
 	fmt.Printf("Created repository %q (main slot: %s, initial commit: %s)\n", name, cfg.MainSlotID, rootCommit)
 	if !*createOnly {
-		fmt.Printf("Mounted workspace at %s/main\n", name)
+		fmt.Printf("Switched to workspace at %s/main\n", name)
 	}
 }
 
@@ -265,7 +265,7 @@ func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	fmt.Printf("Created change branch %q (slot: %s, base: %s)\n", meta.BranchName, meta.SlotID, meta.CommitHash)
-	fmt.Printf("Workspace available at %s\n", meta.WorkspaceDir)
+	fmt.Printf("Switched to workspace at %s\n", meta.WorkspaceDir)
 }
 
 func runRepoStatus(globalCfg *config.InvariantConfig, args []string) {
@@ -891,7 +891,8 @@ func runRepoMount(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Mounted repository %s (branch: %s) at %s\n", meta.RepoName, meta.BranchName, meta.WorkspaceDir)
+	fmt.Printf("Mounted repository %s (branch: %s)\n", meta.RepoName, meta.BranchName)
+	fmt.Printf("Switched to workspace at %s\n", meta.WorkspaceDir)
 }
 
 func runRepoUnmount(globalCfg *config.InvariantConfig, args []string) {

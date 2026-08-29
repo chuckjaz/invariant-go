@@ -68,6 +68,8 @@ func MountRepository(ctx context.Context, store storage.Storage, slotsClient slo
 		return nil, err
 	}
 
+	_ = ChangeWorkingDirectory(mainBranchDir)
+
 	return meta, nil
 }
 
@@ -77,6 +79,9 @@ func UnmountRepository(workspaceDir string) error {
 	if err != nil {
 		return err
 	}
+
+	parent := filepath.Dir(wsRoot)
+	_ = ChangeWorkingDirectory(parent)
 
 	// Verify workspace exists
 	if _, err := ReadWorkspaceMetadata(wsRoot); err != nil {

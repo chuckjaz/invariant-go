@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"invariant/internal/names"
 	"invariant/internal/repository/commit"
@@ -62,6 +63,8 @@ func ExecuteSubmit(
 	}
 
 	// Retire change branch workspace
+	repoRoot := filepath.Dir(meta.WorkspaceDir)
+	_ = ChangeWorkingDirectory(repoRoot)
 	_ = os.RemoveAll(meta.WorkspaceDir)
 
 	return resp, nil

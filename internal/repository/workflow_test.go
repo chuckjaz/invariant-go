@@ -68,6 +68,12 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	repoName := "myproject"
 	repoDir := filepath.Join(tempBase, repoName)
 
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	cdFile := filepath.Join(tempBase, "cd_target.txt")
+	t.Setenv("INVARIANT_CD_FILE", cdFile)
+
 	// 1. Create Repository
 	cfg, rootCommitHash, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
 		Name:      repoName,
@@ -86,6 +92,14 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 		t.Fatalf("Main workspace metadata not found: %v", err)
 	}
 
+	// Verify working directory was switched to main workspace
+	if curWd, _ := os.Getwd(); curWd != mainWorkspace {
+		t.Errorf("Expected current working directory to be %s, got %s", mainWorkspace, curWd)
+	}
+	if cdContent, _ := os.ReadFile(cdFile); string(cdContent) != mainWorkspace {
+		t.Errorf("Expected CD file to contain %s, got %s", mainWorkspace, string(cdContent))
+	}
+
 	// 2. Create Change Branch
 	meta, err := CreateChangeBranch(ctx, store, slotsClient, namesClient, commitSvc, ChangeOptions{
 		RepoRoot:   repoDir,
@@ -98,6 +112,14 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	changeWorkspace := filepath.Join(repoDir, "feat-awesome")
 	if meta.BranchName != ":Alice:myproject:feat-awesome" {
 		t.Errorf("Unexpected change branch name: %s", meta.BranchName)
+	}
+
+	// Verify working directory was switched to change workspace
+	if curWd, _ := os.Getwd(); curWd != changeWorkspace {
+		t.Errorf("Expected current working directory to be %s, got %s", changeWorkspace, curWd)
+	}
+	if cdContent, _ := os.ReadFile(cdFile); string(cdContent) != changeWorkspace {
+		t.Errorf("Expected CD file to contain %s, got %s", changeWorkspace, string(cdContent))
 	}
 
 	// 3. Edit files & generate temp file in workspace
@@ -177,6 +199,11 @@ func TestWorkflow_EndToEnd(t *testing.T) {
 	// Verify change directory was retired
 	if _, err := os.Stat(changeWorkspace); !os.IsNotExist(err) {
 		t.Errorf("Expected change workspace to be retired, but still exists")
+	}
+
+	// Verify working directory was switched to repository root
+	if curWd, _ := os.Getwd(); curWd != repoDir {
+		t.Errorf("Expected working directory after submit to be %s, got %s", repoDir, curWd)
 	}
 }
 

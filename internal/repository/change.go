@@ -140,5 +140,7 @@ func CreateChangeBranch(
 		return nil, err
 	}
 
+	_ = ChangeWorkingDirectory(changeDir)
+
 	return meta, nil
 }

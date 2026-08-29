@@ -134,6 +134,7 @@ func CreateRepository(
 		if err := WriteWorkspaceMetadata(mainDir, meta); err != nil {
 			return nil, "", err
 		}
+		_ = ChangeWorkingDirectory(mainDir)
 	}
 
 	return cfg, rootCommitHash, nil
