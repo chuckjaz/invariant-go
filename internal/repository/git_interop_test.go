@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -149,11 +150,15 @@ func TestGitImport(t *testing.T) {
 
 	mainWs := filepath.Join(repoDir, "main")
 
-	// Import Git repo into Invariant workspace
+	var progBuf bytes.Buffer
+
+	// Import Git repo into Invariant workspace with progress tracking enabled
 	res, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
 		GitDir:             gitDir,
 		Branch:             "master",
 		TargetWorkspaceDir: mainWs,
+		ShowProgress:       true,
+		ProgressWriter:     &progBuf,
 	})
 	if err != nil {
 		t.Fatalf("ImportGitRepository failed: %v", err)
@@ -344,5 +349,25 @@ func TestGitRoundtrip(t *testing.T) {
 	exportedUtils, _ := os.ReadFile(filepath.Join(targetGitDir, "src", "utils.go"))
 	if string(origUtils) != string(exportedUtils) {
 		t.Errorf("src/utils.go content mismatch:\nOriginal: %s\nExported: %s", origUtils, exportedUtils)
+	}
+}
+
+func TestGitImportProgressTracker(t *testing.T) {
+	tracker := &GitImportProgressTracker{}
+	tracker.SetCommit(1, 5, "1234567890abcdef", "Feature commit message")
+
+	var buf bytes.Buffer
+	stop := tracker.Start(context.Background(), &buf)
+
+	time.Sleep(100 * time.Millisecond)
+	stop()
+
+	if tracker.CurrentCommitIndex != 1 || tracker.TotalCommits != 5 {
+		t.Errorf("Unexpected tracker commit index/total: %d/%d", tracker.CurrentCommitIndex, tracker.TotalCommits)
+	}
+
+	formatted := tracker.formatBytes(1024 * 1024 * 5)
+	if !strings.Contains(formatted, "5.0 MB") {
+		t.Errorf("formatBytes unexpected output: %s", formatted)
 	}
 }

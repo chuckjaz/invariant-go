@@ -1232,6 +1232,8 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 		Branch:             *branchFlag,
 		TargetWorkspaceDir: cwd,
 		Depth:              *depthFlag,
+		ShowProgress:       true,
+		ProgressWriter:     os.Stdout,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error importing git repository: %v\n", err)
