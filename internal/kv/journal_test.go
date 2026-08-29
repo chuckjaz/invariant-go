@@ -95,7 +95,7 @@ func TestJournal_AutoFlush(t *testing.T) {
 
 	// The slots should have been updated with the new journal pointer
 	var slotVal string
-	for attempt := 0; attempt < 50; attempt++ {
+	for range 50 {
 		slotVal, err = slotClient.Get(ctx, "j-slot")
 		if err == nil && slotVal != "" {
 			break

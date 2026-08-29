@@ -155,7 +155,7 @@ Do not publish the branch name with the Names Service.
 ---
 
 ### `ir cherry-pick <branch|commit> [<commit>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Take the changes from specified commits and apply them to the current workspace (in chronological order, if multiple commits are selected).
 
@@ -224,42 +224,42 @@ Display a summary of changed files with insertion/deletion counts.
 ---
 
 ### `ir restore [<path>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Discard uncommitted local edits and restore specific file(s) or the entire working tree directly from the current HEAD commit snapshot.
 
 ---
 
 ### `ir revert <commit>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Compute the inverse patch of the specified commit and apply it as a new commit on the current branch.
 
 ---
 
 ### `ir blame <file>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Annotate each line of the specified file with the commit hash, author, and timestamp from which the line originated.
 
 ---
 
 ### `ir show <commit>[:<path>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Display commit metadata and unified diff for a commit, or display the content of `<path>` at that commit snapshot without mounting.
 
 ---
 
 ### `ir grep <pattern>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Search for text or regular expression patterns across commit trees directly in CAS.
 
 ---
 
 ### `ir stash`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Manage ephemeral working tree snapshots.
 
@@ -280,7 +280,7 @@ Remove a stashed snapshot.
 ---
 
 ### `ir bisect`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Binary search across the commit history to locate the commit that introduced a bug.
 
@@ -301,7 +301,7 @@ Automatically run a test script at each midpoint step until the culprit commit i
 ---
 
 ### `ir rebase`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Rebase commits in a private change branch.
 
@@ -381,7 +381,7 @@ Import the commits into this branch from the corresponding branch of the given G
 ---
 
 ### `ir log`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Display the commit history of the current branch. By default, traverses the first-parent spine.
 
@@ -396,7 +396,7 @@ Display the full DAG commit graph including merge branches.
 ---
 
 ### `ir mount [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Mount a repository in the given directory. If no `<directory>` argument is provided, the current directory is used.
 
@@ -633,7 +633,7 @@ Abort the sync operation and restore the workspace to the clean pre-sync commit 
 ---
 
 ### `ir unmount <directory>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Unmount the repository and all nested workspaces.
 

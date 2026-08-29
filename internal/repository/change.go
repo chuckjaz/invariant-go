@@ -125,18 +125,20 @@ func CreateChangeBranch(
 	}
 
 	meta := &WorkspaceMetadata{
-		RepoName:     repoName,
-		BranchName:   branchName,
-		Upstream:     upstream,
-		SlotID:       changeSlotID,
-		CommitHash:   upstreamCommitHash,
-		Writable:     true,
-		CreatedAt:    time.Now().Unix(),
-		WorkspaceDir: changeDir,
+		RepoName:       repoName,
+		BranchName:     branchName,
+		Upstream:       upstream,
+		SlotID:         changeSlotID,
+		CommitHash:     upstreamCommitHash,
+		ParentSnapshot: upstreamCommitHash,
+		Writable:       true,
+		CreatedAt:      time.Now().Unix(),
+		WorkspaceDir:   changeDir,
 	}
 
-	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	_ = os.WriteFile(filepath.Join(changeDir, ".invariant-workspace"), metaData, 0644)
+	if err := WriteWorkspaceMetadata(changeDir, meta); err != nil {
+		return nil, err
+	}
 
 	return meta, nil
 }

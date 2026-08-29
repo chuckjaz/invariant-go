@@ -29,14 +29,15 @@ type CreateOptions struct {
 
 // WorkspaceMetadata represents the persistent metadata stored in a repository workspace directory.
 type WorkspaceMetadata struct {
-	RepoName     string `json:"repoName"`
-	BranchName   string `json:"branchName"`
-	Upstream     string `json:"upstream"`
-	SlotID       string `json:"slotId"`
-	CommitHash   string `json:"commitHash"`
-	Writable     bool   `json:"writable"`
-	CreatedAt    int64  `json:"createdAt"`
-	WorkspaceDir string `json:"workspaceDir,omitempty"`
+	RepoName       string `json:"repoName"`
+	BranchName     string `json:"branchName"`
+	Upstream       string `json:"upstream"`
+	SlotID         string `json:"slotId"`
+	CommitHash     string `json:"commitHash"`
+	ParentSnapshot string `json:"parentSnapshot,omitempty"`
+	Writable       bool   `json:"writable"`
+	CreatedAt      int64  `json:"createdAt"`
+	WorkspaceDir   string `json:"workspaceDir,omitempty"`
 }
 
 // CreateRepository creates a new repository, initializes root commit and main branch,
@@ -120,7 +121,7 @@ func CreateRepository(
 		}
 
 		// Write workspace metadata
-		meta := WorkspaceMetadata{
+		meta := &WorkspaceMetadata{
 			RepoName:     opts.Name,
 			BranchName:   "main",
 			Upstream:     "main",
@@ -130,9 +131,35 @@ func CreateRepository(
 			CreatedAt:    time.Now().Unix(),
 			WorkspaceDir: mainDir,
 		}
-		metaData, _ := json.MarshalIndent(meta, "", "  ")
-		_ = os.WriteFile(filepath.Join(mainDir, ".invariant-workspace"), metaData, 0644)
+		if err := WriteWorkspaceMetadata(mainDir, meta); err != nil {
+			return nil, "", err
+		}
 	}
 
 	return cfg, rootCommitHash, nil
+}
+
+// ReadWorkspaceMetadata loads .invariant-workspace from wsRoot.
+func ReadWorkspaceMetadata(wsRoot string) (*WorkspaceMetadata, error) {
+	wsPath := filepath.Join(wsRoot, ".invariant-workspace")
+	data, err := os.ReadFile(wsPath)
+	if err != nil {
+		return nil, err
+	}
+	var meta WorkspaceMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	meta.WorkspaceDir = wsRoot
+	return &meta, nil
+}
+
+// WriteWorkspaceMetadata saves .invariant-workspace to wsRoot.
+func WriteWorkspaceMetadata(wsRoot string, meta *WorkspaceMetadata) error {
+	wsPath := filepath.Join(wsRoot, ".invariant-workspace")
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(wsPath, data, 0644)
 }

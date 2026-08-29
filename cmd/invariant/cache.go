@@ -256,7 +256,6 @@ func cacheContentTree(
 
 	var wg sync.WaitGroup
 	for _, entry := range dir {
-		entry := entry
 		entryName := entry.GetName()
 
 		childSegments := make([]string, len(currentSegments)+1)

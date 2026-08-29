@@ -22,7 +22,7 @@ func LineDiff(oldLines, newLines []string, oldName, newName string) (string, int
 	// Quick check for identical content
 	if n == m {
 		identical := true
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if oldLines[i] != newLines[i] {
 				identical = false
 				break
@@ -39,8 +39,8 @@ func LineDiff(oldLines, newLines []string, oldName, newName string) (string, int
 		lcs[i] = make([]int, m+1)
 	}
 
-	for i := 0; i < n; i++ {
-		for j := 0; j < m; j++ {
+	for i := range n {
+		for j := range m {
 			if oldLines[i] == newLines[j] {
 				lcs[i+1][j+1] = lcs[i][j] + 1
 			} else if lcs[i+1][j] >= lcs[i][j+1] {

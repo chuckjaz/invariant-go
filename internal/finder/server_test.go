@@ -8,6 +8,7 @@ import (
 	"invariant/internal/notify"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 )
@@ -32,18 +33,12 @@ func (m *mockDiscovery) Find(ctx context.Context, protocol, tag string, count in
 	var results []discovery.ServiceDescription
 	for _, desc := range m.services {
 		hasProtocol := protocol == ""
-		for _, p := range desc.Protocols {
-			if p == protocol {
-				hasProtocol = true
-				break
-			}
+		if slices.Contains(desc.Protocols, protocol) {
+			hasProtocol = true
 		}
 		hasTag := tag == ""
-		for _, t := range desc.Tags {
-			if t == tag {
-				hasTag = true
-				break
-			}
+		if slices.Contains(desc.Tags, tag) {
+			hasTag = true
 		}
 		if hasProtocol && hasTag {
 			results = append(results, desc)

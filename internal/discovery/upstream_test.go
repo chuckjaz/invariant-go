@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -25,18 +26,12 @@ func (m *mockParentDiscovery) Find(ctx context.Context, protocol, tag string, co
 	var results []ServiceDescription
 	for _, desc := range m.services {
 		hasProtocol := protocol == ""
-		for _, p := range desc.Protocols {
-			if p == protocol {
-				hasProtocol = true
-				break
-			}
+		if slices.Contains(desc.Protocols, protocol) {
+			hasProtocol = true
 		}
 		hasTag := tag == ""
-		for _, t := range desc.Tags {
-			if t == tag {
-				hasTag = true
-				break
-			}
+		if slices.Contains(desc.Tags, tag) {
+			hasTag = true
 		}
 		if hasProtocol && hasTag {
 			results = append(results, desc)

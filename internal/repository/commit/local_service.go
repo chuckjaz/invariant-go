@@ -3,6 +3,7 @@ package commit
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -308,13 +309,7 @@ func (s *LocalService) SubmitChange(ctx context.Context, req SubmitRequest) (*Su
 		return nil, fmt.Errorf("failed to read change commit %s: %w", changeCommitHash, err)
 	}
 
-	isFastForward := false
-	for _, p := range changeCommit.Parents {
-		if p == targetCommitHash {
-			isFastForward = true
-			break
-		}
-	}
+	isFastForward := slices.Contains(changeCommit.Parents, targetCommitHash)
 
 	var finalCommitHash string
 	if isFastForward {
@@ -382,13 +377,22 @@ func (s *LocalService) Bisect(ctx context.Context, goodCommits, badCommits []str
 		return "", 0, fmt.Errorf("at least one bad commit required for bisect")
 	}
 
-	commits, hashes, err := s.GetHistory(ctx, badCommits[0], false, "")
+	// Start traversal from the earliest known bad commit
+	startBad := badCommits[len(badCommits)-1]
+	commits, hashes, err := s.GetHistory(ctx, startBad, true, "")
 	if err != nil {
 		return "", 0, err
 	}
 
 	goodSet := make(map[string]bool)
 	for _, g := range goodCommits {
+		gCommits, gHashes, err := s.GetHistory(ctx, g, true, "")
+		if err == nil {
+			for _, gh := range gHashes {
+				goodSet[gh] = true
+			}
+		}
+		_ = gCommits
 		goodSet[g] = true
 	}
 
@@ -405,11 +409,11 @@ func (s *LocalService) Bisect(ctx context.Context, goodCommits, badCommits []str
 		if len(candidates) == 1 {
 			return candidates[0], 0, nil
 		}
-		return badCommits[0], 0, nil
+		return startBad, 0, nil
 	}
 
 	midIdx := len(candidates) / 2
-	return candidates[midIdx], len(candidates) - midIdx, nil
+	return candidates[midIdx], len(candidates) - 1, nil
 }
 
 // InteractiveRebase applies an edited commit plan onto a base.

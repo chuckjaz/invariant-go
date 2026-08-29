@@ -62,7 +62,7 @@ func CleanWorkspace(
 		if err != nil {
 			return err
 		}
-		if rel == ".invariant-workspace" || rel == ".git" || strings.HasPrefix(rel, ".ir-") {
+		if strings.HasPrefix(rel, ".invariant-") || rel == ".git" || strings.HasPrefix(rel, ".ir-") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

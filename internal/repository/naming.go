@@ -109,3 +109,26 @@ func UnregisterReleaseTag(ctx context.Context, namesClient names.Names, repoName
 	}
 	return nil
 }
+
+// ResolveBranchSlot resolves the slot ID for a branch (e.g. "main" or a change branch).
+func ResolveBranchSlot(ctx context.Context, namesClient names.Names, repoName, branchName string) (string, error) {
+	if branchName == "main" || branchName == "" {
+		entry, err := namesClient.Get(ctx, repoName)
+		if err != nil {
+			return "", err
+		}
+		return entry.Value, nil
+	}
+	if strings.HasPrefix(branchName, ":") {
+		entry, err := namesClient.Get(ctx, branchName)
+		if err != nil {
+			return "", err
+		}
+		return entry.Value, nil
+	}
+	entry, err := namesClient.Get(ctx, branchName)
+	if err == nil && entry.Value != "" {
+		return entry.Value, nil
+	}
+	return "", fmt.Errorf("could not resolve branch slot for %s", branchName)
+}

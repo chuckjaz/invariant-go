@@ -839,10 +839,10 @@ func TestFilesService_ConcurrentCreateEntry(t *testing.T) {
 	const numFiles = 50
 	errCh := make(chan error, numFiles)
 
-	for i := 0; i < numFiles; i++ {
+	for i := range numFiles {
 		go func(idx int) {
 			name := fmt.Sprintf("concurrent-file-%d.txt", idx)
-			data := []byte(fmt.Sprintf("Concurrent file data content #%d", idx))
+			data := fmt.Appendf(nil, "Concurrent file data content #%d", idx)
 			err := filesService.CreateEntry(ctx, 1, name, filetree.FileKind, "", nil, bytes.NewReader(data))
 			if err != nil {
 				errCh <- err
@@ -873,7 +873,7 @@ func TestFilesService_ConcurrentCreateEntry(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < numFiles; i++ {
+	for range numFiles {
 		if err := <-errCh; err != nil {
 			t.Fatalf("Concurrent operation failed: %v", err)
 		}

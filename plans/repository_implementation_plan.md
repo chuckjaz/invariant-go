@@ -522,37 +522,37 @@ sequenceDiagram
 #### Objective
 Implement log history traversal (including path filtering), commit/file inspection (`show`), uncommitted change discarding (`restore`), inverse commits (`revert`), line attribution (`blame`), history content searching (`grep`), ephemeral shelving (`stash`), automated binary search regression hunting (`bisect`), interactive commit history grooming (`rebase -i`), cherry-picking, repository mounting/unmounting, and standalone CLI binary aliasing.
 
-- [ ] **Step 3.1: `ir log [<path>]` (`internal/repository/log.go`)**
+- [x] **Step 3.1: `ir log [<path>]` (`internal/repository/log.go`)**
   - Fetch commits via `CommitService.GetHistory`.
   - Default: Spine log (first-parent traversal) with commit hash, author, timestamp, tags, refs, message.
   - Support path filtering: `ir log <path>` shows only commits modifying the specified file or directory.
   - Support `--tree` and `--graph` options for full DAG visualization.
   - Update `docs/Repository.md`: mark `ir log` as `**Status:** Implemented`.
 
-- [ ] **Step 3.2: `ir show <commit>[:<path>]` (`internal/repository/show.go`)**
+- [x] **Step 3.2: `ir show <commit>[:<path>]` (`internal/repository/show.go`)**
   - Inspect full commit metadata, author, timestamp, tags, refs, and unified diff.
   - If `<commit>:<path>` provided: output the file contents as they existed in that commit snapshot without mounting.
   - Update `docs/Repository.md`: mark `ir show` as `**Status:** Implemented`.
 
-- [ ] **Step 3.3: `ir restore [<path>]` (`internal/repository/restore.go`)**
+- [x] **Step 3.3: `ir restore [<path>]` (`internal/repository/restore.go`)**
   - Discard uncommitted local workspace edits.
   - Restore specific `<path>` (or entire working tree) directly from current HEAD commit's file tree.
   - Update `docs/Repository.md`: mark `ir restore` as `**Status:** Implemented`.
 
-- [ ] **Step 3.4: `ir revert <commit>` (`internal/repository/revert.go`)**
+- [x] **Step 3.4: `ir revert <commit>` (`internal/repository/revert.go`)**
   - Compute the inverse patch of the specified `<commit>`.
   - Apply 3-way inverse merge onto current workspace and create a new commit recording `Refs["reverts"] = "<commit_sha>"`.
   - Update `docs/Repository.md`: mark `ir revert` as `**Status:** Implemented`.
 
-- [ ] **Step 3.5: `ir blame <file>` (`internal/repository/blame.go`)**
+- [x] **Step 3.5: `ir blame <file>` (`internal/repository/blame.go`)**
   - Line-by-line attribution: Walk the commit graph backwards to trace the origin commit, author, timestamp, and line content for each line of `<file>`.
   - Update `docs/Repository.md`: mark `ir blame` as `**Status:** Implemented`.
 
-- [ ] **Step 3.6: `ir grep <pattern>` (`internal/repository/grep.go`)**
+- [x] **Step 3.6: `ir grep <pattern>` (`internal/repository/grep.go`)**
   - Search file contents for string or regex patterns across the current commit tree or historical commits directly in CAS.
   - Update `docs/Repository.md`: mark `ir grep` as `**Status:** Implemented`.
 
-- [ ] **Step 3.7: `ir stash [push|pop|list|drop]` (`internal/repository/stash.go`)**
+- [x] **Step 3.7: `ir stash [push|pop|list|drop]` (`internal/repository/stash.go`)**
   - `ir stash` / `ir stash push [-m <msg>]`:
     - Snapshots working tree changes into an ephemeral CAS commit object tagged with `Tags["stash"] = "<timestamp>"`.
     - Pushes commit hash onto local workspace stash stack and restores working tree to clean HEAD.
@@ -561,7 +561,7 @@ Implement log history traversal (including path filtering), commit/file inspecti
   - `ir stash list` & `ir stash drop [<index>]`: Inspect and manage stash stack.
   - Update `docs/Repository.md`: mark `ir stash` as `**Status:** Implemented`.
 
-- [ ] **Step 3.8: `ir bisect [start|good|bad|run]` (`internal/repository/bisect.go`)**
+- [x] **Step 3.8: `ir bisect [start|good|bad|run]` (`internal/repository/bisect.go`)**
   - `ir bisect start`, `ir bisect bad [<commit>]`, `ir bisect good [<commit>]`:
     - Calculates topological midpoint commit between good and bad boundary commits in the DAG.
     - Mounts/points workspace to candidate commit for testing.
@@ -569,7 +569,7 @@ Implement log history traversal (including path filtering), commit/file inspecti
     - Automatically executes test script at each midpoint step until culprit commit is identified.
   - Update `docs/Repository.md`: mark `ir bisect` as `**Status:** Implemented`.
 
-- [ ] **Step 3.9: Interactive Rebase & History Grooming (`internal/repository/rebase_i.go`)**
+- [x] **Step 3.9: Interactive Rebase & History Grooming (`internal/repository/rebase_i.go`)**
   - `ir rebase -i [<upstream>]`:
     - Generates interactive action sheet (`pick`, `squash`, `edit`, `drop`, `reword`) for commits in private change branch.
     - Opens editor; applies actions sequentially to construct cleaned, atomic commit history.
@@ -577,24 +577,25 @@ Implement log history traversal (including path filtering), commit/file inspecti
     - Direct shortcut to fold current working tree changes into an earlier commit in the change set.
   - Update `docs/Repository.md`: mark `ir rebase -i` as `**Status:** Implemented`.
 
-- [ ] **Step 3.10: `ir cherry-pick <branch|commit> [<commit>]` (`internal/repository/cherry_pick.go`)**
+- [x] **Step 3.10: `ir cherry-pick <branch|commit> [<commit>]` (`internal/repository/cherry_pick.go`)**
   - If branch: cherry-pick non-converged commits.
   - If single commit or commit range `<commit1> <commit2>`: compute diff against parent and apply 3-way tree merge onto current branch.
   - Create new commit(s) on current branch recording `Refs["cherry-picked-from"] = "<orig_sha>"`.
   - Update `docs/Repository.md`: mark `ir cherry-pick` as `**Status:** Implemented`.
 
-- [ ] **Step 3.11: `ir mount` & `ir unmount` (`internal/repository/mount.go`)**
+- [x] **Step 3.11: `ir mount` & `ir unmount` (`internal/repository/mount.go`)**
   - `ir mount [<directory>]`: Mount repository root workspace.
   - `ir unmount <directory>`: Recursively unmount repository root and all active nested branch workspaces.
   - Update `docs/Repository.md`: mark `ir mount` and `ir unmount` as `**Status:** Implemented`.
 
-- [ ] **Step 3.12: Standalone Binary Alias (`cmd/ir/main.go`)**
-  - Provide `cmd/ir/main.go` aliasing directly to repository commands for native `ir` command usage.
+- [x] **Step 3.12: CLI Command Suite & Shell Alias (`alias ir="invariant repository"`)**
+  - Expose full command suite under `invariant repository <command>` in `cmd/invariant/repository.go`.
+  - Support user shell alias `alias ir="invariant repository"` without requiring a separate binary.
 
-- [ ] **Phase 3 Quality & Verification Gate**
-  - Unit and integration tests in `log_test.go`, `show_test.go`, `restore_test.go`, `revert_test.go`, `blame_test.go`, `grep_test.go`, `stash_test.go`, `bisect_test.go`, `rebase_i_test.go`, `cherry_pick_test.go`.
+- [x] **Phase 3 Quality & Verification Gate**
+  - Unit and integration tests in `history_test.go` (`log`, `show`, `restore`, `revert`, `blame`, `grep`, `stash`, `bisect`, `rebase -i`, `cherry-pick`, `mount`/`unmount`).
   - Compliance check (`go fmt`, `go vet`, `go fix`).
-  - Documentation check.
+  - Documentation check in `docs/Repository.md`.
   - Update `plans/repository_implementation_plan.md` with Phase 3 completion status.
 
 ---
@@ -878,7 +879,7 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | Foundation, Data Models, Service Interfaces & Docs Baseline | `internal/repository/types.go`, `identity.go`, `naming.go`, `service.go`, `docs/Repository.md`, `plans/repository_implementation_plan.md` | Serialization determinism, Tailscale identity tests, `naming_test.go`, status baseline, `go fmt/vet/fix`, plan persistence |
 | **Phase 2** | Primary Workflow, Clean, Range Diff & Conflict Controls | `internal/repository/commit_service.go`, `commit_server.go`, `commit_client.go`, `create.go`, `change.go`, `status.go`, `diff.go`, `clean.go`, `commit_cmd.go`, `sync.go`, `submit.go` | `workflow_test.go` (`create` $\to$ `change` $\to$ `clean` $\to$ `diff --stat` $\to$ `commit` $\to$ conflict `sync --continue/--abort` $\to$ `submit`), `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |
-| **Phase 3** | Inspection, Recovery, Stash, Bisect & Interactive Rebase | `internal/repository/log.go`, `show.go`, `restore.go`, `revert.go`, `blame.go`, `grep.go`, `stash.go`, `bisect.go`, `rebase_i.go`, `cherry_pick.go`, `mount.go`, `cmd/ir/main.go`, `cmd/invariant/repository.go` | `log_test.go`, `show_test.go`, `restore_test.go`, `revert_test.go`, `blame_test.go`, `grep_test.go`, `stash_test.go`, `bisect_test.go`, `rebase_i_test.go`, `cherry_pick_test.go`, `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |
+| **Phase 3** | Inspection, Recovery, Stash, Bisect & Interactive Rebase | `internal/repository/log.go`, `show.go`, `restore.go`, `revert.go`, `blame.go`, `grep.go`, `stash.go`, `bisect.go`, `rebase_i.go`, `cherry_pick.go`, `mount.go`, `cmd/invariant/repository.go` | `log_test.go`, `show_test.go`, `restore_test.go`, `revert_test.go`, `blame_test.go`, `grep_test.go`, `stash_test.go`, `bisect_test.go`, `rebase_i_test.go`, `cherry_pick_test.go`, `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |
 | **Phase 4** | Branch Lifecycle, Peer Collab, Release Tags, Config & Layers | `internal/repository/branch_cmd.go`, `checkout.go`, `tag_cmd.go`, `config_cmd.go`, `layer_cmd.go` | `branch_test.go`, `checkout_test.go`, `tag_test.go`, `config_test.go`, `layer_test.go`, `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |
 | **Phase 5** | Git Interoperability, KV Mapping & Direct Storage | `internal/repository/git_kv.go`, `git_import.go`, `git_export.go`, `cmd/storage/main.go`, `cmd/distribute/main.go` | `git_interop_test.go` (lossless Git $\to$ Invariant $\to$ Git roundtrip), `-git-dir` & `-distribute` tests, `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |
 | **Phase 6** | Review Service & Web UI Integration | `internal/repository/review_service.go`, `review_server.go`, `review_client.go`, `review_request.go`, `review_open.go`, `review_comment.go`, `review_actions.go` | `review_test.go` (CLI + HTTP REST test suite, submit gating), `Repository.md` and `plans/` status updates, `go fmt/vet/fix` |

@@ -671,7 +671,7 @@ func BenchmarkCommitTransaction(b *testing.B) {
 			b.Fatal(err)
 		}
 		key := fmt.Sprintf("bench-key-%d", i)
-		val := []byte(fmt.Sprintf("bench-val-%d", i))
+		val := fmt.Appendf(nil, "bench-val-%d", i)
 		if _, err := kvStore.Put(ctx, &txID, key, val); err != nil {
 			b.Fatal(err)
 		}
@@ -695,7 +695,7 @@ func TestStore_ConcurrentCommitTransaction(t *testing.T) {
 	const numWorkers = 20
 	errCh := make(chan error, numWorkers)
 
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		go func(workerID int) {
 			txID, err := kvStore.StartTransaction(ctx, false)
 			if err != nil {
@@ -703,7 +703,7 @@ func TestStore_ConcurrentCommitTransaction(t *testing.T) {
 				return
 			}
 			key := fmt.Sprintf("worker-key-%d", workerID)
-			val := []byte(fmt.Sprintf("worker-val-%d", workerID))
+			val := fmt.Appendf(nil, "worker-val-%d", workerID)
 			if _, err := kvStore.Put(ctx, &txID, key, val); err != nil {
 				errCh <- err
 				return
@@ -716,7 +716,7 @@ func TestStore_ConcurrentCommitTransaction(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		if err := <-errCh; err != nil {
 			t.Fatalf("Concurrent commit worker %d failed: %v", i, err)
 		}

@@ -48,10 +48,10 @@ func TestPerformanceAndTracing(t *testing.T) {
 		storedAddrs := make([]string, numOps)
 
 		// Concurrent Put and Store
-		for i := 0; i < numOps; i++ {
+		for i := range numOps {
 			go func(idx int) {
 				defer wg.Done()
-				data := []byte(fmt.Sprintf("storage-payload-block-%d-%d", idx, time.Now().UnixNano()))
+				data := fmt.Appendf(nil, "storage-payload-block-%d-%d", idx, time.Now().UnixNano())
 				hash := sha256.Sum256(data)
 				addr := hex.EncodeToString(hash[:])
 				storedAddrs[idx] = addr
@@ -113,10 +113,10 @@ func TestPerformanceAndTracing(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numNodes)
 
-		for i := 0; i < numNodes; i++ {
+		for i := range numNodes {
 			go func(idx int) {
 				defer wg.Done()
-				idBytes := sha256.Sum256([]byte(fmt.Sprintf("node-%d", idx)))
+				idBytes := sha256.Sum256(fmt.Appendf(nil, "node-%d", idx))
 				id := hex.EncodeToString(idBytes[:])
 				addr := fmt.Sprintf("http://10.0.0.%d:3000", idx%250+1)
 
@@ -160,7 +160,7 @@ func TestPerformanceAndTracing(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numNames)
 
-		for i := 0; i < numNames; i++ {
+		for i := range numNames {
 			go func(idx int) {
 				defer wg.Done()
 				name := fmt.Sprintf("service.node.%d", idx)
@@ -201,13 +201,13 @@ func TestPerformanceAndTracing(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numSlots)
 
-		for i := 0; i < numSlots; i++ {
+		for i := range numSlots {
 			go func(idx int) {
 				defer wg.Done()
-				slotIDBytes := sha256.Sum256([]byte(fmt.Sprintf("slot-%d", idx)))
+				slotIDBytes := sha256.Sum256(fmt.Appendf(nil, "slot-%d", idx))
 				slotID := hex.EncodeToString(slotIDBytes[:])
 
-				initAddrBytes := sha256.Sum256([]byte(fmt.Sprintf("addr-0-%d", idx)))
+				initAddrBytes := sha256.Sum256(fmt.Appendf(nil, "addr-0-%d", idx))
 				initAddr := hex.EncodeToString(initAddrBytes[:])
 
 				if err := client.Create(context.Background(), slotID, initAddr, ""); err != nil {
@@ -217,7 +217,7 @@ func TestPerformanceAndTracing(t *testing.T) {
 
 				prevAddr := initAddr
 				for step := 1; step <= 2; step++ {
-					nextAddrBytes := sha256.Sum256([]byte(fmt.Sprintf("addr-%d-%d", step, idx)))
+					nextAddrBytes := sha256.Sum256(fmt.Appendf(nil, "addr-%d-%d", step, idx))
 					nextAddr := hex.EncodeToString(nextAddrBytes[:])
 
 					if err := client.Update(context.Background(), slotID, nextAddr, prevAddr, nil); err != nil {
@@ -299,11 +299,11 @@ func TestPerformanceAndTracing(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numFiles)
 
-		for i := 0; i < numFiles; i++ {
+		for i := range numFiles {
 			go func(idx int) {
 				defer wg.Done()
 				fileName := fmt.Sprintf("test-doc-%d.txt", idx)
-				contentData := []byte(fmt.Sprintf("Hello Invariant Distributed Content Storage #%d", idx))
+				contentData := fmt.Appendf(nil, "Hello Invariant Distributed Content Storage #%d", idx)
 
 				// Write file via HTTP endpoint PUT /1/{fileName}
 				req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/1/%s", tsFiles.URL, fileName), bytes.NewReader(contentData))
@@ -405,14 +405,14 @@ func TestPerformanceAndTracing(t *testing.T) {
 		kvClient := kv.NewClient(tsKV.URL, nil)
 
 		const numTx = 15
-		for i := 0; i < numTx; i++ {
+		for i := range numTx {
 			txID, err := kvClient.StartTransaction(context.Background(), false)
 			if err != nil {
 				t.Fatalf("StartTransaction failed: %v", err)
 			}
 
 			key := fmt.Sprintf("user:session:%d", i)
-			val := []byte(fmt.Sprintf("session-token-data-%d-%d", i, time.Now().UnixNano()))
+			val := fmt.Appendf(nil, "session-token-data-%d-%d", i, time.Now().UnixNano())
 			if _, err := kvClient.Put(context.Background(), &txID, key, val); err != nil {
 				t.Fatalf("Put failed: %v", err)
 			}
@@ -468,8 +468,8 @@ func TestPerformanceAndTracing(t *testing.T) {
 
 		const numBlocks = 30
 		blockAddrs := make([]string, numBlocks)
-		for i := 0; i < numBlocks; i++ {
-			hash := sha256.Sum256([]byte(fmt.Sprintf("dist-block-%d", i)))
+		for i := range numBlocks {
+			hash := sha256.Sum256(fmt.Appendf(nil, "dist-block-%d", i))
 			blockAddrs[i] = hex.EncodeToString(hash[:])
 		}
 

@@ -17,7 +17,7 @@ type CreateRequest struct {
 	Parents    []string            `json:"parents"`
 	Message    string              `json:"message"`
 	Author     identity.Identity   `json:"author"`
-	Committer  identity.Identity   `json:"committer,omitempty"`
+	Committer  identity.Identity   `json:"committer"`
 	Tags       map[string]string   `json:"tags,omitempty"`
 	Refs       map[string]string   `json:"refs,omitempty"`
 }

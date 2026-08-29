@@ -46,7 +46,7 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 		var dir filetree.Directory
 		for _, e := range entries {
 			name := e.Name()
-			if name == ".git" || name == ".invariant-workspace" || strings.HasPrefix(name, ".ir-") {
+			if name == ".git" || strings.HasPrefix(name, ".invariant-") || strings.HasPrefix(name, ".ir-") {
 				continue
 			}
 

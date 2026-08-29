@@ -81,11 +81,7 @@ func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 	if countStr != "" {
 		parsedCount, err := strconv.Atoi(countStr)
 		if err == nil {
-			if parsedCount <= 0 {
-				count = 0
-			} else {
-				count = parsedCount
-			}
+			count = max(parsedCount, 0)
 		}
 	}
 
