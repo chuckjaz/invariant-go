@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"invariant/internal/config"
 	"invariant/internal/discovery"
+	"invariant/internal/finder"
 	"invariant/internal/names"
 	"invariant/internal/repository"
 	"invariant/internal/repository/commit"
@@ -65,46 +67,87 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	}
 }
 
-func initRepoClients(globalCfg *config.InvariantConfig) (storage.Storage, slots.Slots, names.Names, commit.Service) {
-	discURL := "http://localhost:8080"
-	if globalCfg != nil && globalCfg.Discovery != "" {
-		discURL = globalCfg.Discovery
+func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (storage.Storage, slots.Slots, names.Names, commit.Service) {
+	if globalCfg == nil || globalCfg.Discovery == "" {
+		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: discovery service URL is not configured (check ~/.invariant/config.yaml)\n")
+		os.Exit(1)
 	}
 
-	discClient := discovery.NewClient(discURL, nil)
+	discClient := discovery.NewClient(globalCfg.Discovery, nil)
 
-	findService := func(kind string) string {
-		id, err := discClient.Find(context.Background(), kind, "", 1)
+	findService := func(kind string, tag string) string {
+		id, err := discClient.Find(context.Background(), kind, tag, 1)
 		if err != nil || len(id) == 0 {
 			return ""
 		}
 		return id[0].Address
 	}
 
-	sAddr, err := discovery.ResolveName(context.Background(), discClient, "storage-v1")
-	if err != nil || sAddr == "" {
-		sAddr = findService("storage-v1")
+	// Determine write tag (default: "originals")
+	writeTag := explicitTag
+	if writeTag == "" {
+		if globalCfg.Repository != nil && globalCfg.Repository.WriteTag != "" {
+			writeTag = globalCfg.Repository.WriteTag
+		} else if globalCfg.WriteTag != "" {
+			writeTag = globalCfg.WriteTag
+		} else {
+			writeTag = "originals"
+		}
 	}
-	if sAddr == "" {
-		sAddr = "http://localhost:8081"
+	if strings.EqualFold(writeTag, "any") {
+		writeTag = ""
 	}
-	storageClient := storage.NewClient(sAddr, nil)
 
+	// 1. Initialize Storage with write tag restriction
+	finderAddr := findService("finder-v1", "")
+	var storageClient storage.Storage
+	var aggregateOpts []storage.AggregateClientOption
+	if writeTag != "" {
+		aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
+	}
+
+	if finderAddr != "" {
+		finderClient := finder.NewClient(finderAddr, nil)
+		storageClient = storage.NewAggregateClient(finderClient, discClient, 3, 1000, aggregateOpts...)
+	} else {
+		// Fallback to direct storage service discovery lookup with tag filter
+		sAddr := findService("storage-v1", writeTag)
+		if sAddr == "" && writeTag != "" {
+			fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) with tag %q could not be discovered\n", writeTag)
+			os.Exit(1)
+		}
+		if sAddr == "" {
+			sAddr, _ = discovery.ResolveName(context.Background(), discClient, "storage-v1")
+		}
+		if sAddr == "" {
+			sAddr = findService("storage-v1", "")
+		}
+		if sAddr == "" {
+			fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) could not be discovered\n")
+			os.Exit(1)
+		}
+		storageClient = storage.NewClient(sAddr, nil)
+	}
+
+	// 2. Initialize Slots
 	slotsAddr, err := discovery.ResolveName(context.Background(), discClient, "slots-v1")
 	if err != nil || slotsAddr == "" {
-		slotsAddr = findService("slots-v1")
+		slotsAddr = findService("slots-v1", "")
 	}
 	if slotsAddr == "" {
-		slotsAddr = "http://localhost:8082"
+		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: slots service (slots-v1) could not be discovered\n")
+		os.Exit(1)
 	}
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
+	// 3. Initialize Names
 	namesAddr, err := discovery.ResolveName(context.Background(), discClient, "names-v1")
 	if err != nil || namesAddr == "" {
-		namesAddr = findService("names-v1")
+		namesAddr = findService("names-v1", "")
 	}
 	if namesAddr == "" {
-		namesAddr = "http://localhost:8083"
+		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: names service (names-v1) could not be discovered\n")
+		os.Exit(1)
 	}
 	namesClient := names.NewClient(namesAddr, nil)
 
@@ -119,10 +162,11 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 	encrypted := fs.Bool("encrypt", false, "Enable encryption for repository objects")
 	compressed := fs.Bool("compress", false, "Enable compression for repository objects")
 	writable := fs.Bool("writable", false, "Make main branch workspace writable")
+	tagFlag := fs.String("tag", "", "Storage write tag to restrict CAS writes (default: 'originals', use 'any' to write to any server)")
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-d=<dir>] [-create-only] [-encrypt] [-compress] [-writable]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-d=<dir>] [-tag=<tag>] [-create-only] [-encrypt] [-compress] [-writable]\n")
 		os.Exit(1)
 	}
 
@@ -132,7 +176,7 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 		contentArg = fs.Arg(1)
 	}
 
-	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	cfg, rootCommit, err := repository.CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, repository.CreateOptions{
@@ -159,17 +203,18 @@ func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository change", flag.ExitOnError)
 	privateFlag := fs.Bool("private", false, "Create private change branch not published to Names service")
 	upstreamFlag := fs.String("upstream", "main", "Upstream branch to branch from")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository change <name> [-private] [-upstream=main]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository change <name> [-private] [-upstream=main] [-tag=<tag>]\n")
 		os.Exit(1)
 	}
 
 	changeName := fs.Arg(0)
 	cwd, _ := os.Getwd()
 
-	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	meta, err := repository.CreateChangeBranch(ctx, store, slotsClient, namesClient, commitSvc, repository.ChangeOptions{
@@ -189,7 +234,7 @@ func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
 
 func runRepoStatus(globalCfg *config.InvariantConfig, args []string) {
 	cwd, _ := os.Getwd()
-	store, slotsClient, _, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, "")
 	ctx := context.Background()
 
 	res, err := repository.GetStatus(ctx, store, slotsClient, commitSvc, cwd)
@@ -223,7 +268,7 @@ func runRepoDiff(globalCfg *config.InvariantConfig, args []string) {
 	fs.Parse(args)
 
 	cwd, _ := os.Getwd()
-	store, slotsClient, _, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, "")
 	ctx := context.Background()
 
 	commit1 := ""
@@ -268,7 +313,7 @@ func runRepoClean(globalCfg *config.InvariantConfig, args []string) {
 
 	fs.Parse(args)
 	cwd, _ := os.Getwd()
-	store, slotsClient, _, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, "")
 	ctx := context.Background()
 
 	cleaned, err := repository.CleanWorkspace(ctx, store, slotsClient, commitSvc, repository.CleanOptions{
@@ -301,10 +346,11 @@ func runRepoCommit(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository commit", flag.ExitOnError)
 	fs.Var(&msgFlags, "m", "Commit message line (repeatable)")
 	amend := fs.Bool("amend", false, "Amend the previous commit")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals', use 'any' for all servers)")
 
 	fs.Parse(args)
 	cwd, _ := os.Getwd()
-	store, slotsClient, _, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	c, hash, err := repository.ExecuteCommit(ctx, store, slotsClient, commitSvc, repository.CommitOptions{
@@ -324,10 +370,11 @@ func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository sync", flag.ExitOnError)
 	continueFlag := fs.Bool("continue", false, "Continue sync after resolving conflicts")
 	abortFlag := fs.Bool("abort", false, "Abort sync and restore pre-sync state")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
 
 	fs.Parse(args)
 	cwd, _ := os.Getwd()
-	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	newHead, conflicts, err := repository.ExecuteSync(ctx, store, slotsClient, namesClient, commitSvc, repository.SyncOptions{
@@ -358,6 +405,7 @@ func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
 func runRepoSubmit(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository submit", flag.ExitOnError)
 	target := fs.String("target", "main", "Target branch to submit to")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
 	fs.Parse(args)
 
 	cwd, _ := os.Getwd()
@@ -365,7 +413,7 @@ func runRepoSubmit(globalCfg *config.InvariantConfig, args []string) {
 		cwd, _ = filepath.Abs(fs.Arg(0))
 	}
 
-	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg)
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	resp, err := repository.ExecuteSubmit(ctx, store, slotsClient, namesClient, commitSvc, repository.SubmitOptions{

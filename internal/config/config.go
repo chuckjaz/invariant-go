@@ -7,9 +7,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RepositoryGlobalConfig holds repository-specific global configuration.
+type RepositoryGlobalConfig struct {
+	WriteTag string `yaml:"write_tag,omitempty"`
+}
+
 // InvariantConfig holds global configuration for invariant CLI tools.
 type InvariantConfig struct {
-	Discovery string `yaml:"discovery"`
+	Discovery  string                  `yaml:"discovery"`
+	Repository *RepositoryGlobalConfig `yaml:"repository,omitempty"`
+	WriteTag   string                  `yaml:"write_tag,omitempty"`
 }
 
 // ConfigDir returns the path to the ~/.invariant directory.
