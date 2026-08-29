@@ -10,20 +10,20 @@ import (
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: invariant <command> [options]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
-	fmt.Fprintf(os.Stderr, "  start     Start invariant services from configuration\n")
-	fmt.Fprintf(os.Stderr, "  slot      Allocate a new slot from the slots service\n")
-	fmt.Fprintf(os.Stderr, "  name      Register a name to a 32-byte hex value\n")
-	fmt.Fprintf(os.Stderr, "  lookup    Lookup a name and print the resolved address\n")
-	fmt.Fprintf(os.Stderr, "  mount     Mount the invariant file system using FUSE\n")
-	fmt.Fprintf(os.Stderr, "  cache     Ensure all blocks for a mount are cached locally\n")
-	fmt.Fprintf(os.Stderr, "  nfs       Start the invariant file system as an NFS Server\n")
-	fmt.Fprintf(os.Stderr, "  upload    Upload a local directory as a file tree\n")
-	fmt.Fprintf(os.Stderr, "  print     Print a block's contents to standard output\n")
-	fmt.Fprintf(os.Stderr, "  systemd   Manage invariant services using systemd\n")
-	fmt.Fprintf(os.Stderr, "  status    Query the discovery service and verify node health directly\n")
-	fmt.Fprintf(os.Stderr, "  workspace Manage layered workspaces\n")
-	fmt.Fprintf(os.Stderr, "  scan-repo Scan a Git repository and index mappings to KV service\n")
-	fmt.Fprintf(os.Stderr, "  repository (ir) Manage Invariant version control repositories\n")
+	fmt.Fprintf(os.Stderr, "  start       Start invariant services from configuration\n")
+	fmt.Fprintf(os.Stderr, "  slot        Allocate a new slot from the slots service\n")
+	fmt.Fprintf(os.Stderr, "  name        Register a name to a 32-byte hex value\n")
+	fmt.Fprintf(os.Stderr, "  lookup      Lookup a name and print the resolved address\n")
+	fmt.Fprintf(os.Stderr, "  mount       Mount the invariant file system using FUSE\n")
+	fmt.Fprintf(os.Stderr, "  cache       Ensure all blocks for a mount are cached locally\n")
+	fmt.Fprintf(os.Stderr, "  nfs         Start the invariant file system as an NFS Server\n")
+	fmt.Fprintf(os.Stderr, "  upload      Upload a local directory as a file tree\n")
+	fmt.Fprintf(os.Stderr, "  print       Print a block's contents to standard output\n")
+	fmt.Fprintf(os.Stderr, "  systemd     Manage invariant services using systemd\n")
+	fmt.Fprintf(os.Stderr, "  status      Query the discovery service and verify node health directly\n")
+	fmt.Fprintf(os.Stderr, "  workspace   Manage layered workspaces\n")
+	fmt.Fprintf(os.Stderr, "  scan-repo   Scan a Git repository and index mappings to KV service\n")
+	fmt.Fprintf(os.Stderr, "  repository  Manage Invariant version control repositories\n")
 	os.Exit(1)
 }
 
@@ -65,7 +65,7 @@ func main() {
 		runWorkspace(cfg, os.Args[2:])
 	case "scan-repo":
 		runScanRepo(cfg, os.Args[2:])
-	case "repository", "repo", "ir":
+	case "repository", "repo":
 		runRepository(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])

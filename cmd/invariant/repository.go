@@ -29,17 +29,16 @@ func (s *stringListFlag) Set(val string) error {
 
 func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository <command> [options]\n")
-		fmt.Fprintf(os.Stderr, "       ir <command> [options]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository <command> [options]\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
-		fmt.Fprintf(os.Stderr, "  create    Create a new repository and initialize main branch\n")
-		fmt.Fprintf(os.Stderr, "  change    Create a writable change branch workspace\n")
-		fmt.Fprintf(os.Stderr, "  status    Show workspace working tree changes against HEAD commit\n")
-		fmt.Fprintf(os.Stderr, "  diff      Show unified diffs and statistics\n")
-		fmt.Fprintf(os.Stderr, "  clean     Purge untracked files from the workspace\n")
-		fmt.Fprintf(os.Stderr, "  commit    Snapshot and commit changes to the branch slot\n")
-		fmt.Fprintf(os.Stderr, "  sync      Rebase workspace onto upstream HEAD\n")
-		fmt.Fprintf(os.Stderr, "  submit    Fast-forward/rebase change into upstream and retire workspace\n")
+		fmt.Fprintf(os.Stderr, "  create      Create a new repository and initialize main branch\n")
+		fmt.Fprintf(os.Stderr, "  change      Create a writable change branch workspace\n")
+		fmt.Fprintf(os.Stderr, "  status      Show workspace working tree changes against HEAD commit\n")
+		fmt.Fprintf(os.Stderr, "  diff        Show unified diffs and statistics\n")
+		fmt.Fprintf(os.Stderr, "  clean       Purge untracked files from the workspace\n")
+		fmt.Fprintf(os.Stderr, "  commit      Snapshot and commit changes to the branch slot\n")
+		fmt.Fprintf(os.Stderr, "  sync        Rebase workspace onto upstream HEAD\n")
+		fmt.Fprintf(os.Stderr, "  submit      Fast-forward/rebase change into upstream and retire workspace\n")
 		os.Exit(1)
 	}
 
@@ -114,7 +113,7 @@ func initRepoClients(globalCfg *config.InvariantConfig) (storage.Storage, slots.
 }
 
 func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir create", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository create", flag.ExitOnError)
 	dirFlag := fs.String("d", "", "Initial content directory path")
 	createOnly := fs.Bool("create-only", false, "Create repository in CAS without mounting local workspace")
 	encrypted := fs.Bool("encrypt", false, "Enable encryption for repository objects")
@@ -123,7 +122,7 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: ir create <name> [<content>] [-d=<dir>] [-create-only] [-encrypt] [-compress] [-writable]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-d=<dir>] [-create-only] [-encrypt] [-compress] [-writable]\n")
 		os.Exit(1)
 	}
 
@@ -157,13 +156,13 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir change", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository change", flag.ExitOnError)
 	privateFlag := fs.Bool("private", false, "Create private change branch not published to Names service")
 	upstreamFlag := fs.String("upstream", "main", "Upstream branch to branch from")
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: ir change <name> [-private] [-upstream=main]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository change <name> [-private] [-upstream=main]\n")
 		os.Exit(1)
 	}
 
@@ -219,7 +218,7 @@ func runRepoStatus(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runRepoDiff(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir diff", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository diff", flag.ExitOnError)
 	statOnly := fs.Bool("stat", false, "Show file change and line count summary statistics")
 	fs.Parse(args)
 
@@ -261,7 +260,7 @@ func runRepoDiff(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runRepoClean(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir clean", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository clean", flag.ExitOnError)
 	force := fs.Bool("f", false, "Force deletion of untracked files")
 	removeDirs := fs.Bool("d", false, "Remove untracked directories as well")
 	removeIgnored := fs.Bool("x", false, "Also remove ignored files")
@@ -299,7 +298,7 @@ func runRepoClean(globalCfg *config.InvariantConfig, args []string) {
 
 func runRepoCommit(globalCfg *config.InvariantConfig, args []string) {
 	var msgFlags stringListFlag
-	fs := flag.NewFlagSet("ir commit", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository commit", flag.ExitOnError)
 	fs.Var(&msgFlags, "m", "Commit message line (repeatable)")
 	amend := fs.Bool("amend", false, "Amend the previous commit")
 
@@ -322,7 +321,7 @@ func runRepoCommit(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir sync", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository sync", flag.ExitOnError)
 	continueFlag := fs.Bool("continue", false, "Continue sync after resolving conflicts")
 	abortFlag := fs.Bool("abort", false, "Abort sync and restore pre-sync state")
 
@@ -342,7 +341,7 @@ func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if len(conflicts) > 0 {
-		fmt.Fprintf(os.Stderr, "CONFLICT: Automatic merge failed. Fix conflicts and run 'ir sync --continue' (or 'ir sync --abort').\n")
+		fmt.Fprintf(os.Stderr, "CONFLICT: Automatic merge failed. Fix conflicts and run 'invariant repository sync --continue' (or '--abort').\n")
 		for _, conf := range conflicts {
 			fmt.Fprintf(os.Stderr, "  %s\n", conf)
 		}
@@ -357,7 +356,7 @@ func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
 }
 
 func runRepoSubmit(globalCfg *config.InvariantConfig, args []string) {
-	fs := flag.NewFlagSet("ir submit", flag.ExitOnError)
+	fs := flag.NewFlagSet("repository submit", flag.ExitOnError)
 	target := fs.String("target", "main", "Target branch to submit to")
 	fs.Parse(args)
 
