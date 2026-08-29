@@ -28,6 +28,8 @@ type RepositoryConfig struct {
 	WriteTag       string            `json:"writeTag,omitempty"`
 	ReviewRequired bool              `json:"reviewRequired,omitempty"`
 	Layers         []LayerDependency `json:"layers,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	PeerBranches   map[string]string `json:"peerBranches,omitempty"`
 	Settings       map[string]string `json:"settings,omitempty"`
 	CreatedAt      int64             `json:"createdAt"`
 }

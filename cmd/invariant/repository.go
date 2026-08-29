@@ -15,6 +15,7 @@ import (
 	"invariant/internal/names"
 	"invariant/internal/repository"
 	"invariant/internal/repository/commit"
+	repoconfig "invariant/internal/repository/config"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -52,6 +53,11 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "  bisect       Binary search across history to locate regressions\n")
 		fmt.Fprintf(os.Stderr, "  rebase       Rebase and groom commit history interactively\n")
 		fmt.Fprintf(os.Stderr, "  cherry-pick  Apply commits from another branch or commit range\n")
+		fmt.Fprintf(os.Stderr, "  branch       Manage local and peer change branches\n")
+		fmt.Fprintf(os.Stderr, "  checkout     Switch to or mount a local, upstream, or peer branch\n")
+		fmt.Fprintf(os.Stderr, "  tag          Create, list, or delete release tags\n")
+		fmt.Fprintf(os.Stderr, "  config       Get, set, list, or unset repository or user settings\n")
+		fmt.Fprintf(os.Stderr, "  layer        Manage pinned sub-repository dependency layers\n")
 		fmt.Fprintf(os.Stderr, "  mount        Mount an existing repository workspace\n")
 		fmt.Fprintf(os.Stderr, "  unmount      Unmount repository workspace\n")
 		os.Exit(1)
@@ -94,6 +100,16 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		runRepoRebase(globalCfg, args[1:])
 	case "cherry-pick":
 		runRepoCherryPick(globalCfg, args[1:])
+	case "branch":
+		runRepoBranch(globalCfg, args[1:])
+	case "checkout":
+		runRepoCheckout(globalCfg, args[1:])
+	case "tag":
+		runRepoTag(globalCfg, args[1:])
+	case "config":
+		runRepoConfig(globalCfg, args[1:])
+	case "layer":
+		runRepoLayer(globalCfg, args[1:])
 	case "mount":
 		runRepoMount(globalCfg, args[1:])
 	case "unmount":
@@ -868,6 +884,252 @@ func runRepoCherryPick(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	fmt.Printf("Cherry-picked %d commit(s). New HEAD: %s\n", len(created), created[len(created)-1])
+}
+
+func runRepoBranch(globalCfg *config.InvariantConfig, args []string) {
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	ctx := context.Background()
+
+	if len(args) > 0 && (args[0] == "delete" || args[0] == "-d" || args[0] == "-D") {
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository branch delete <name>\n")
+			os.Exit(1)
+		}
+		branchName := args[1]
+		if err := repository.DeleteBranch(ctx, store, slotsClient, namesClient, cwd, branchName); err != nil {
+			fmt.Fprintf(os.Stderr, "Error deleting branch: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Deleted branch %q\n", branchName)
+		return
+	}
+
+	branches, err := repository.ListBranches(ctx, store, slotsClient, namesClient, commitSvc, cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing branches: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(repository.FormatBranchList(branches))
+}
+
+func runRepoCheckout(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository checkout", flag.ExitOnError)
+	writable := fs.Bool("writable", true, "Make checked-out workspace writable")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository checkout <branch|peer-branch> [-writable]\n")
+		os.Exit(1)
+	}
+
+	branchName := fs.Arg(0)
+	cwd, _ := os.Getwd()
+
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	ctx := context.Background()
+
+	meta, err := repository.CheckoutBranch(ctx, store, slotsClient, namesClient, commitSvc, repository.CheckoutOptions{
+		WorkspaceDir: cwd,
+		BranchName:   branchName,
+		Writable:     *writable,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking out branch %q: %v\n", branchName, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Switched to branch %q at %s\n", meta.BranchName, meta.WorkspaceDir)
+}
+
+func runRepoTag(globalCfg *config.InvariantConfig, args []string) {
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	ctx := context.Background()
+
+	subcmd := "list"
+	subargs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcmd = args[0]
+		subargs = args[1:]
+	}
+
+	switch subcmd {
+	case "create":
+		if len(subargs) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository tag create <name> [<commit>]\n")
+			os.Exit(1)
+		}
+		tagName := subargs[0]
+		targetCommit := ""
+		if len(subargs) > 1 {
+			targetCommit = subargs[1]
+		}
+		info, err := repository.CreateTag(ctx, store, slotsClient, namesClient, commitSvc, cwd, tagName, targetCommit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating tag: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Created tag %q pointing to %s\n", info.Name, info.CommitHash[:min(8, len(info.CommitHash))])
+
+	case "delete":
+		if len(subargs) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository tag delete <name>\n")
+			os.Exit(1)
+		}
+		tagName := subargs[0]
+		if err := repository.DeleteTag(ctx, store, slotsClient, namesClient, cwd, tagName); err != nil {
+			fmt.Fprintf(os.Stderr, "Error deleting tag: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Deleted tag %q\n", tagName)
+
+	case "list":
+		tags, err := repository.ListTags(ctx, store, slotsClient, namesClient, commitSvc, cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing tags: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(repository.FormatTagList(tags))
+
+	default:
+		// If first arg doesn't match subcommand, treat as "tag <name> [<commit>]"
+		tagName := subcmd
+		targetCommit := ""
+		if len(subargs) > 0 {
+			targetCommit = subargs[0]
+		}
+		info, err := repository.CreateTag(ctx, store, slotsClient, namesClient, commitSvc, cwd, tagName, targetCommit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating tag: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Created tag %q pointing to %s\n", info.Name, info.CommitHash[:min(8, len(info.CommitHash))])
+	}
+}
+
+func runRepoConfig(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository config", flag.ExitOnError)
+	isGlobal := fs.Bool("global", false, "Manage global user configuration")
+	fs.Parse(args)
+
+	subargs := fs.Args()
+	subcmd := "list"
+	if len(subargs) > 0 {
+		subcmd = subargs[0]
+		subargs = subargs[1:]
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, _ := initRepoClients(globalCfg, "")
+	configSvc := repoconfig.NewLocalService(store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	switch subcmd {
+	case "get":
+		if len(subargs) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository config get [--global] <key>\n")
+			os.Exit(1)
+		}
+		val, err := repository.GetConfigSetting(ctx, configSvc, cwd, *isGlobal, subargs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting config %q: %v\n", subargs[0], err)
+			os.Exit(1)
+		}
+		fmt.Println(val)
+
+	case "set":
+		if len(subargs) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository config set [--global] <key> <value>\n")
+			os.Exit(1)
+		}
+		if err := repository.SetConfigSetting(ctx, configSvc, cwd, *isGlobal, subargs[0], subargs[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error setting config %q: %v\n", subargs[0], err)
+			os.Exit(1)
+		}
+		fmt.Printf("Set %s = %s\n", subargs[0], subargs[1])
+
+	case "unset":
+		if len(subargs) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository config unset [--global] <key>\n")
+			os.Exit(1)
+		}
+		if err := repository.UnsetConfigSetting(ctx, configSvc, cwd, *isGlobal, subargs[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error unsetting config %q: %v\n", subargs[0], err)
+			os.Exit(1)
+		}
+		fmt.Printf("Unset %s\n", subargs[0])
+
+	case "list":
+		settings, err := repository.ListConfigSettings(ctx, configSvc, cwd, *isGlobal)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(repository.FormatConfigList(settings))
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", subcmd)
+		os.Exit(1)
+	}
+}
+
+func runRepoLayer(globalCfg *config.InvariantConfig, args []string) {
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	ctx := context.Background()
+
+	subcmd := "list"
+	subargs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcmd = args[0]
+		subargs = args[1:]
+	}
+
+	switch subcmd {
+	case "add":
+		fs := flag.NewFlagSet("repository layer add", flag.ExitOnError)
+		commitFlag := fs.String("commit", "", "Pinned commit hash (default: latest HEAD)")
+		fs.Parse(subargs)
+
+		if fs.NArg() < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository layer add <repo_name> <mount_path> [--commit=<sha>]\n")
+			os.Exit(1)
+		}
+		repoName := fs.Arg(0)
+		mountPath := fs.Arg(1)
+
+		layer, err := repository.AddLayer(ctx, store, slotsClient, namesClient, commitSvc, cwd, repoName, mountPath, *commitFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error adding layer: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Added dependency layer %q at %s (commit %s)\n", layer.Repository, layer.MountPath, layer.Commit[:min(8, len(layer.Commit))])
+
+	case "remove":
+		if len(subargs) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: invariant repository layer remove <mount_path>\n")
+			os.Exit(1)
+		}
+		mountPath := subargs[0]
+		if err := repository.RemoveLayer(cwd, mountPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error removing layer: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Removed layer mounted at %q\n", mountPath)
+
+	case "list":
+		layers, err := repository.ListLayers(cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing layers: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(repository.FormatLayerList(layers))
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown layer subcommand: %s\n", subcmd)
+		os.Exit(1)
+	}
 }
 
 func runRepoMount(globalCfg *config.InvariantConfig, args []string) {

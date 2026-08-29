@@ -313,7 +313,7 @@ Interactively edit, reorder, squash, or drop commits in the change branch before
 ---
 
 ### `ir branch`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Manage branches and discover peer branches registered in the Names Service.
 
@@ -328,14 +328,14 @@ Delete a change branch workspace and unregister it from the Names Service.
 ---
 
 ### `ir checkout <branch|peer-branch>`
-**Status:** Unimplemented
+**Status:** Implemented
 
-Checkout and mount a local or peer-published change branch (e.g. `ir checkout :alice:myrepo:feat-x`) into a local workspace directory.
+Checkout and mount a local or peer-published change branch (e.g. `ir checkout :alice:myrepo:feat-x`) into a local workspace directory and switch the current working directory.
 
 ---
 
 ### `ir tag`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Manage immutable release tags.
 
@@ -353,16 +353,41 @@ Delete a release tag.
 ---
 
 ### `ir config`
-**Status:** Unimplemented
+**Status:** Implemented
 
-Get or set configuration properties at repository scope or global user scope.
+Get, set, list, or unset configuration properties at repository scope or global user scope (`--global`).
+
+#### Subcommands
+
+##### `get <key>`
+Retrieve the value of a configuration setting.
+
+##### `set <key> <value>`
+Update or add a configuration setting.
+
+##### `list`
+List all configuration settings.
+
+##### `unset <key>`
+Remove a configuration setting.
 
 ---
 
 ### `ir layer`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Manage pinned sub-repository and component dependency layers in the workspace.
+
+#### Subcommands
+
+##### `add <repo_name> <mount_path> [--commit=<sha>]`
+Pin and materialize an external repository tree into the specified workspace sub-directory.
+
+##### `list`
+List all pinned sub-repository dependency layers.
+
+##### `remove <mount_path>`
+Unpin and remove a sub-repository dependency layer.
 
 ---
 

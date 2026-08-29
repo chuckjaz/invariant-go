@@ -96,7 +96,17 @@ func CreateRepository(
 		Encrypted:      opts.Encrypted,
 		Compressed:     opts.Compressed,
 		ReviewRequired: false,
+		Tags:           make(map[string]string),
+		PeerBranches:   make(map[string]string),
+		Settings:       make(map[string]string),
 		CreatedAt:      time.Now().Unix(),
+	}
+	cfgAddr, err := WriteRepositoryConfig(ctx, store, cfg)
+	if err == nil {
+		cfgSlotID, err := AllocateSlot(ctx, slotsClient, cfgAddr, "")
+		if err == nil {
+			_ = namesClient.Put(ctx, opts.Name+":config", cfgSlotID, nil)
+		}
 	}
 
 	// 5. Register repository name in Names Service

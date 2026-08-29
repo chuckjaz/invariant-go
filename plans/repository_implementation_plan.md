@@ -605,44 +605,44 @@ Implement log history traversal (including path filtering), commit/file inspecti
 #### Objective
 Implement comprehensive branch management (`branch list`, `branch delete`), peer change collaboration (`checkout` peer branch), immutable release tagging (`tag create`, `tag list`, `tag delete`), repository/user configuration management (`config`), and sub-repository layer composition (`layer`).
 
-- [ ] **Step 4.1: `ir branch [list|delete]` (`internal/repository/branch_cmd.go`)**
+- [x] **Step 4.1: `ir branch [list|delete]` (`internal/repository/branch.go`)**
   - `ir branch` / `ir branch list`:
     - List local mounted workspaces and upstream branches.
-    - Query Names Service for all published peer branches matching `:<user>:<repo_name>:*`.
+    - Query Names Service and `RepositoryConfig.PeerBranches` for published peer branches matching `:<user>:<repo_name>:*`.
     - Display branch names, tracking upstream, and current HEAD commit summaries.
   - `ir branch delete <name>`:
-    - Unmount local workspace if mounted.
-    - Unregister `:<user>:<repo_name>:<name>` from Names Service.
+    - Unmount local workspace if mounted (auto-switching working directory to repo root if current).
+    - Unregister `:<user>:<repo_name>:<name>` from Names Service and `RepositoryConfig.PeerBranches`.
     - Clean up branch directory.
   - Update `docs/Repository.md`: mark `ir branch` as `**Status:** Implemented`.
 
-- [ ] **Step 4.2: `ir checkout <branch|peer-branch>` (`internal/repository/checkout.go`)**
-  - Allow checking out / mounting a peer's published change branch (e.g. `ir checkout :alice:myrepo:feat-x`).
-  - Resolves peer slot from Names Service, creates local workspace directory `<repo_root>/feat-x`, and mounts it locally.
+- [x] **Step 4.2: `ir checkout <branch|peer-branch>` (`internal/repository/checkout.go`)**
+  - Allow checking out / mounting a peer's published change branch (e.g. `ir checkout :alice:myrepo:feat-x`) or local workspace.
+  - Resolves peer slot from Names Service or `RepositoryConfig.PeerBranches`, creates local workspace directory `<repo_root>/feat-x`, materializes file tree, writes `.invariant-workspace`, and switches working directory.
   - Update `docs/Repository.md`: mark `ir checkout` as `**Status:** Implemented`.
 
-- [ ] **Step 4.3: `ir tag [create|list|delete]` (`internal/repository/tag_cmd.go`)**
-  - `ir tag create <name> [<commit>]`: Create an immutable named release pointer pointing to `<commit>` (default: current HEAD) registered in Names Service under `<repo_name>:tags:<name>`.
+- [x] **Step 4.3: `ir tag [create|list|delete]` (`internal/repository/tag.go`)**
+  - `ir tag create <name> [<commit>]`: Create an immutable named release pointer pointing to `<commit>` (default: current HEAD) registered in Names Service under `<repo_name>:tags:<name>` and stored in `RepositoryConfig.Tags`.
   - `ir tag list`: List all release tags and target commit hashes for the repository.
-  - `ir tag delete <name>`: Delete release tag from Names Service.
+  - `ir tag delete <name>`: Delete release tag from repository configuration and Names Service.
   - Update `docs/Repository.md`: mark `ir tag` as `**Status:** Implemented`.
 
-- [ ] **Step 4.4: `ir config [get|set|list|unset]` (`internal/repository/config_cmd.go`)**
-  - Manage configuration settings at repository scope (stored in `RepositoryConfig.Settings`) or global user scope (`~/.invariant/config.json`).
+- [x] **Step 4.4: `ir config [get|set|list|unset]` (`internal/repository/config_cmd.go`, `internal/repository/config/local_service.go`)**
+  - Manage configuration settings at repository scope (stored in `RepositoryConfig.Settings` and specialized fields) or global user scope (`~/.invariant/config.json`).
   - Configure default branch policies, write tags, author details, editor preferences, review requirement rules, and custom diff/merge settings.
   - Update `docs/Repository.md`: mark `ir config` as `**Status:** Implemented`.
 
-- [ ] **Step 4.5: Sub-Repository Layer Composition (`ir layer`) (`internal/repository/layer_cmd.go`)**
+- [x] **Step 4.5: Sub-Repository Layer Composition (`ir layer`) (`internal/repository/layer.go`)**
   - `ir layer add <repository_name> <mount_path> [--commit=<sha>]`:
-    - Pins another Invariant repository as a read-only or shared dependency layer in `.invariant-layer` / `.invariant-share`.
+    - Pins another Invariant repository as a dependency layer in `.invariant-layers.json` and materializes files at `<mount_path>`.
   - `ir layer list` & `ir layer remove <mount_path>`:
     - View and manage pinned sub-repository layers.
   - Update `docs/Repository.md`: mark `ir layer` as `**Status:** Implemented`.
 
-- [ ] **Phase 4 Quality & Verification Gate**
-  - Multi-user collaboration tests in `internal/repository/branch_test.go`, `tag_test.go`, `config_test.go`, `layer_test.go`.
+- [x] **Phase 4 Quality & Verification Gate**
+  - Multi-user collaboration tests in `internal/repository/lifecycle_test.go` and `internal/repository/config/local_service_test.go`.
   - Compliance check (`go fmt`, `go vet`, `go fix`).
-  - Documentation check.
+  - Documentation check in `docs/Repository.md`.
   - Update `plans/repository_implementation_plan.md` with Phase 4 completion status.
 
 ---

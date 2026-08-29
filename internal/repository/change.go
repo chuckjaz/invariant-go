@@ -106,6 +106,14 @@ func CreateChangeBranch(
 		if err := RegisterChangeBranch(ctx, namesClient, author, repoName, opts.ChangeName, changeSlotID); err != nil {
 			return nil, fmt.Errorf("failed to register change branch in names service: %w", err)
 		}
+		cfg, slotID, prevAddr, err := loadRepoConfigForTag(ctx, store, slotsClient, namesClient, repoName)
+		if err == nil && cfg != nil {
+			if cfg.PeerBranches == nil {
+				cfg.PeerBranches = make(map[string]string)
+			}
+			cfg.PeerBranches[FormatChangeBranchName(author, repoName, opts.ChangeName)] = changeSlotID
+			_ = saveRepoConfigForTag(ctx, store, slotsClient, namesClient, repoName, cfg, slotID, prevAddr)
+		}
 	}
 
 	// 4. Create change branch directory and materialize workspace
