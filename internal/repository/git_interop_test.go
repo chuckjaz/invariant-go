@@ -196,6 +196,118 @@ func TestGitImport(t *testing.T) {
 	}
 }
 
+func TestGitImport_AlreadyImported(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotsClient := slots.NewMemorySlots("test-slots")
+	namesClient := names.NewInMemoryNames()
+	kvClient := kv.NewMemoryKeyValueStore()
+
+	idProvider := &workflowMockIDProvider{name: "Alice"}
+	SetDefaultIdentityProvider(idProvider)
+	commitSvc := commit.NewLocalService(store, slotsClient, namesClient, idProvider)
+
+	tempBase := t.TempDir()
+	gitDir := filepath.Join(tempBase, "source-git")
+	gitRepo, headGitHash := createTestGitRepo(t, gitDir)
+
+	// 1. Create Invariant repository workspace
+	repoName := "imported-repo-reuse"
+	repoDir := filepath.Join(tempBase, repoName)
+	CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
+		Name:      repoName,
+		TargetDir: repoDir,
+		Writable:  true,
+	})
+
+	mainWs := filepath.Join(repoDir, "main")
+
+	// 2. First import
+	res1, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "master",
+		TargetWorkspaceDir: mainWs,
+	})
+	if err != nil {
+		t.Fatalf("First ImportGitRepository failed: %v", err)
+	}
+	if res1.ImportedCommits != 2 {
+		t.Fatalf("Expected 2 imported commits on first run, got %d", res1.ImportedCommits)
+	}
+
+	// Verify KV has commit and tree mappings
+	kvIdx := NewGitKVIndex(kvClient)
+	invCommit1, err := kvIdx.GetCommitInvariantHash(ctx, headGitHash.String())
+	if err != nil || invCommit1 != res1.HeadCommit {
+		t.Errorf("KV commit mapping missing: got %s, expected %s", invCommit1, res1.HeadCommit)
+	}
+
+	// 3. Second import on identical repository (should recognize commits as already imported)
+	res2, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "master",
+		TargetWorkspaceDir: mainWs,
+	})
+	if err != nil {
+		t.Fatalf("Second ImportGitRepository failed: %v", err)
+	}
+	if res2.ImportedCommits != 2 {
+		t.Errorf("Expected 2 commits total, got %d", res2.ImportedCommits)
+	}
+	if res2.HeadCommit != res1.HeadCommit {
+		t.Errorf("HEAD commit changed on re-import: %s vs %s", res2.HeadCommit, res1.HeadCommit)
+	}
+
+	// 4. Add a third commit to Git repository
+	wt, err := gitRepo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get git worktree: %v", err)
+	}
+	os.WriteFile(filepath.Join(gitDir, "src", "feature.go"), []byte("package main\n\nfunc Feature() {}\n"), 0644)
+	wt.Add("src/feature.go")
+	headGitHash3, err := wt.Commit("Add feature.go", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Git Author",
+			Email: "author@example.com",
+			When:  time.Unix(1700002000, 0),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to commit 3 in git: %v", err)
+	}
+
+	// 5. Third import (incremental import)
+	res3, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "master",
+		TargetWorkspaceDir: mainWs,
+	})
+	if err != nil {
+		t.Fatalf("Third ImportGitRepository failed: %v", err)
+	}
+	if res3.ImportedCommits != 3 {
+		t.Errorf("Expected 3 commits total, got %d", res3.ImportedCommits)
+	}
+
+	// Verify new commit parent is the previous Invariant HEAD
+	head3CommitObj, err := commitSvc.GetCommit(ctx, res3.HeadCommit)
+	if err != nil {
+		t.Fatalf("Failed to retrieve 3rd commit: %v", err)
+	}
+	if len(head3CommitObj.Parents) != 1 || head3CommitObj.Parents[0] != res1.HeadCommit {
+		t.Errorf("Expected parent %s for new commit, got %v", res1.HeadCommit, head3CommitObj.Parents)
+	}
+
+	// Verify 3rd commit mapping in KV
+	invCommit3, err := kvIdx.GetCommitInvariantHash(ctx, headGitHash3.String())
+	if err != nil || invCommit3 != res3.HeadCommit {
+		t.Errorf("KV commit mapping for 3rd commit missing: got %s, expected %s", invCommit3, res3.HeadCommit)
+	}
+}
+
 func TestGitExport(t *testing.T) {
 	origWd, _ := os.Getwd()
 	defer os.Chdir(origWd)

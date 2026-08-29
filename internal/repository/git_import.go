@@ -51,6 +51,8 @@ type GitImportProgressTracker struct {
 	CurrentCommitIndex int
 	CurrentCommitHash  string
 	CurrentCommitMsg   string
+	CommitsImported    uint64
+	CommitsSkipped     uint64
 
 	FilesChecking int64
 	FilesChecked  uint64
@@ -297,6 +299,9 @@ func ImportGitRepository(
 					rootCommit = existingInv
 				}
 				headCommit = existingInv
+				if tracker != nil {
+					atomic.AddUint64(&tracker.CommitsSkipped, 1)
+				}
 				continue
 			}
 		}
@@ -338,6 +343,9 @@ func ImportGitRepository(
 
 		gitToInvCommit[gHashStr] = invHash
 		_ = kvIdx.RecordCommitMapping(ctx, gHashStr, invHash)
+		if tracker != nil {
+			atomic.AddUint64(&tracker.CommitsImported, 1)
+		}
 
 		if rootCommit == "" {
 			rootCommit = invHash

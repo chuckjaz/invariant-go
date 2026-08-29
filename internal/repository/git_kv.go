@@ -56,12 +56,16 @@ func (idx *GitKVIndex) GetTreeInvariantAddress(ctx context.Context, gitTreeSHA1 
 	if idx.kvClient == nil || gitTreeSHA1 == "" {
 		return "", nil
 	}
-	key := "tree:sha1:" + strings.ToLower(gitTreeSHA1)
-	res, err := idx.kvClient.BatchGet(ctx, nil, []string{key})
+	gSha1 := strings.ToLower(gitTreeSHA1)
+	keys := []string{"tree:sha1:" + gSha1, "SHA1:" + gSha1}
+	res, err := idx.kvClient.BatchGet(ctx, nil, keys)
 	if err != nil {
 		return "", err
 	}
-	if val, ok := res[key]; ok {
+	if val, ok := res["tree:sha1:"+gSha1]; ok {
+		return string(val.Value), nil
+	}
+	if val, ok := res["SHA1:"+gSha1]; ok {
 		return string(val.Value), nil
 	}
 	return "", nil
@@ -72,12 +76,16 @@ func (idx *GitKVIndex) GetTreeGitSHA1(ctx context.Context, invTreeAddr string) (
 	if idx.kvClient == nil || invTreeAddr == "" {
 		return "", nil
 	}
-	key := "tree:sha256:" + strings.ToLower(invTreeAddr)
-	res, err := idx.kvClient.BatchGet(ctx, nil, []string{key})
+	iAddr := strings.ToLower(invTreeAddr)
+	keys := []string{"tree:sha256:" + iAddr, "SHA256:" + iAddr}
+	res, err := idx.kvClient.BatchGet(ctx, nil, keys)
 	if err != nil {
 		return "", err
 	}
-	if val, ok := res[key]; ok {
+	if val, ok := res["tree:sha256:"+iAddr]; ok {
+		return string(val.Value), nil
+	}
+	if val, ok := res["SHA256:"+iAddr]; ok {
 		return string(val.Value), nil
 	}
 	return "", nil
@@ -88,12 +96,16 @@ func (idx *GitKVIndex) GetCommitInvariantHash(ctx context.Context, gitCommitSHA1
 	if idx.kvClient == nil || gitCommitSHA1 == "" {
 		return "", nil
 	}
-	key := "commit:sha1:" + strings.ToLower(gitCommitSHA1)
-	res, err := idx.kvClient.BatchGet(ctx, nil, []string{key})
+	gSha1 := strings.ToLower(gitCommitSHA1)
+	keys := []string{"commit:sha1:" + gSha1, "SHA1:" + gSha1}
+	res, err := idx.kvClient.BatchGet(ctx, nil, keys)
 	if err != nil {
 		return "", err
 	}
-	if val, ok := res[key]; ok {
+	if val, ok := res["commit:sha1:"+gSha1]; ok {
+		return string(val.Value), nil
+	}
+	if val, ok := res["SHA1:"+gSha1]; ok {
 		return string(val.Value), nil
 	}
 	return "", nil
@@ -104,12 +116,16 @@ func (idx *GitKVIndex) GetCommitGitSHA1(ctx context.Context, invCommitHash strin
 	if idx.kvClient == nil || invCommitHash == "" {
 		return "", nil
 	}
-	key := "commit:sha256:" + strings.ToLower(invCommitHash)
-	res, err := idx.kvClient.BatchGet(ctx, nil, []string{key})
+	iHash := strings.ToLower(invCommitHash)
+	keys := []string{"commit:sha256:" + iHash, "SHA256:" + iHash}
+	res, err := idx.kvClient.BatchGet(ctx, nil, keys)
 	if err != nil {
 		return "", err
 	}
-	if val, ok := res[key]; ok {
+	if val, ok := res["commit:sha256:"+iHash]; ok {
+		return string(val.Value), nil
+	}
+	if val, ok := res["SHA256:"+iHash]; ok {
 		return string(val.Value), nil
 	}
 	return "", nil
@@ -142,6 +158,8 @@ func (idx *GitKVIndex) RecordTreeMapping(ctx context.Context, gitTreeSHA1, invTr
 	entries := map[string][]byte{
 		"tree:sha1:" + gSha1:    []byte(iAddr),
 		"tree:sha256:" + iAddr:  []byte(gSha1),
+		"SHA1:" + gSha1:         []byte(iAddr),
+		"SHA256:" + iAddr:       []byte(gSha1),
 		"tree:scanned:" + gSha1: []byte("true"),
 	}
 	_, err := idx.kvClient.BatchPut(ctx, nil, entries)
@@ -159,6 +177,8 @@ func (idx *GitKVIndex) RecordCommitMapping(ctx context.Context, gitCommitSHA1, i
 	entries := map[string][]byte{
 		"commit:sha1:" + gSha1:   []byte(iHash),
 		"commit:sha256:" + iHash: []byte(gSha1),
+		"SHA1:" + gSha1:          []byte(iHash),
+		"SHA256:" + iHash:        []byte(gSha1),
 	}
 	_, err := idx.kvClient.BatchPut(ctx, nil, entries)
 	return err
