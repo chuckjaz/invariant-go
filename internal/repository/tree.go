@@ -151,6 +151,10 @@ func MaterializeTree(ctx context.Context, tree content.ContentLink, destDir stri
 				if err != nil {
 					return err
 				}
+				if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+					fr.Close()
+					return err
+				}
 				outF, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 				if err != nil {
 					fr.Close()

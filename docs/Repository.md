@@ -392,16 +392,35 @@ Unpin and remove a sub-repository dependency layer.
 ---
 
 ### `ir git export [<repository directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Export the commits in the current branch to the corresponding branch of the given Git repository, mapping Invariant file trees to Git trees using the KV service SHA1 $\leftrightarrow$ SHA256 index.
+
+#### Options
+
+##### `-branch=<name>`
+Target Git branch name to update (default: `main`).
+
+##### `-from=<commit-hash>`
+Specific Invariant commit hash to export (default: active workspace HEAD).
 
 ---
 
 ### `ir git import [<repository directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Import the commits into this branch from the corresponding branch of the given Git repository, using the KV service SHA1 $\leftrightarrow$ SHA256 mapping objects to convert Git trees and blobs to Invariant file trees.
+
+#### Options
+
+##### `-branch=<name>`
+Git branch to import (default: active Git `HEAD`).
+
+##### `-depth=<n>`
+Depth of commit history to import (default: 0 = full history).
+
+##### `-tag=<name>`
+Storage write tag for importing original blob content (default: `originals`).
 
 ---
 

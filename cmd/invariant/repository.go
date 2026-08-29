@@ -12,6 +12,7 @@ import (
 	"invariant/internal/config"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/kv"
 	"invariant/internal/names"
 	"invariant/internal/repository"
 	"invariant/internal/repository/commit"
@@ -58,6 +59,7 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "  tag          Create, list, or delete release tags\n")
 		fmt.Fprintf(os.Stderr, "  config       Get, set, list, or unset repository or user settings\n")
 		fmt.Fprintf(os.Stderr, "  layer        Manage pinned sub-repository dependency layers\n")
+		fmt.Fprintf(os.Stderr, "  git          Import or export commits and trees to/from a Git repository\n")
 		fmt.Fprintf(os.Stderr, "  mount        Mount an existing repository workspace\n")
 		fmt.Fprintf(os.Stderr, "  unmount      Unmount repository workspace\n")
 		os.Exit(1)
@@ -110,6 +112,8 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		runRepoConfig(globalCfg, args[1:])
 	case "layer":
 		runRepoLayer(globalCfg, args[1:])
+	case "git":
+		runRepoGit(globalCfg, args[1:])
 	case "mount":
 		runRepoMount(globalCfg, args[1:])
 	case "unmount":
@@ -1169,4 +1173,109 @@ func runRepoUnmount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	fmt.Printf("Unmounted repository workspace at %s\n", targetDir)
+}
+
+func initKVClient(globalCfg *config.InvariantConfig) kv.BatchKeyValueStore {
+	if globalCfg == nil || globalCfg.Discovery == "" {
+		return kv.NewMemoryKeyValueStore()
+	}
+	discClient := discovery.NewClient(globalCfg.Discovery, nil)
+	kvAddr, err := discovery.ResolveName(context.Background(), discClient, "kv-v1")
+	if err != nil || kvAddr == "" {
+		ids, _ := discClient.Find(context.Background(), "kv-v1", "", 1)
+		if len(ids) > 0 {
+			kvAddr = ids[0].Address
+		}
+	}
+	if kvAddr != "" {
+		return kv.NewClient(kvAddr, nil)
+	}
+	return kv.NewMemoryKeyValueStore()
+}
+
+func runRepoGit(globalCfg *config.InvariantConfig, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository git <import|export> [options]\n")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "import":
+		runRepoGitImport(globalCfg, args[1:])
+	case "export":
+		runRepoGitExport(globalCfg, args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown git subcommand: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository git import", flag.ExitOnError)
+	branchFlag := fs.String("branch", "", "Git branch to import (default: HEAD)")
+	depthFlag := fs.Int("depth", 0, "Depth of commit history to import (default: 0 = full history)")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
+	fs.Parse(args)
+
+	gitDir := "."
+	if fs.NArg() > 0 {
+		gitDir = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
+	kvClient := initKVClient(globalCfg)
+	ctx := context.Background()
+
+	res, err := repository.ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, repository.GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             *branchFlag,
+		TargetWorkspaceDir: cwd,
+		Depth:              *depthFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error importing git repository: %v\n", err)
+		os.Exit(1)
+	}
+
+	shortHead := res.HeadCommit
+	if len(shortHead) > 8 {
+		shortHead = shortHead[:8]
+	}
+	fmt.Printf("Successfully imported %d commit(s) from Git branch %q (HEAD: %s)\n", res.ImportedCommits, res.BranchName, shortHead)
+}
+
+func runRepoGitExport(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository git export", flag.ExitOnError)
+	branchFlag := fs.String("branch", "main", "Target Git branch name")
+	fromCommit := fs.String("from", "", "Specific commit hash to export (default: current HEAD)")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository git export <target-git-dir> [-branch=main] [-from=<sha>]\n")
+		os.Exit(1)
+	}
+	targetGitDir := fs.Arg(0)
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, "")
+	kvClient := initKVClient(globalCfg)
+	ctx := context.Background()
+
+	res, err := repository.ExportGitRepository(ctx, store, slotsClient, commitSvc, kvClient, repository.GitExportOptions{
+		WorkspaceDir: cwd,
+		TargetGitDir: targetGitDir,
+		Branch:       *branchFlag,
+		FromCommit:   *fromCommit,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error exporting git repository: %v\n", err)
+		os.Exit(1)
+	}
+
+	shortHead := res.GitHeadCommit
+	if len(shortHead) > 8 {
+		shortHead = shortHead[:8]
+	}
+	fmt.Printf("Successfully exported %d commit(s) to Git repository at %s (branch: %s, HEAD: %s)\n", res.ExportedCommits, targetGitDir, res.GitBranch, shortHead)
 }

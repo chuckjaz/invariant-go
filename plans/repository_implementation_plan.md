@@ -677,7 +677,7 @@ graph LR
     DirectStore -.->|Indexed by| KVStore
 ```
 
-- [ ] **Step 5.1: Bidirectional Git SHA1 $\leftrightarrow$ Invariant SHA256 KV Object Mapping Engine (`internal/repository/git_kv.go`)**
+- [x] **Step 5.1: Bidirectional Git SHA1 $\leftrightarrow$ Invariant SHA256 KV Object Mapping Engine (`internal/repository/git_kv.go`)**
   - Integrate with `internal/gitscan` and `internal/kv` conventions:
     - `SHA1:<git_blob_sha1>` $\to$ `<invariant_sha256_hex>`
     - `SHA256:<invariant_sha256_hex>` $\to$ `<git_blob_sha1>`
@@ -685,7 +685,7 @@ graph LR
   - During import and export, batch-query KV to reuse existing object conversions, avoiding redundant hashing and storage duplication.
   - Index newly converted blobs and trees into KV in batches.
 
-- [ ] **Step 5.2: `ir git import` & `ir git export` (`internal/repository/git_import.go`, `internal/repository/git_export.go`)**
+- [x] **Step 5.2: `ir git import` & `ir git export` (`internal/repository/git_import.go`, `internal/repository/git_export.go`)**
   - `ir git import [<repository directory>]`:
     - Walk Git commit history using `github.com/go-git/go-git/v5`.
     - Map Git trees to Invariant [`filetree.Directory`](file:///home/chuckjaz/src/invariant-go/internal/filetree/filetree.go#L60) using KV mappings.
@@ -696,17 +696,17 @@ graph LR
     - Update Git branch reference to exported HEAD.
   - Update `docs/Repository.md`: mark `ir git import` and `ir git export` as `**Status:** Implemented`.
 
-- [ ] **Step 5.3: Direct Git Storage Service Option (`-git-dir`) (`cmd/storage/main.go`)**
+- [x] **Step 5.3: Direct Git Storage Service Option (`-git-dir`) (`cmd/storage/main.go`)**
   - Add `-git-dir` flag to [`cmd/storage/main.go`](file:///home/chuckjaz/src/invariant-go/cmd/storage/main.go).
   - When `-git-dir` is passed:
     - Instantiate [`git.NewGitStorage`](file:///home/chuckjaz/src/invariant-go/internal/storage/git/git_storage.go#L98) with KV service client.
     - Read blobs and objects directly from the local `.git` repository on demand without copying them into standard storage.
 
-- [ ] **Step 5.4: Lazy Background Distribute Service Integration (`-distribute`)**
+- [x] **Step 5.4: Lazy Background Distribute Service Integration (`-distribute`)**
   - Connect a distribute service ([`cmd/distribute/main.go`](file:///home/chuckjaz/src/invariant-go/cmd/distribute/main.go)) with the direct Git storage service.
   - Distribute service monitors newly referenced blocks and lazily uploads them to Invariant cluster storage in the background.
 
-- [ ] **Phase 5 Quality & Verification Gate**
+- [x] **Phase 5 Quality & Verification Gate**
   - Lossless bidirectional roundtrip tests in `internal/repository/git_interop_test.go` (Git $\to$ Invariant $\to$ Git).
   - Storage integration tests verifying `-git-dir` and `-distribute` serving and replicating objects.
   - Compliance check (`go fmt`, `go vet`, `go fix`).

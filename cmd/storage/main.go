@@ -13,8 +13,10 @@ import (
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
 	"invariant/internal/identity"
+	"invariant/internal/kv"
 	"invariant/internal/notify"
 	"invariant/internal/storage"
+	gitstorage "invariant/internal/storage/git"
 	"invariant/internal/tags"
 	"invariant/internal/trace"
 )
@@ -37,6 +39,14 @@ func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay
 func main() {
 	var dir string
 	flag.StringVar(&dir, "dir", "", "Base directory for file system storage")
+	var gitDir string
+	flag.StringVar(&gitDir, "git-dir", "", "Path to a local Git repository to serve blobs from directly")
+	var gitScanCommit string
+	flag.StringVar(&gitScanCommit, "git-scan-commit", "HEAD", "Git commit to scan on startup when using -git-dir")
+	var gitScanDepth int
+	flag.IntVar(&gitScanDepth, "git-scan-depth", -1, "Depth of commit history to scan on startup (-1 for full history)")
+	var gitScanConcurrency int
+	flag.IntVar(&gitScanConcurrency, "git-scan-concurrency", 20, "Concurrency for scanning git repository on startup")
 	var s3Bucket string
 	flag.StringVar(&s3Bucket, "s3-bucket", "", "AWS S3 bucket name for storage")
 	var s3Prefix string
@@ -63,7 +73,35 @@ func main() {
 	flag.Parse()
 
 	var s storage.Storage
-	if s3Bucket != "" {
+	if gitDir != "" {
+		var kvClient kv.BatchKeyValueStore
+		if discoveryURL != "" {
+			dClient := discovery.NewClient(discoveryURL, nil)
+			kvAddr, err := discovery.ResolveName(context.Background(), dClient, "kv-v1")
+			if err != nil || kvAddr == "" {
+				ids, _ := dClient.Find(context.Background(), "kv-v1", "", 1)
+				if len(ids) > 0 {
+					kvAddr = ids[0].Address
+				}
+			}
+			if kvAddr != "" {
+				kvClient = kv.NewClient(kvAddr, nil)
+			}
+		}
+		if kvClient == nil {
+			kvClient = kv.NewMemoryKeyValueStore()
+		}
+
+		var err error
+		s, err = gitstorage.NewGitStorage(gitDir, kvClient, gitstorage.GitStorageOptions{
+			ScanCommit:      gitScanCommit,
+			ScanDepth:       gitScanDepth,
+			ScanConcurrency: gitScanConcurrency,
+		})
+		if err != nil {
+			log.Fatalf("Failed to initialize Git storage: %v", err)
+		}
+	} else if s3Bucket != "" {
 		var err error
 		s, err = storage.NewS3Storage(context.Background(), s3Bucket, s3Prefix)
 		if err != nil {
