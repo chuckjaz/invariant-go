@@ -320,6 +320,19 @@ type ReviewService interface {
 }
 ```
 
+### 3.3 Service Discovery, Client Initialization & Storage Write Tag Policies
+- **Strict Service Discovery**: The repository CLI strictly relies on service discovery via `~/.invariant/config.yaml` (`discovery` URL). It deliberately omits fallback to `localhost` ports; if discovery or any required service (`storage-v1`, `slots-v1`, `names-v1`) cannot be resolved, an explicit error is reported instructing the user that Invariant is not configured correctly.
+- **Storage Write Tag Restriction**: All repository storage operations default to writing only to storage servers tagged with `"originals"` via `storage.WithWriteTagOption("originals")`.
+- **Configurable Write Tags**: The write tag is configurable globally in `~/.invariant/config.yaml` via `write_tag` or `repository.write_tag`, and per-command using the `-tag=<tag>` flag. Passing `-tag=any` removes tag filtering and allows writing to any available storage node.
+
+### 3.4 Modular Package Architecture & Identity Providers
+- **Sub-module Structure**: Under `internal/repository/`, domain services are split into independent sub-modules to eliminate monolithic files and prevent cyclic dependencies:
+  - `internal/repository/identity/`: Pluggable identity providers.
+  - `internal/repository/commit/`: Commit engine, diffing, history, and REST API.
+  - `internal/repository/review/`: Code review models and service interface.
+  - `internal/repository/config/`: Repository metadata and CAS serialization.
+- **Pluggable Identity Hierarchy**: An extensible `identity.Provider` interface supports multiple identity backends (`TailscaleProvider`, `EnvironmentProvider`, and `MultiProvider` fallback chains).
+
 ---
 
 ## 4. Documentation & Plan Maintenance Strategy
@@ -446,31 +459,33 @@ sequenceDiagram
   - Implement HTTP handlers (`POST /api/v1/commit`, `GET /api/v1/commit/{sha}`, `GET /api/v1/history`, `POST /api/v1/sync`, `POST /api/v1/submit`, `POST /api/v1/diff`, `GET /api/v1/blame`, `POST /api/v1/bisect`, `POST /api/v1/rebase`).
   - Implement `Client` implementing `commit.Service` over HTTP.
 
-- [x] **Step 2.2: `ir create <name> [<content>]` (`internal/repository/create.go`, `cmd/invariant/repository.go`)**
-  - Parse CLI arguments: `<name>`, initial content or `-d=<path>`, `-create-only`, `-encrypt`, `-compress`, `-writable`.
+- [x] **Step 2.2: `invariant repository create <name> [<content>]` (`internal/repository/create.go`, `cmd/invariant/repository.go`)**
+  - Parse CLI arguments: `<name>`, initial content or `-d=<path>`, `-create-only`, `-encrypt`, `-compress`, `-writable`, `-tag=<tag>`.
+  - Enforce strict discovery (no fallback to localhost) and report actionable configuration errors if services are missing.
+  - Enforce default `"originals"` storage write tag via `storage.WithWriteTagOption`, with `-tag` CLI flag and `~/.invariant/config.yaml` overrides.
   - Create initial commit, main branch slot, and Names registration via `commit.Service`.
   - Mount workspace directory `<name>/main` (read-only by default, or writable if `-writable`).
   - Update `docs/Repository.md`: mark `ir create` as `**Status:** Implemented`.
 
-- [x] **Step 2.3: `ir change <name>` (`internal/repository/change.go`)**
-  - Flag: `-private`.
+- [x] **Step 2.3: `invariant repository change <name>` (`internal/repository/change.go`)**
+  - Flags: `-private`, `-upstream=<branch>`, `-tag=<tag>`.
   - Allocate change slot pointing to upstream HEAD commit.
   - Register `:<user>:<repo_name>:<name>` in Names service unless `-private`.
   - Mount writable workspace at `<repo_root>/<name>`.
   - Update `docs/Repository.md`: mark `ir change` as `**Status:** Implemented`.
 
-- [x] **Step 2.4: `ir status`, `ir diff` & `ir clean` (`internal/repository/status.go`, `internal/repository/diff.go`, `internal/repository/clean.go`)**
+- [x] **Step 2.4: `invariant repository status`, `diff` & `clean` (`internal/repository/status.go`, `internal/repository/diff.go`, `internal/repository/clean.go`)**
   - `status`: Compare workspace active tree to HEAD commit tree; show Added, Modified, Deleted files.
   - `diff [<commit1>] [<commit2>] [--stat]`:
     - Diffs working tree vs HEAD, working tree vs arbitrary commit, or `<commit1>` vs `<commit2>`.
-    - Supports `ir diff <branch>...` (3-dot merge-base diff against upstream).
+    - Supports `diff <branch>...` (3-dot merge-base diff against upstream).
     - Supports `--stat` summary output showing files changed and lines added/deleted.
   - `clean [-f] [-d] [-x]`:
     - Resets and purges uncommitted temporary/ignored files in the local workspace overlay layer without modifying tracked source edits.
   - Update `docs/Repository.md`: mark `ir status`, `ir diff`, and `ir clean` as `**Status:** Implemented`.
 
-- [x] **Step 2.5: `ir commit` (`internal/repository/commit_cmd.go`)**
-  - Options: `-m <msg>` (repeatable, newline concatenated), `-e` / `-edit`, `-no-edit`, `-amend`.
+- [x] **Step 2.5: `invariant repository commit` (`internal/repository/commit_cmd.go`)**
+  - Options: `-m <msg>` (repeatable, newline concatenated), `-e` / `-edit`, `-no-edit`, `-amend`, `-tag=<tag>`.
   - Snapshot working tree; launch editor if no `-m` and not `-no-edit`.
   - Call `CommitService.CreateCommit`:
     - Populate `Author` (with Tailscale identity/token).
@@ -478,15 +493,15 @@ sequenceDiagram
     - Update change branch slot via CAS.
   - Update `docs/Repository.md`: mark `ir commit` as `**Status:** Implemented`.
 
-- [x] **Step 2.6: `ir sync` with Conflict Lifecycle Controls (`internal/repository/sync.go`)**
+- [x] **Step 2.6: `invariant repository sync` with Conflict Lifecycle Controls (`internal/repository/sync.go`)**
   - Route through `CommitService.SyncBranch`.
   - Perform 3-way merge on file trees using [`workspace.MergeTrees`](file:///home/chuckjaz/src/invariant-go/internal/workspace/workspace.go#L300-L440).
   - Write standard conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) if conflicts exist.
-  - Support `ir sync --abort`: restore workspace cleanly to pre-sync commit.
-  - Support `ir sync --continue`: verify all conflict markers are resolved, snapshot tree, and finalize rebased commit.
+  - Support `sync --abort`: restore workspace cleanly to pre-sync commit.
+  - Support `sync --continue`: verify all conflict markers are resolved, snapshot tree, and finalize rebased commit.
   - Update `docs/Repository.md`: mark `ir sync` as `**Status:** Implemented`.
 
-- [x] **Step 2.7: `ir submit [<directory>]` (`internal/repository/submit.go`)**
+- [x] **Step 2.7: `invariant repository submit [<directory>]` (`internal/repository/submit.go`)**
   - Route through `CommitService.SubmitChange`.
   - Validate branch criteria (e.g. check approved review status if required).
   - Fast-forward or rebase onto upstream branch.
@@ -495,6 +510,7 @@ sequenceDiagram
 
 - [x] **Phase 2 Quality & Verification Gate**
   - End-to-end integration test in `internal/repository/workflow_test.go` covering `create` $\to$ `change` $\to$ `clean` $\to$ `diff --stat` $\to$ `commit` $\to$ conflict resolution with `--continue`/`--abort` $\to$ `submit`.
+  - Aligned command names and descriptions in top-level `invariant` CLI help.
   - Verify compliance with `go fmt`, `go vet`, and `go fix`.
   - Full Go doc comments on all new exported APIs.
   - Update `plans/repository_implementation_plan.md` with Phase 2 completion status.
