@@ -182,8 +182,25 @@ func CreateRepository(
 	return cfg, rootCommitHash, nil
 }
 
-// ReadWorkspaceMetadata loads .invariant-workspace from wsRoot.
+// ReadWorkspaceMetadata loads workspace metadata from wsRoot (checking .invariant-mount / .invariant-mount.json if mounted, or .invariant-workspace if unmounted).
 func ReadWorkspaceMetadata(wsRoot string) (*WorkspaceMetadata, error) {
+	for _, mountFileName := range []string{".invariant-mount", ".invariant-mount.json"} {
+		mountPath := filepath.Join(wsRoot, mountFileName)
+		if data, err := os.ReadFile(mountPath); err == nil {
+			var mountCfg struct {
+				InvariantMount bool            `json:"invariant_mount"`
+				WorkspaceInfo  json.RawMessage `json:"workspace_info,omitempty"`
+			}
+			if err := json.Unmarshal(data, &mountCfg); err == nil && len(mountCfg.WorkspaceInfo) > 0 {
+				var meta WorkspaceMetadata
+				if err := json.Unmarshal(mountCfg.WorkspaceInfo, &meta); err == nil {
+					meta.WorkspaceDir = wsRoot
+					return &meta, nil
+				}
+			}
+		}
+	}
+
 	wsPath := filepath.Join(wsRoot, ".invariant-workspace")
 	data, err := os.ReadFile(wsPath)
 	if err != nil {
@@ -195,6 +212,17 @@ func ReadWorkspaceMetadata(wsRoot string) (*WorkspaceMetadata, error) {
 	}
 	meta.WorkspaceDir = wsRoot
 	return &meta, nil
+}
+
+// IsWorkspaceMounted checks whether wsRoot is currently a mounted workspace.
+func IsWorkspaceMounted(wsRoot string) bool {
+	for _, mountFileName := range []string{".invariant-mount", ".invariant-mount.json"} {
+		mountPath := filepath.Join(wsRoot, mountFileName)
+		if _, err := os.Stat(mountPath); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // WriteWorkspaceMetadata saves .invariant-workspace to wsRoot.

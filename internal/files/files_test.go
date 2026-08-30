@@ -1115,3 +1115,73 @@ func TestFilesService_LayerWriteTag(t *testing.T) {
 		t.Errorf("Data mismatch for temp.scratch: got %s, want %s", dataScratch, scratchPayload)
 	}
 }
+
+func TestFilesService_WorkspacePseudoNode(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+
+	wsJSON := []byte(`{"repoName":"my-repo","branchName":"main","commitHash":"abc12345"}`)
+
+	opts := Options{
+		Storage: store,
+		MountConfig: &MountConfig{
+			InvariantMount: true,
+			IsWorkspace:    true,
+			WorkspaceInfo:  wsJSON,
+		},
+	}
+
+	filesService, err := NewInMemoryFiles(opts)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	// 1. Lookup .invariant-mount
+	info, err := filesService.Lookup(ctx, 1, ".invariant-mount")
+	if err != nil {
+		t.Fatalf("Lookup .invariant-mount failed: %v", err)
+	}
+	if info.Kind != "File" {
+		t.Errorf("Expected Kind 'File', got %s", info.Kind)
+	}
+
+	// 2. Read .invariant-mount
+	r, err := filesService.ReadFile(ctx, info.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadFile .invariant-mount failed: %v", err)
+	}
+	defer r.Close()
+	data, _ := io.ReadAll(r)
+
+	if !strings.Contains(string(data), `"repoName": "my-repo"`) || !strings.Contains(string(data), `"commitHash": "abc12345"`) {
+		t.Errorf(".invariant-mount content mismatch: %s", string(data))
+	}
+
+	// 3. Verify .invariant-workspace is NOT provided in the mount
+	if _, err := filesService.Lookup(ctx, 1, ".invariant-workspace"); err == nil {
+		t.Errorf("Expected .invariant-workspace to NOT be present in mounted files")
+	}
+
+	// 4. ReadDirectory should include .invariant-mount and NOT .invariant-workspace
+	dir, err := filesService.ReadDirectory(ctx, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("ReadDirectory failed: %v", err)
+	}
+	foundMount := false
+	foundWorkspace := false
+	for _, entry := range dir {
+		if entry.GetName() == ".invariant-mount" {
+			foundMount = true
+		}
+		if entry.GetName() == ".invariant-workspace" {
+			foundWorkspace = true
+		}
+	}
+	if !foundMount {
+		t.Errorf(".invariant-mount not found in ReadDirectory")
+	}
+	if foundWorkspace {
+		t.Errorf(".invariant-workspace should not be present in ReadDirectory for mount")
+	}
+}

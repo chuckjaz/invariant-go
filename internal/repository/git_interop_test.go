@@ -860,3 +860,55 @@ func TestGitImport_NoDirectoryDoesNotCreateDir(t *testing.T) {
 		t.Errorf("Virtual README.md content mismatch: %s", string(data))
 	}
 }
+
+func TestFindWorkspaceRoot_MountedAndUnmounted(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Unmounted workspace
+	unmountedDir := filepath.Join(tempDir, "unmounted")
+	os.MkdirAll(unmountedDir, 0755)
+	unmountedMeta := &WorkspaceMetadata{
+		RepoName:   "test-repo",
+		BranchName: "main",
+		CommitHash: "c111",
+	}
+	if err := WriteWorkspaceMetadata(unmountedDir, unmountedMeta); err != nil {
+		t.Fatalf("Failed to write metadata: %v", err)
+	}
+
+	root, meta, err := FindWorkspaceRoot(unmountedDir)
+	if err != nil {
+		t.Fatalf("FindWorkspaceRoot failed for unmounted dir: %v", err)
+	}
+	if root != unmountedDir || meta.RepoName != "test-repo" || meta.BranchName != "main" {
+		t.Errorf("Mismatch for unmounted dir: root=%s, meta=%+v", root, meta)
+	}
+	if IsWorkspaceMounted(unmountedDir) {
+		t.Errorf("Expected IsWorkspaceMounted=false for unmounted dir")
+	}
+
+	// 2. Mounted workspace (.invariant-mount pseudo file)
+	mountedDir := filepath.Join(tempDir, "mounted")
+	os.MkdirAll(mountedDir, 0755)
+	mountCfg := files.MountConfig{
+		InvariantMount: true,
+		IsWorkspace:    true,
+		WorkspaceInfo:  []byte(`{"repoName":"mounted-repo","branchName":"feature","commitHash":"c222"}`),
+	}
+	mountData, _ := json.MarshalIndent(mountCfg, "", "  ")
+	os.WriteFile(filepath.Join(mountedDir, ".invariant-mount"), mountData, 0644)
+
+	subDir := filepath.Join(mountedDir, "sub", "deep")
+	os.MkdirAll(subDir, 0755)
+
+	rootM, metaM, err := FindWorkspaceRoot(subDir)
+	if err != nil {
+		t.Fatalf("FindWorkspaceRoot failed for mounted dir: %v", err)
+	}
+	if rootM != mountedDir || metaM.RepoName != "mounted-repo" || metaM.BranchName != "feature" {
+		t.Errorf("Mismatch for mounted dir: root=%s, meta=%+v", rootM, metaM)
+	}
+	if !IsWorkspaceMounted(mountedDir) {
+		t.Errorf("Expected IsWorkspaceMounted=true for mounted dir")
+	}
+}

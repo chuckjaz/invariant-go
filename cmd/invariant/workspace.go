@@ -349,7 +349,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		ReadOnly: true,
 	}}, layers...)
 
-	wsData, _ := json.Marshal(wsInfo)
+	wsData := data
 
 	finalStorage, localStore := SetupCacheStorage(&commonFlags, storageClient)
 

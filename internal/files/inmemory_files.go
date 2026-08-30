@@ -325,32 +325,35 @@ func (s *InMemoryFiles) ensurePseudoMountNodeLocked(rootNode *Node) {
 	if rootNode.Children == nil {
 		rootNode.Children = make(map[string]uint64)
 	}
-	if _, exists := rootNode.Children[".invariant-mount.json"]; exists {
-		return
-	}
+
 	data, err := json.MarshalIndent(s.opts.MountConfig, "", "  ")
 	if err != nil {
 		return
 	}
 	now := uint64(time.Now().Unix())
-	pseudoID := s.next
-	s.next++
 	modeStr := "0444"
-	s.nodes[pseudoID] = &Node{
-		ID:              pseudoID,
-		Name:            ".invariant-mount.json",
-		Kind:            filetree.FileKind,
-		Parents:         map[uint64]bool{1: true},
-		CreateTime:      &now,
-		ModifyTime:      &now,
-		Mode:            &modeStr,
-		Size:            uint64(len(data)),
-		Type:            "regular",
-		Target:          string(data),
-		LayerMembership: map[int]bool{0: true},
-		IsLoaded:        true,
+
+	for _, mountFileName := range []string{".invariant-mount", ".invariant-mount.json"} {
+		if _, exists := rootNode.Children[mountFileName]; !exists {
+			pseudoID := s.next
+			s.next++
+			s.nodes[pseudoID] = &Node{
+				ID:              pseudoID,
+				Name:            mountFileName,
+				Kind:            filetree.FileKind,
+				Parents:         map[uint64]bool{1: true},
+				CreateTime:      &now,
+				ModifyTime:      &now,
+				Mode:            &modeStr,
+				Size:            uint64(len(data)),
+				Type:            "regular",
+				Target:          string(data),
+				LayerMembership: map[int]bool{0: true},
+				IsLoaded:        true,
+			}
+			rootNode.Children[mountFileName] = pseudoID
+		}
 	}
-	rootNode.Children[".invariant-mount.json"] = pseudoID
 }
 
 func (s *InMemoryFiles) getFullPath(id uint64) string {
@@ -1280,7 +1283,7 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 		for layerIdx := range node.LayerMembership {
 			var entries filetree.Directory
 			for name, childID := range node.Children {
-				if name == ".invariant-mount.json" {
+				if name == ".invariant-mount.json" || name == ".invariant-mount" {
 					continue
 				}
 				child := s.nodes[childID]

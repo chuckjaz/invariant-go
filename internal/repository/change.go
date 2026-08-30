@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,7 +22,7 @@ type ChangeOptions struct {
 	AuthorName     string
 }
 
-// FindWorkspaceRoot walks up directory parents searching for .invariant-workspace.
+// FindWorkspaceRoot walks up directory parents searching for a mounted or unmounted repository workspace.
 func FindWorkspaceRoot(startDir string) (string, *WorkspaceMetadata, error) {
 	curr, err := filepath.Abs(startDir)
 	if err != nil {
@@ -31,14 +30,9 @@ func FindWorkspaceRoot(startDir string) (string, *WorkspaceMetadata, error) {
 	}
 
 	for {
-		wsPath := filepath.Join(curr, ".invariant-workspace")
-		data, err := os.ReadFile(wsPath)
-		if err == nil {
-			var meta WorkspaceMetadata
-			if err := json.Unmarshal(data, &meta); err == nil {
-				meta.WorkspaceDir = curr
-				return curr, &meta, nil
-			}
+		meta, err := ReadWorkspaceMetadata(curr)
+		if err == nil && meta != nil {
+			return curr, meta, nil
 		}
 
 		parent := filepath.Dir(curr)
@@ -47,7 +41,7 @@ func FindWorkspaceRoot(startDir string) (string, *WorkspaceMetadata, error) {
 		}
 		curr = parent
 	}
-	return "", nil, fmt.Errorf("not in an invariant repository workspace (no .invariant-workspace found)")
+	return "", nil, fmt.Errorf("not in an invariant repository workspace (no .invariant-workspace or .invariant-mount found)")
 }
 
 // CreateChangeBranch creates a writable change workspace branched from upstream.
