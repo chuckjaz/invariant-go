@@ -291,9 +291,22 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		}
 
 		if success {
+			// Poll briefly to ensure mount is visible in kernel VFS to external commands
+			for range 50 {
+				if _, err := os.Stat(filepath.Join(absDir, ".invariant-mount")); err == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
 		} else {
-			log.Fatalf("Background mount failed or exited unexpectedly")
+			debugData, _ := os.ReadFile(logPath)
+			if len(debugData) > 0 {
+				fmt.Fprintf(os.Stderr, "Background mount failed (PID: %d). Log details from %s:\n%s\n", cmd.Process.Pid, logPath, string(debugData))
+			} else {
+				fmt.Fprintf(os.Stderr, "Background mount failed or exited unexpectedly (PID: %d)\n", cmd.Process.Pid)
+			}
+			os.Exit(1)
 		}
 
 		r.Close()
@@ -406,6 +419,10 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("Mount fail: %v\n", err)
 	}
 
+	if err := server.WaitMount(); err != nil {
+		log.Fatalf("WaitMount fail: %v\n", err)
+	}
+
 	defer func() {
 		log.Println("Syncing workspace before shutdown...")
 		if err := filesrv.Sync(context.Background(), 1, true); err != nil {
@@ -498,20 +515,36 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 
 	findService := func(kind string) string {
 		id, err := dClient.Find(context.Background(), kind, "", 1)
-		if err != nil {
-			log.Fatalf("Could not find %s service: %v", kind, err)
-		}
-		if len(id) == 0 {
-			log.Fatalf("Could not find %s service", kind)
+		if err != nil || len(id) == 0 {
+			return ""
 		}
 		return id[0].Address
 	}
 
 	finderAddr := findService("finder-v1")
-	finderClient := finder.NewClient(finderAddr, nil)
-	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	var finderClient finder.Finder
+	var storageClient storage.Storage
+	if finderAddr != "" {
+		finderClient = finder.NewClient(finderAddr, nil)
+		storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	} else {
+		sAddr := findService("storage-v1")
+		if sAddr == "" {
+			sAddr, _ = discovery.ResolveName(context.Background(), dClient, "storage-v1")
+		}
+		if sAddr == "" {
+			log.Fatalf("Could not find storage-v1 service")
+		}
+		storageClient = storage.NewClient(sAddr, nil)
+	}
 
 	slotsAddr := findService("slots-v1")
+	if slotsAddr == "" {
+		slotsAddr, _ = discovery.ResolveName(context.Background(), dClient, "slots-v1")
+	}
+	if slotsAddr == "" {
+		log.Fatalf("Could not find slots-v1 service")
+	}
 	slotsClient := slots.NewClient(slotsAddr, nil)
 
 	sharedDClient = dClient
