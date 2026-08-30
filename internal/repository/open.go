@@ -11,18 +11,22 @@ import (
 	"invariant/internal/repository/commit"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
+	"invariant/internal/workspace"
 )
 
-// OpenOptions specifies parameters for opening an existing repository workspace.
+// OpenOptions specifies parameters for opening an existing repository FUSE workspace.
 type OpenOptions struct {
-	RepoName  string
-	Branch    string // Target branch (default: "main")
-	TargetDir string // Target root directory on disk (default: ./<RepoName>)
-	Writable  bool
+	RepoName   string
+	Branch     string   // Target branch (default: "main")
+	TargetDir  string   // Target root directory on disk (default: ./<RepoName>)
+	Layers     []string // Additional layers for the FUSE workspace
+	Writable   bool
+	CreateOnly bool // If true, creates .invariant-workspace configuration without mounting
 }
 
-// OpenRepository opens an existing repository from Names service, materializes the branch file tree,
-// writes .invariant-workspace metadata, and changes the working directory to the branch workspace.
+// OpenRepository creates a FUSE workspace for an existing repository from the Names service,
+// configures the layered .invariant-workspace metadata without physical file materialization,
+// and changes the working directory to the branch workspace.
 func OpenRepository(
 	ctx context.Context,
 	store storage.Storage,
@@ -69,7 +73,7 @@ func OpenRepository(
 		return "", fmt.Errorf("failed to retrieve commit from branch slot %s: %w", slotID, err)
 	}
 
-	// 3. Create target workspace directory
+	// 3. Create target workspace directory on disk
 	targetRoot := opts.TargetDir
 	if targetRoot == "" {
 		targetRoot = opts.RepoName
@@ -79,17 +83,28 @@ func OpenRepository(
 		return "", fmt.Errorf("failed to create workspace directory %s: %w", branchDir, err)
 	}
 
-	// 4. Materialize tree files in workspace
+	// 4. Retrieve commit object to get base tree link
 	commitObj, err := commitSvc.GetCommit(ctx, commitHash)
 	if err != nil {
 		return "", fmt.Errorf("failed to retrieve commit object %s: %w", commitHash, err)
 	}
-	if err := MaterializeTree(ctx, commitObj.Tree, branchDir, store); err != nil {
-		return "", fmt.Errorf("failed to materialize tree in %s: %w", branchDir, err)
+
+	// 5. Create FUSE workspace layers via workspace package (no physical file materialization)
+	wsLink, err := workspace.CreateWorkspace(
+		ctx,
+		store,
+		slotsClient,
+		nil,
+		commitObj.Tree,
+		opts.Layers,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create FUSE workspace layers: %w", err)
 	}
 
-	// 5. Write workspace metadata
+	// 6. Write .invariant-workspace metadata with FUSE content link
 	meta := &WorkspaceMetadata{
+		Content:      &wsLink,
 		RepoName:     opts.RepoName,
 		BranchName:   branchName,
 		Upstream:     branchName,

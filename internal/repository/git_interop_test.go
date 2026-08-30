@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"invariant/internal/files"
 	"invariant/internal/kv"
 	"invariant/internal/names"
 	"invariant/internal/repository/commit"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
+	"invariant/internal/workspace"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -789,13 +792,14 @@ func TestGitImport_NoDirectoryDoesNotCreateDir(t *testing.T) {
 		t.Fatalf("Repository %q not registered in Names service: %v", repoName, err)
 	}
 
-	// 2. Open repository using OpenRepository into a local workspace
+	// 2. Open repository using OpenRepository into a FUSE workspace (no physical files on disk)
 	openTargetDir := filepath.Join(tempBase, "opened-repo")
 	wsDir, err := OpenRepository(ctx, store, slotsClient, namesClient, commitSvc, OpenOptions{
-		RepoName:  repoName,
-		Branch:    "main",
-		TargetDir: openTargetDir,
-		Writable:  true,
+		RepoName:   repoName,
+		Branch:     "main",
+		TargetDir:  openTargetDir,
+		Writable:   true,
+		CreateOnly: true,
 	})
 	if err != nil {
 		t.Fatalf("OpenRepository failed: %v", err)
@@ -806,14 +810,53 @@ func TestGitImport_NoDirectoryDoesNotCreateDir(t *testing.T) {
 		t.Errorf("Expected workspace dir %s, got %s", expectedWsDir, wsDir)
 	}
 
-	// Verify workspace files materialized
-	readmeData, err := os.ReadFile(filepath.Join(wsDir, "README.md"))
-	if err != nil || !strings.Contains(string(readmeData), "Updated documentation") {
-		t.Errorf("README.md not materialized in opened workspace: %v", err)
+	// Verify physical files are NOT materialized onto disk
+	if _, err := os.Stat(filepath.Join(wsDir, "README.md")); !os.IsNotExist(err) {
+		t.Errorf("Expected physical README.md to NOT exist on disk before FUSE mount, but got stat err: %v", err)
 	}
 
+	// Verify .invariant-workspace contains FUSE workspace content link
 	meta, err := ReadWorkspaceMetadata(wsDir)
 	if err != nil || meta.CommitHash != res.HeadCommit {
-		t.Errorf("Metadata mismatch: err=%v, commit=%v vs expected=%s", err, meta, res.HeadCommit)
+		t.Fatalf("Metadata mismatch: err=%v, commit=%v vs expected=%s", err, meta, res.HeadCommit)
+	}
+	if meta.Content == nil || meta.Content.Address == "" {
+		t.Fatalf("Expected non-empty FUSE workspace Content link in metadata")
+	}
+
+	// Verify virtual files through FUSE layers
+	layers, err := workspace.ResolveLayers(ctx, slotsClient, store, *meta.Content)
+	if err != nil {
+		t.Fatalf("Failed to resolve FUSE workspace layers: %v", err)
+	}
+	if len(layers) == 0 {
+		t.Fatalf("Expected at least one layer in FUSE workspace")
+	}
+
+	// Verify reading virtual file via files service
+	fsOpts := files.Options{
+		Storage:  store,
+		Slots:    slotsClient,
+		RootLink: *meta.Content,
+		Layers:   layers,
+	}
+	inMemFS, err := files.NewInMemoryFiles(fsOpts)
+	if err != nil {
+		t.Fatalf("Failed to create in-memory files from workspace: %v", err)
+	}
+	defer inMemFS.Close()
+
+	entryInfo, err := inMemFS.Lookup(ctx, 1, "README.md")
+	if err != nil {
+		t.Fatalf("Virtual README.md lookup failed: %v", err)
+	}
+	r, err := inMemFS.ReadFile(ctx, entryInfo.Node, 0, 0)
+	if err != nil {
+		t.Fatalf("Failed to read virtual README.md: %v", err)
+	}
+	defer r.Close()
+	data, _ := io.ReadAll(r)
+	if !strings.Contains(string(data), "Updated documentation") {
+		t.Errorf("Virtual README.md content mismatch: %s", string(data))
 	}
 }

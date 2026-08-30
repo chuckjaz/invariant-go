@@ -457,7 +457,7 @@ The directory to mount. This must be a directory created by `create` or `clone`.
 ### `ir open <name> [<directory>]`
 **Status:** Implemented
 
-Open an existing repository by name from the Names Service, creating the target repository workspace directory on disk (defaulting to `./<name>/main` or `./<name>/<branch>`), materializing the file tree, and switching the current working directory to the branch workspace.
+Open an existing repository by name from the Names Service, creating a layered FUSE workspace directory on disk (defaulting to `./<name>/main` or `./<name>/<branch>`) with `.invariant-workspace` pointing to the commit's file tree layers without physical file materialization, and mounting the workspace.
 
 #### Arguments
 
@@ -471,6 +471,15 @@ The target root directory on disk for the repository workspace (defaults to `./<
 
 ##### `-b=<branch>`, `-branch=<branch>`
 Target branch to open (default: `main`).
+
+##### `-layers=<layer1,layer2>`
+Comma-separated list of additional layers for the FUSE workspace.
+
+##### `-create-only`
+Create the FUSE workspace directory and `.invariant-workspace` configuration without mounting it.
+
+##### `-foreground`
+Mount directly in foreground instead of spawning background task.
 
 ##### `-writable`
 Open the workspace as writable.

@@ -284,12 +284,15 @@ func runRepoOpen(globalCfg *config.InvariantConfig, args []string) {
 	branchLongFlag := fs.String("branch", "", "Branch to open (default: main)")
 	dirFlag := fs.String("d", "", "Target root directory for the repository workspace")
 	dirLongFlag := fs.String("directory", "", "Target root directory for the repository workspace")
+	layersFlag := fs.String("layers", "", "Comma-separated list of additional layers for the FUSE workspace")
+	createOnly := fs.Bool("create-only", false, "Create the FUSE workspace configuration without mounting it")
+	foreground := fs.Bool("foreground", false, "Mount directly in foreground instead of spawning background task")
 	writable := fs.Bool("writable", false, "Make workspace writable")
 	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository open <name> [<directory>] [-b=<branch>] [-d=<dir>] [-writable]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository open <name> [<directory>] [-b=<branch>] [-d=<dir>] [-layers=...] [-create-only] [-foreground] [-writable]\n")
 		os.Exit(1)
 	}
 
@@ -307,22 +310,37 @@ func runRepoOpen(globalCfg *config.InvariantConfig, args []string) {
 		branch = *branchFlag
 	}
 
+	var layersList []string
+	if *layersFlag != "" {
+		layersList = strings.Split(*layersFlag, ",")
+	}
+
 	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
 	wsDir, err := repository.OpenRepository(ctx, store, slotsClient, namesClient, commitSvc, repository.OpenOptions{
-		RepoName:  name,
-		Branch:    branch,
-		TargetDir: targetDir,
-		Writable:  *writable,
+		RepoName:   name,
+		Branch:     branch,
+		TargetDir:  targetDir,
+		Layers:     layersList,
+		Writable:   *writable,
+		CreateOnly: *createOnly,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening repository: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Opened repository %q (branch %q) in %s\n", name, branch, wsDir)
-	fmt.Printf("Switched to workspace at %s\n", wsDir)
+	fmt.Printf("Created FUSE workspace for repository %q (branch %q) at %s\n", name, branch, wsDir)
+	if !*createOnly {
+		mountArgs := []string{wsDir}
+		if *foreground {
+			mountArgs = append([]string{"-foreground"}, mountArgs...)
+		}
+		runWorkspaceMount(globalCfg, mountArgs)
+	} else {
+		fmt.Printf("FUSE workspace configuration saved in %s (mount with 'invariant workspace mount %s')\n", wsDir, wsDir)
+	}
 }
 
 func runRepoChange(globalCfg *config.InvariantConfig, args []string) {

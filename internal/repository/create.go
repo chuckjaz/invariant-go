@@ -31,15 +31,16 @@ type CreateOptions struct {
 
 // WorkspaceMetadata represents the persistent metadata stored in a repository workspace directory.
 type WorkspaceMetadata struct {
-	RepoName       string `json:"repoName"`
-	BranchName     string `json:"branchName"`
-	Upstream       string `json:"upstream"`
-	SlotID         string `json:"slotId"`
-	CommitHash     string `json:"commitHash"`
-	ParentSnapshot string `json:"parentSnapshot,omitempty"`
-	Writable       bool   `json:"writable"`
-	CreatedAt      int64  `json:"createdAt"`
-	WorkspaceDir   string `json:"workspaceDir,omitempty"`
+	Content        *content.ContentLink `json:"content,omitempty"`
+	RepoName       string               `json:"repoName"`
+	BranchName     string               `json:"branchName"`
+	Upstream       string               `json:"upstream"`
+	SlotID         string               `json:"slotId"`
+	CommitHash     string               `json:"commitHash"`
+	ParentSnapshot string               `json:"parentSnapshot,omitempty"`
+	Writable       bool                 `json:"writable"`
+	CreatedAt      int64                `json:"createdAt"`
+	WorkspaceDir   string               `json:"workspaceDir,omitempty"`
 }
 
 // CreateRepository creates a new repository, initializes root commit and main branch,
