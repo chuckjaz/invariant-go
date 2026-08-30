@@ -97,6 +97,37 @@ func TestLogAndShow(t *testing.T) {
 		t.Fatalf("expected 3 log entries, got %d", len(entries))
 	}
 
+	// Test StreamLog
+	var streamed []string
+	err = StreamLog(ctx, store, slotsClient, commitSvc, LogOptions{
+		WorkspaceDir: mainDir,
+	}, func(entry LogEntry) error {
+		streamed = append(streamed, entry.Commit.Message)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamLog failed: %v", err)
+	}
+	if len(streamed) != 3 {
+		t.Fatalf("expected 3 streamed log entries, got %d", len(streamed))
+	}
+
+	// Test StreamLog with MaxCount
+	var streamedLimited []string
+	err = StreamLog(ctx, store, slotsClient, commitSvc, LogOptions{
+		WorkspaceDir: mainDir,
+		MaxCount:     2,
+	}, func(entry LogEntry) error {
+		streamedLimited = append(streamedLimited, entry.Commit.Message)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamLog with MaxCount failed: %v", err)
+	}
+	if len(streamedLimited) != 2 {
+		t.Fatalf("expected 2 streamed entries with MaxCount=2, got %d", len(streamedLimited))
+	}
+
 	logText := FormatLog(entries, true)
 	if !strings.Contains(logText, "Update file2") || !strings.Contains(logText, "Update file1") {
 		t.Errorf("expected formatted log to contain commit messages, got:\n%s", logText)

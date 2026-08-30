@@ -599,18 +599,26 @@ func runRepoLog(globalCfg *config.InvariantConfig, args []string) {
 	store, slotsClient, _, commitSvc := initRepoClients(globalCfg, "")
 	ctx := context.Background()
 
-	entries, err := repository.GetLog(ctx, store, slotsClient, commitSvc, repository.LogOptions{
+	showTree := *tree || *graph
+	first := true
+	err := repository.StreamLog(ctx, store, slotsClient, commitSvc, repository.LogOptions{
 		WorkspaceDir: cwd,
 		PathFilter:   pathFilter,
-		Tree:         *tree || *graph,
+		Tree:         showTree,
 		MaxCount:     *maxCount,
+	}, func(entry repository.LogEntry) error {
+		first = false
+		fmt.Print(repository.FormatLogEntry(entry, showTree))
+		return nil
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting log: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Print(repository.FormatLog(entries, *tree || *graph))
+	if first {
+		fmt.Print("No commit history found.\n")
+	}
 }
 
 func runRepoShow(globalCfg *config.InvariantConfig, args []string) {
