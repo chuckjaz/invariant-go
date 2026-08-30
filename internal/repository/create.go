@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"invariant/internal/content"
@@ -54,8 +55,10 @@ func CreateRepository(
 		return nil, "", fmt.Errorf("repository name cannot be empty")
 	}
 
-	// 1. Determine initial tree content
+	// 1. Determine initial content
 	var initialTree content.ContentLink
+	var rootCommitHash string
+
 	if opts.Directory != "" {
 		treeLink, err := SnapshotDirectory(ctx, opts.Directory, store)
 		if err != nil {
@@ -63,7 +66,23 @@ func CreateRepository(
 		}
 		initialTree = treeLink
 	} else if opts.Content != "" {
-		initialTree = content.ContentLink{Address: opts.Content}
+		var link content.ContentLink
+		trimmedContent := strings.TrimSpace(opts.Content)
+		if strings.HasPrefix(trimmedContent, "{") {
+			if err := json.Unmarshal([]byte(trimmedContent), &link); err != nil {
+				return nil, "", fmt.Errorf("failed to parse content link JSON: %w", err)
+			}
+		} else {
+			link = content.ContentLink{Address: trimmedContent}
+		}
+
+		// Check if the provided link points directly to an existing Commit object in CAS
+		if c, err := commitSvc.GetCommit(ctx, link.Address); err == nil && c != nil && c.Tree.Address != "" {
+			rootCommitHash = link.Address
+			initialTree = c.Tree
+		} else {
+			initialTree = link
+		}
 	} else {
 		treeLink, err := CreateEmptyTree(ctx, store)
 		if err != nil {
@@ -72,15 +91,18 @@ func CreateRepository(
 		initialTree = treeLink
 	}
 
-	// 2. Create root initial commit
-	_, rootCommitHash, err := commitSvc.CreateCommit(ctx, commit.CreateRequest{
-		RepoName:   opts.Name,
-		BranchName: "main",
-		TreeLink:   initialTree,
-		Message:    "Initial commit",
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create root commit: %w", err)
+	// 2. Create root initial commit if not already using an existing commit
+	if rootCommitHash == "" {
+		_, newHash, err := commitSvc.CreateCommit(ctx, commit.CreateRequest{
+			RepoName:   opts.Name,
+			BranchName: "main",
+			TreeLink:   initialTree,
+			Message:    "Initial commit",
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create root commit: %w", err)
+		}
+		rootCommitHash = newHash
 	}
 
 	// 3. Allocate main branch slot

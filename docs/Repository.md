@@ -114,9 +114,12 @@ Create a new repository by the given name. The repository is opened in a subdire
 The name of the repository to create. This name is used to create a subdirectory in the current directory and is registered with the Names Service.
 
 ##### `<content>`
-The name, address, or content link for the initial content. A directory can be imported by using the `-d` option, which will upload the contents of the directory and create the repository with the uploaded content.
+The name, address, or content link (address hex string or JSON `{"address":"..."}`) for the initial content. If `<content>` points to an existing commit (such as from `ir git import`), the repository is initialized directly at that commit with its full ancestor history intact. If `<content>` points to a directory tree (such as from `invariant upload`), an initial root commit is created pointing to that tree. A directory can also be imported using the `-d` option.
 
 #### Options
+
+##### `-content=<link>`
+Specifies the initial CAS content link / address or commit link explicitly.
 
 ##### `-create-only`
 Creates the repository without opening, mounting it, or changing directory.
@@ -685,3 +688,52 @@ Unmount the repository and all nested workspaces, switching the working director
 
 ##### `<directory>`
 The directory of the repository being unmounted. This must be the root directory of the repository.
+
+---
+
+### `ir git import [<git-dir>]`
+**Status:** Implemented
+
+Import commit history and file trees from a local Git repository into Invariant CAS. Displays real-time upload progress matching `invariant upload` and outputs the content link for the imported tip commit. When `-create` is supplied, an Invariant repository is automatically initialized pointing to the imported tip commit.
+
+#### Arguments
+
+##### `[<git-dir>]`
+The path to the source Git repository (defaults to `.`).
+
+#### Options
+
+##### `-branch=<branch>`
+Git branch or revision to import (defaults to HEAD).
+
+##### `-depth=<depth>`
+Depth of commit history to import (`0` = full history).
+
+##### `-create[=<name>]`, `-name=<name>`
+Create a new Invariant repository rooted at the imported tip commit. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
+
+##### `-writable`
+Make the created repository workspace writable.
+
+##### `-tag=<tag>`
+Storage service write tag (defaults to `originals`).
+
+---
+
+### `ir git export <target-git-dir>`
+**Status:** Implemented
+
+Export Invariant commits and file trees from the current workspace or commit into a standard Git repository.
+
+#### Arguments
+
+##### `<target-git-dir>`
+Target directory for the exported Git repository.
+
+#### Options
+
+##### `-branch=<branch>`
+Target Git branch name (defaults to `main`).
+
+##### `-from=<commit-hash>`
+Specific Invariant commit hash to export (defaults to current workspace HEAD).

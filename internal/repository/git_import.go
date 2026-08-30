@@ -35,14 +35,18 @@ type GitImportOptions struct {
 	Depth              int
 	ShowProgress       bool
 	ProgressWriter     io.Writer
+	CreateRepoName     string
+	Writable           bool
 }
 
 // GitImportResult contains summary information about an imported Git repository.
 type GitImportResult struct {
-	ImportedCommits int    `json:"importedCommits"`
-	RootCommit      string `json:"rootCommit"`
-	HeadCommit      string `json:"headCommit"`
-	BranchName      string `json:"branchName"`
+	ImportedCommits int                 `json:"importedCommits"`
+	RootCommit      string              `json:"rootCommit"`
+	HeadCommit      string              `json:"headCommit"`
+	HeadCommitLink  content.ContentLink `json:"headCommitLink"`
+	BranchName      string              `json:"branchName"`
+	CreatedRepoName string              `json:"createdRepoName,omitempty"`
 }
 
 // GitImportProgressTracker tracks real-time progress of a Git import operation.
@@ -367,8 +371,31 @@ func ImportGitRepository(
 		headCommit = invHash
 	}
 
-	// 5. Update workspace if target workspace directory is specified
-	if opts.TargetWorkspaceDir != "" && headCommit != "" {
+	res := &GitImportResult{
+		ImportedCommits: len(gitCommits),
+		RootCommit:      rootCommit,
+		HeadCommit:      headCommit,
+		HeadCommitLink:  content.ContentLink{Address: headCommit},
+		BranchName:      branchName,
+	}
+
+	// 5. Create repository or update workspace
+	if opts.CreateRepoName != "" && headCommit != "" {
+		targetDir := opts.TargetWorkspaceDir
+		if targetDir == "" {
+			targetDir = opts.CreateRepoName
+		}
+		_, _, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
+			Name:      opts.CreateRepoName,
+			Content:   headCommit,
+			Writable:  opts.Writable,
+			TargetDir: targetDir,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create repository %q on import: %w", opts.CreateRepoName, err)
+		}
+		res.CreatedRepoName = opts.CreateRepoName
+	} else if opts.TargetWorkspaceDir != "" && headCommit != "" {
 		wsRoot, meta, err := FindWorkspaceRoot(opts.TargetWorkspaceDir)
 		if err == nil && meta != nil {
 			needMaterialize := meta.CommitHash != headCommit
@@ -393,12 +420,7 @@ func ImportGitRepository(
 		}
 	}
 
-	return &GitImportResult{
-		ImportedCommits: len(gitCommits),
-		RootCommit:      rootCommit,
-		HeadCommit:      headCommit,
-		BranchName:      branchName,
-	}, nil
+	return res, nil
 }
 
 func importGitTree(

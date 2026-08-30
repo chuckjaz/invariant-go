@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -214,6 +215,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository create", flag.ExitOnError)
 	dirFlag := fs.String("d", "", "Initial content directory path")
+	contentFlag := fs.String("content", "", "Initial CAS content link / address or commit link")
 	createOnly := fs.Bool("create-only", false, "Create repository in CAS without mounting local workspace")
 	encrypted := fs.Bool("encrypt", false, "Enable encryption for repository objects")
 	compressed := fs.Bool("compress", false, "Enable compression for repository objects")
@@ -222,13 +224,13 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-d=<dir>] [-tag=<tag>] [-create-only] [-encrypt] [-compress] [-writable]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-content=<link>] [-d=<dir>] [-tag=<tag>] [-create-only] [-encrypt] [-compress] [-writable]\n")
 		os.Exit(1)
 	}
 
 	name := fs.Arg(0)
-	contentArg := ""
-	if fs.NArg() > 1 {
+	contentArg := *contentFlag
+	if fs.NArg() > 1 && contentArg == "" {
 		contentArg = fs.Arg(1)
 	}
 
@@ -1215,6 +1217,9 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	branchFlag := fs.String("branch", "", "Git branch to import (default: HEAD)")
 	depthFlag := fs.Int("depth", 0, "Depth of commit history to import (default: 0 = full history)")
 	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
+	createFlag := fs.String("create", "", "Create an Invariant repository from imported Git branch (e.g. -create=my-repo)")
+	nameFlag := fs.String("name", "", "Repository name when using -create")
+	writableFlag := fs.Bool("writable", false, "Make created repository workspace writable")
 	fs.Parse(args)
 
 	gitDir := "."
@@ -1222,18 +1227,45 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 		gitDir = fs.Arg(0)
 	}
 
+	createRepoName := ""
+	if *createFlag != "" {
+		if *createFlag == "true" {
+			if *nameFlag != "" {
+				createRepoName = *nameFlag
+			} else {
+				base := filepath.Base(gitDir)
+				if base == "." || base == "/" {
+					cwd, _ := os.Getwd()
+					base = filepath.Base(cwd)
+				}
+				createRepoName = base
+			}
+		} else {
+			createRepoName = *createFlag
+		}
+	} else if *nameFlag != "" {
+		createRepoName = *nameFlag
+	}
+
 	cwd, _ := os.Getwd()
 	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	kvClient := initKVClient(globalCfg)
 	ctx := context.Background()
 
+	targetWorkspaceDir := ""
+	if createRepoName == "" {
+		targetWorkspaceDir = cwd
+	}
+
 	res, err := repository.ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, repository.GitImportOptions{
 		GitDir:             gitDir,
 		Branch:             *branchFlag,
-		TargetWorkspaceDir: cwd,
+		TargetWorkspaceDir: targetWorkspaceDir,
 		Depth:              *depthFlag,
 		ShowProgress:       true,
 		ProgressWriter:     os.Stdout,
+		CreateRepoName:     createRepoName,
+		Writable:           *writableFlag,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error importing git repository: %v\n", err)
@@ -1244,7 +1276,12 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	if len(shortHead) > 8 {
 		shortHead = shortHead[:8]
 	}
+	linkJSON, _ := json.Marshal(res.HeadCommitLink)
 	fmt.Printf("Successfully imported %d commit(s) from Git branch %q (HEAD: %s)\n", res.ImportedCommits, res.BranchName, shortHead)
+	fmt.Printf("Tip commit content link: %s\n", string(linkJSON))
+	if res.CreatedRepoName != "" {
+		fmt.Printf("Created repository %q from tip commit\n", res.CreatedRepoName)
+	}
 }
 
 func runRepoGitExport(globalCfg *config.InvariantConfig, args []string) {

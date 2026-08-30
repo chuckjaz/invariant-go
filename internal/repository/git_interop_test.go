@@ -3,6 +3,7 @@ package repository
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -481,5 +482,128 @@ func TestGitImportProgressTracker(t *testing.T) {
 	formatted := tracker.formatBytes(1024 * 1024 * 5)
 	if !strings.Contains(formatted, "5.0 MB") {
 		t.Errorf("formatBytes unexpected output: %s", formatted)
+	}
+}
+
+func TestGitImport_CreateRepositoryOption(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotsClient := slots.NewMemorySlots("test-slots")
+	namesClient := names.NewInMemoryNames()
+	kvClient := kv.NewMemoryKeyValueStore()
+
+	idProvider := &workflowMockIDProvider{name: "Alice"}
+	SetDefaultIdentityProvider(idProvider)
+	commitSvc := commit.NewLocalService(store, slotsClient, namesClient, idProvider)
+
+	tempBase := t.TempDir()
+	gitDir := filepath.Join(tempBase, "source-git")
+	_, _ = createTestGitRepo(t, gitDir)
+
+	repoName := "auto-created-from-git"
+	targetRepoDir := filepath.Join(tempBase, repoName)
+
+	// Import and automatically create repository
+	res, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "master",
+		CreateRepoName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	if err != nil {
+		t.Fatalf("ImportGitRepository with CreateRepoName failed: %v", err)
+	}
+
+	if res.CreatedRepoName != repoName {
+		t.Errorf("Expected CreatedRepoName %q, got %q", repoName, res.CreatedRepoName)
+	}
+	if res.HeadCommitLink.Address != res.HeadCommit {
+		t.Errorf("Expected HeadCommitLink address %q, got %q", res.HeadCommit, res.HeadCommitLink.Address)
+	}
+
+	// Verify workspace exists at targetRepoDir/main
+	wsDir := filepath.Join(targetRepoDir, "main")
+	meta, err := ReadWorkspaceMetadata(wsDir)
+	if err != nil {
+		t.Fatalf("Failed to read workspace metadata: %v", err)
+	}
+	if meta.CommitHash != res.HeadCommit {
+		t.Errorf("Expected workspace commit hash %s, got %s", res.HeadCommit, meta.CommitHash)
+	}
+	if meta.RepoName != repoName {
+		t.Errorf("Expected workspace repo name %s, got %s", repoName, meta.RepoName)
+	}
+
+	// Verify files are materialized in workspace
+	readmeData, err := os.ReadFile(filepath.Join(wsDir, "README.md"))
+	if err != nil || !strings.Contains(string(readmeData), "Updated documentation") {
+		t.Errorf("README.md not properly materialized: %v", err)
+	}
+}
+
+func TestCreateRepositoryFromCommitLink(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotsClient := slots.NewMemorySlots("test-slots")
+	namesClient := names.NewInMemoryNames()
+	kvClient := kv.NewMemoryKeyValueStore()
+
+	idProvider := &workflowMockIDProvider{name: "Alice"}
+	SetDefaultIdentityProvider(idProvider)
+	commitSvc := commit.NewLocalService(store, slotsClient, namesClient, idProvider)
+
+	tempBase := t.TempDir()
+	gitDir := filepath.Join(tempBase, "source-git")
+	_, _ = createTestGitRepo(t, gitDir)
+
+	// 1. Import Git repo to CAS
+	importRes, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir: gitDir,
+		Branch: "master",
+	})
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	// 2. Create new repository directly from content link JSON
+	linkJSON, _ := json.Marshal(importRes.HeadCommitLink)
+	repoName := "repo-from-link"
+	targetRepoDir := filepath.Join(tempBase, repoName)
+
+	cfg, rootCommit, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
+		Name:      repoName,
+		Content:   string(linkJSON),
+		TargetDir: targetRepoDir,
+		Writable:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository from commit content link JSON failed: %v", err)
+	}
+
+	if rootCommit != importRes.HeadCommit {
+		t.Errorf("Expected root commit %s to match imported HEAD %s", rootCommit, importRes.HeadCommit)
+	}
+	if cfg.MainSlotID == "" {
+		t.Fatalf("Expected non-empty MainSlotID")
+	}
+
+	// Verify slot address matches tip commit
+	slotAddr, err := slotsClient.Get(ctx, cfg.MainSlotID)
+	if err != nil || slotAddr != importRes.HeadCommit {
+		t.Errorf("Slot address mismatch: got %s, expected %s", slotAddr, importRes.HeadCommit)
+	}
+
+	// Verify workspace files materialized
+	wsDir := filepath.Join(targetRepoDir, "main")
+	readmeData, err := os.ReadFile(filepath.Join(wsDir, "README.md"))
+	if err != nil || !strings.Contains(string(readmeData), "Updated documentation") {
+		t.Errorf("README.md not properly materialized in workspace: %v", err)
 	}
 }
