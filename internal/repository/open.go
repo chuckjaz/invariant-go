@@ -79,8 +79,12 @@ func OpenRepository(
 		targetRoot = opts.RepoName
 	}
 	branchDir := filepath.Join(targetRoot, branchName)
-	if err := os.MkdirAll(branchDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create workspace directory %s: %w", branchDir, err)
+	absBranchDir, err := filepath.Abs(branchDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute path for %s: %w", branchDir, err)
+	}
+	if err := os.MkdirAll(absBranchDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create workspace directory %s: %w", absBranchDir, err)
 	}
 
 	// 4. Retrieve commit object to get base tree link
@@ -112,12 +116,12 @@ func OpenRepository(
 		CommitHash:   commitHash,
 		Writable:     opts.Writable,
 		CreatedAt:    time.Now().Unix(),
-		WorkspaceDir: branchDir,
+		WorkspaceDir: absBranchDir,
 	}
-	if err := WriteWorkspaceMetadata(branchDir, meta); err != nil {
+	if err := WriteWorkspaceMetadata(absBranchDir, meta); err != nil {
 		return "", err
 	}
 
-	_ = ChangeWorkingDirectory(branchDir)
-	return branchDir, nil
+	_ = ChangeWorkingDirectory(absBranchDir)
+	return absBranchDir, nil
 }

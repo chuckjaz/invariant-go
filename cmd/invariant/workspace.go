@@ -244,7 +244,13 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 		var newArgs []string
 		newArgs = append(newArgs, "workspace", "mount", "-foreground")
-		newArgs = append(newArgs, args...)
+		for _, arg := range args {
+			if arg == directory {
+				newArgs = append(newArgs, absDir)
+			} else {
+				newArgs = append(newArgs, arg)
+			}
+		}
 
 		logPath := "/tmp/invariant-debug.log"
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -252,6 +258,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 			log.Fatalf("Failed to open mount log buffer map natively for path %s: %v", logPath, err)
 		}
 		cmd := exec.Command(exe, newArgs...)
+		cmd.Dir = absDir
 		cmd.Stdin = nil
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
