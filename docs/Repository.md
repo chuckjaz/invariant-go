@@ -709,7 +709,7 @@ Git branch or revision to import (defaults to HEAD).
 ##### `-depth=<depth>`
 Depth of commit history to import (`0` = full history).
 
-##### `-create[=<name>]`, `-name=<name>`
+##### `-create[=<name>]`
 Create a new Invariant repository rooted at the imported tip commit. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
 
 ##### `-writable`

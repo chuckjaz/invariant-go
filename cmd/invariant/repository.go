@@ -33,6 +33,25 @@ func (s *stringListFlag) Set(val string) error {
 	return nil
 }
 
+type optionalStringFlag struct {
+	set   bool
+	value string
+}
+
+func (f *optionalStringFlag) String() string {
+	return f.value
+}
+
+func (f *optionalStringFlag) Set(s string) error {
+	f.set = true
+	f.value = s
+	return nil
+}
+
+func (f *optionalStringFlag) IsBoolFlag() bool {
+	return true
+}
+
 func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: invariant repository <command> [options]\n\n")
@@ -1217,8 +1236,8 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	branchFlag := fs.String("branch", "", "Git branch to import (default: HEAD)")
 	depthFlag := fs.Int("depth", 0, "Depth of commit history to import (default: 0 = full history)")
 	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
-	createFlag := fs.String("create", "", "Create an Invariant repository from imported Git branch (e.g. -create=my-repo)")
-	nameFlag := fs.String("name", "", "Repository name when using -create")
+	var createFlag optionalStringFlag
+	fs.Var(&createFlag, "create", "Create an Invariant repository from imported Git branch (e.g. -create or -create=my-repo)")
 	writableFlag := fs.Bool("writable", false, "Make created repository workspace writable")
 	fs.Parse(args)
 
@@ -1228,23 +1247,17 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	createRepoName := ""
-	if *createFlag != "" {
-		if *createFlag == "true" {
-			if *nameFlag != "" {
-				createRepoName = *nameFlag
-			} else {
-				base := filepath.Base(gitDir)
-				if base == "." || base == "/" {
-					cwd, _ := os.Getwd()
-					base = filepath.Base(cwd)
-				}
-				createRepoName = base
-			}
+	if createFlag.set {
+		if createFlag.value != "" && createFlag.value != "true" {
+			createRepoName = createFlag.value
 		} else {
-			createRepoName = *createFlag
+			base := filepath.Base(gitDir)
+			if base == "." || base == "/" {
+				cwd, _ := os.Getwd()
+				base = filepath.Base(cwd)
+			}
+			createRepoName = base
 		}
-	} else if *nameFlag != "" {
-		createRepoName = *nameFlag
 	}
 
 	cwd, _ := os.Getwd()
