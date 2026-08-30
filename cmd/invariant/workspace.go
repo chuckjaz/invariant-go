@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -287,26 +286,12 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 				success = true
 				break
 			}
-			fmt.Print(line)
 		}
 
 		if success {
-			// Poll briefly to ensure mount is visible in kernel VFS to external commands
-			for range 50 {
-				if _, err := os.Stat(filepath.Join(absDir, ".invariant-mount")); err == nil {
-					break
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
 			fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
 		} else {
-			debugData, _ := os.ReadFile(logPath)
-			if len(debugData) > 0 {
-				fmt.Fprintf(os.Stderr, "Background mount failed (PID: %d). Log details from %s:\n%s\n", cmd.Process.Pid, logPath, string(debugData))
-			} else {
-				fmt.Fprintf(os.Stderr, "Background mount failed or exited unexpectedly (PID: %d)\n", cmd.Process.Pid)
-			}
-			os.Exit(1)
+			log.Fatalf("Background mount failed or exited unexpectedly (see %s)", logPath)
 		}
 
 		r.Close()
@@ -321,10 +306,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	var readyPipe *os.File
 	if fdStr := os.Getenv("INVARIANT_READY_FD"); fdStr != "" {
 		if fd, err := strconv.Atoi(fdStr); err == nil {
-			if f := os.NewFile(uintptr(fd), "readyPipe"); f != nil {
-				readyPipe = f
-				log.SetOutput(io.MultiWriter(os.Stderr, readyPipe))
-			}
+			readyPipe = os.NewFile(uintptr(fd), "readyPipe")
 		}
 	}
 
@@ -419,10 +401,6 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("Mount fail: %v\n", err)
 	}
 
-	if err := server.WaitMount(); err != nil {
-		log.Fatalf("WaitMount fail: %v\n", err)
-	}
-
 	defer func() {
 		log.Println("Syncing workspace before shutdown...")
 		if err := filesrv.Sync(context.Background(), 1, true); err != nil {
@@ -435,7 +413,6 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	log.Printf("Unmount by calling 'invariant workspace unmount %s'", absDir)
 
 	if readyPipe != nil {
-		log.SetOutput(os.Stderr)
 		readyPipe.Write([]byte("INVARIANT_MOUNT_READY\n"))
 		readyPipe.Close()
 	}
