@@ -664,3 +664,79 @@ func TestCreateRepositoryFromCommitLink(t *testing.T) {
 		t.Errorf("README.md not properly materialized in workspace: %v", err)
 	}
 }
+
+func TestGitImport_NoDirectoryDoesNotCreateDir(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotsClient := slots.NewMemorySlots("test-slots")
+	namesClient := names.NewInMemoryNames()
+	kvClient := kv.NewMemoryKeyValueStore()
+
+	idProvider := &workflowMockIDProvider{name: "Alice"}
+	SetDefaultIdentityProvider(idProvider)
+	commitSvc := commit.NewLocalService(store, slotsClient, namesClient, idProvider)
+
+	tempBase := t.TempDir()
+	os.Chdir(tempBase)
+
+	gitDir := filepath.Join(tempBase, "source-git")
+	_, _ = createTestGitRepo(t, gitDir)
+
+	repoName := "cas-only-repo"
+
+	// 1. Import with RepositoryName but NO TargetWorkspaceDir (must NOT create directory on disk)
+	res, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:         gitDir,
+		Branch:         "main",
+		RepositoryName: repoName,
+	})
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	if !res.CreatedRepo {
+		t.Errorf("Expected CreatedRepo=true")
+	}
+
+	// Verify no directory was created on disk
+	if _, err := os.Stat(filepath.Join(tempBase, repoName)); !os.IsNotExist(err) {
+		t.Errorf("Expected repo directory %q to NOT exist on disk, but stat returned: %v", repoName, err)
+	}
+
+	// Verify repository exists in Names service
+	entry, err := namesClient.Get(ctx, repoName)
+	if err != nil || entry.Value == "" {
+		t.Fatalf("Repository %q not registered in Names service: %v", repoName, err)
+	}
+
+	// 2. Open repository using OpenRepository into a local workspace
+	openTargetDir := filepath.Join(tempBase, "opened-repo")
+	wsDir, err := OpenRepository(ctx, store, slotsClient, namesClient, commitSvc, OpenOptions{
+		RepoName:  repoName,
+		Branch:    "main",
+		TargetDir: openTargetDir,
+		Writable:  true,
+	})
+	if err != nil {
+		t.Fatalf("OpenRepository failed: %v", err)
+	}
+
+	expectedWsDir := filepath.Join(openTargetDir, "main")
+	if wsDir != expectedWsDir {
+		t.Errorf("Expected workspace dir %s, got %s", expectedWsDir, wsDir)
+	}
+
+	// Verify workspace files materialized
+	readmeData, err := os.ReadFile(filepath.Join(wsDir, "README.md"))
+	if err != nil || !strings.Contains(string(readmeData), "Updated documentation") {
+		t.Errorf("README.md not materialized in opened workspace: %v", err)
+	}
+
+	meta, err := ReadWorkspaceMetadata(wsDir)
+	if err != nil || meta.CommitHash != res.HeadCommit {
+		t.Errorf("Metadata mismatch: err=%v, commit=%v vs expected=%s", err, meta, res.HeadCommit)
+	}
+}

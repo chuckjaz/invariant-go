@@ -454,6 +454,29 @@ The directory to mount. This must be a directory created by `create` or `clone`.
 
 ---
 
+### `ir open <name> [<directory>]`
+**Status:** Implemented
+
+Open an existing repository by name from the Names Service, creating the target repository workspace directory on disk (defaulting to `./<name>/main` or `./<name>/<branch>`), materializing the file tree, and switching the current working directory to the branch workspace.
+
+#### Arguments
+
+##### `<name>`
+The name of the repository registered in the Names Service.
+
+##### `[<directory>]`
+The target root directory on disk for the repository workspace (defaults to `./<name>`).
+
+#### Options
+
+##### `-b=<branch>`, `-branch=<branch>`
+Target branch to open (default: `main`).
+
+##### `-writable`
+Open the workspace as writable.
+
+---
+
 ### `ir review abandon [<directory>]`
 **Status:** Unimplemented
 
@@ -694,7 +717,7 @@ The directory of the repository being unmounted. This must be the root directory
 ### `ir git import [<git-dir>]`
 **Status:** Implemented
 
-Import commit history and file trees from a local Git repository into Invariant CAS. Displays real-time upload progress matching `invariant upload` and outputs the content link for the imported tip commit. When `-create` is supplied, an Invariant repository is automatically initialized pointing to the imported tip commit.
+Import commit history and file trees from a local Git repository into Invariant CAS. Displays real-time upload progress matching `invariant upload` and outputs the content link for the imported tip commit. When `-repository` is supplied, registers the repository/branch in the Names Service without creating a directory on disk, unless `-directory` is explicitly provided.
 
 #### Arguments
 
@@ -708,6 +731,9 @@ Create the repository if it does not already exist with the target branch, or ad
 
 ##### `-branch=<branch>`
 Git branch to import and target Invariant branch name (defaults to HEAD / `main`).
+
+##### `-directory=<path>`, `-d=<path>`
+Target root directory to create the repository workspace on disk. If omitted, no local workspace directory is created (use `ir open <name>` to open the repository later).
 
 ##### `-depth=<depth>`
 Depth of commit history to import (`0` = full history).

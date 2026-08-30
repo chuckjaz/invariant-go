@@ -55,8 +55,8 @@ func (f *optionalStringFlag) IsBoolFlag() bool {
 func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: invariant repository <command> [options]\n\n")
-		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  create       Create a new repository and initialize main branch\n")
+		fmt.Fprintf(os.Stderr, "  open         Open an existing repository workspace on disk\n")
 		fmt.Fprintf(os.Stderr, "  change       Create a writable change branch workspace\n")
 		fmt.Fprintf(os.Stderr, "  status       Show workspace working tree changes against HEAD commit\n")
 		fmt.Fprintf(os.Stderr, "  diff         Show unified diffs and statistics\n")
@@ -88,6 +88,8 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	switch args[0] {
 	case "create":
 		runRepoCreate(globalCfg, args[1:])
+	case "open":
+		runRepoOpen(globalCfg, args[1:])
 	case "change":
 		runRepoChange(globalCfg, args[1:])
 	case "status":
@@ -274,6 +276,53 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 	if !*createOnly {
 		fmt.Printf("Switched to workspace at %s/main\n", name)
 	}
+}
+
+func runRepoOpen(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository open", flag.ExitOnError)
+	branchFlag := fs.String("b", "main", "Branch to open (default: main)")
+	branchLongFlag := fs.String("branch", "", "Branch to open (default: main)")
+	dirFlag := fs.String("d", "", "Target root directory for the repository workspace")
+	dirLongFlag := fs.String("directory", "", "Target root directory for the repository workspace")
+	writable := fs.Bool("writable", false, "Make workspace writable")
+	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
+
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository open <name> [<directory>] [-b=<branch>] [-d=<dir>] [-writable]\n")
+		os.Exit(1)
+	}
+
+	name := fs.Arg(0)
+	targetDir := *dirLongFlag
+	if targetDir == "" {
+		targetDir = *dirFlag
+	}
+	if fs.NArg() > 1 && targetDir == "" {
+		targetDir = fs.Arg(1)
+	}
+
+	branch := *branchLongFlag
+	if branch == "" {
+		branch = *branchFlag
+	}
+
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
+	ctx := context.Background()
+
+	wsDir, err := repository.OpenRepository(ctx, store, slotsClient, namesClient, commitSvc, repository.OpenOptions{
+		RepoName:  name,
+		Branch:    branch,
+		TargetDir: targetDir,
+		Writable:  *writable,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening repository: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Opened repository %q (branch %q) in %s\n", name, branch, wsDir)
+	fmt.Printf("Switched to workspace at %s\n", wsDir)
 }
 
 func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
@@ -1240,6 +1289,8 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	fs.Var(&repoFlag, "repository", "Repository name to import into or create (e.g. -repository or -repository=my-repo)")
 	fs.Var(&repoFlag, "repo", "Alias for -repository")
 	fs.Var(&repoFlag, "create", "Alias for -repository")
+	dirFlag := fs.String("directory", "", "Target directory to create workspace on disk (only created if supplied)")
+	dirShortFlag := fs.String("d", "", "Alias for -directory")
 	writableFlag := fs.Bool("writable", false, "Make created repository/branch workspace writable")
 	fs.Parse(args)
 
@@ -1262,13 +1313,18 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
+	targetWorkspaceDir := *dirFlag
+	if targetWorkspaceDir == "" {
+		targetWorkspaceDir = *dirShortFlag
+	}
+
 	cwd, _ := os.Getwd()
 	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	kvClient := initKVClient(globalCfg)
 	ctx := context.Background()
 
-	targetWorkspaceDir := ""
-	if repoName == "" {
+	// If no repository name is specified and no directory is specified, default targetWorkspaceDir to cwd if inside a workspace
+	if repoName == "" && targetWorkspaceDir == "" {
 		targetWorkspaceDir = cwd
 	}
 
@@ -1295,9 +1351,17 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	fmt.Printf("Successfully imported %d commit(s) from Git branch %q (HEAD: %s)\n", res.ImportedCommits, res.BranchName, shortHead)
 	fmt.Printf("Tip commit content link: %s\n", string(linkJSON))
 	if res.CreatedRepo {
-		fmt.Printf("Created repository %q with branch %q from tip commit\n", res.RepositoryName, res.CreatedBranch)
+		if targetWorkspaceDir != "" {
+			fmt.Printf("Created repository %q with branch %q from tip commit (workspace: %s/%s)\n", res.RepositoryName, res.CreatedBranch, targetWorkspaceDir, res.CreatedBranch)
+		} else {
+			fmt.Printf("Created repository %q with branch %q from tip commit (use 'invariant repository open %s' to open workspace)\n", res.RepositoryName, res.CreatedBranch, res.RepositoryName)
+		}
 	} else if res.CreatedBranch != "" {
-		fmt.Printf("Added branch %q to repository %q from tip commit\n", res.CreatedBranch, res.RepositoryName)
+		if targetWorkspaceDir != "" {
+			fmt.Printf("Added branch %q to repository %q from tip commit (workspace: %s/%s)\n", res.CreatedBranch, res.RepositoryName, targetWorkspaceDir, res.CreatedBranch)
+		} else {
+			fmt.Printf("Added branch %q to repository %q from tip commit (use 'invariant repository open %s -branch=%s' to open workspace)\n", res.CreatedBranch, res.RepositoryName, res.RepositoryName, res.CreatedBranch)
+		}
 	}
 }
 

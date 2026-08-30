@@ -400,9 +400,6 @@ func ImportGitRepository(
 
 	if repoName != "" && headCommit != "" {
 		targetDir := opts.TargetWorkspaceDir
-		if targetDir == "" {
-			targetDir = repoName
-		}
 
 		// Check if repository already exists in Names service
 		repoEntry, err := namesClient.Get(ctx, repoName)
@@ -418,8 +415,10 @@ func ImportGitRepository(
 				if err == nil && bEntry.Value != "" {
 					branchExists = true
 				}
-				if _, err := os.Stat(filepath.Join(targetDir, targetBranch, ".invariant-workspace")); err == nil {
-					branchExists = true
+				if targetDir != "" {
+					if _, err := os.Stat(filepath.Join(targetDir, targetBranch, ".invariant-workspace")); err == nil {
+						branchExists = true
+					}
 				}
 			}
 
@@ -434,34 +433,36 @@ func ImportGitRepository(
 			}
 			_ = namesClient.Put(ctx, repoName+":"+targetBranch, branchSlotID, nil)
 
-			// Set up workspace directory for the new branch
-			branchWsDir := filepath.Join(targetDir, targetBranch)
-			if err := os.MkdirAll(branchWsDir, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create branch workspace directory %s: %w", branchWsDir, err)
-			}
+			// Only set up workspace directory if TargetWorkspaceDir is supplied
+			if targetDir != "" {
+				branchWsDir := filepath.Join(targetDir, targetBranch)
+				if err := os.MkdirAll(branchWsDir, 0755); err != nil {
+					return nil, fmt.Errorf("failed to create branch workspace directory %s: %w", branchWsDir, err)
+				}
 
-			headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
-			if err != nil {
-				return nil, fmt.Errorf("failed to retrieve head commit %s: %w", headCommit, err)
-			}
-			if err := MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store); err != nil {
-				return nil, fmt.Errorf("failed to materialize branch tree in %s: %w", branchWsDir, err)
-			}
+				headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+				if err != nil {
+					return nil, fmt.Errorf("failed to retrieve head commit %s: %w", headCommit, err)
+				}
+				if err := MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store); err != nil {
+					return nil, fmt.Errorf("failed to materialize branch tree in %s: %w", branchWsDir, err)
+				}
 
-			meta := &WorkspaceMetadata{
-				RepoName:     repoName,
-				BranchName:   targetBranch,
-				Upstream:     targetBranch,
-				SlotID:       branchSlotID,
-				CommitHash:   headCommit,
-				Writable:     opts.Writable,
-				CreatedAt:    time.Now().Unix(),
-				WorkspaceDir: branchWsDir,
+				meta := &WorkspaceMetadata{
+					RepoName:     repoName,
+					BranchName:   targetBranch,
+					Upstream:     targetBranch,
+					SlotID:       branchSlotID,
+					CommitHash:   headCommit,
+					Writable:     opts.Writable,
+					CreatedAt:    time.Now().Unix(),
+					WorkspaceDir: branchWsDir,
+				}
+				if err := WriteWorkspaceMetadata(branchWsDir, meta); err != nil {
+					return nil, err
+				}
+				_ = ChangeWorkingDirectory(branchWsDir)
 			}
-			if err := WriteWorkspaceMetadata(branchWsDir, meta); err != nil {
-				return nil, err
-			}
-			_ = ChangeWorkingDirectory(branchWsDir)
 
 			res.RepositoryName = repoName
 			res.CreatedRepoName = repoName
@@ -469,12 +470,14 @@ func ImportGitRepository(
 			res.CreatedRepo = false
 		} else {
 			// Repository does not exist; create repository with targetBranch as initial branch
+			createOnly := (targetDir == "")
 			_, _, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
-				Name:      repoName,
-				Branch:    targetBranch,
-				Content:   headCommit,
-				Writable:  opts.Writable,
-				TargetDir: targetDir,
+				Name:       repoName,
+				Branch:     targetBranch,
+				Content:    headCommit,
+				Writable:   opts.Writable,
+				TargetDir:  targetDir,
+				CreateOnly: createOnly,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to create repository %q on import: %w", repoName, err)
