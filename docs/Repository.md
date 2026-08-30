@@ -727,7 +727,7 @@ The path to the source Git repository (defaults to `.`).
 #### Options
 
 ##### `-repository[=<name>]`, `-repo[=<name>]`
-Create the repository if it does not already exist with the target branch, or add the branch to the repository if the repository already exists. If the branch already exists in the repository, an error is reported. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
+Create the repository if it does not already exist with the target branch, or add/fast-forward the branch if the repository already exists. If the branch already exists, determines if the imported commit has the current branch commit as a predecessor (fast-forward); if histories have diverged, an error is reported. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
 
 ##### `-branch=<branch>`
 Git branch to import and target Invariant branch name (defaults to HEAD / `main`).

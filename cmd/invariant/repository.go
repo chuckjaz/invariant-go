@@ -1357,10 +1357,20 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 			fmt.Printf("Created repository %q with branch %q from tip commit (use 'invariant repository open %s' to open workspace)\n", res.RepositoryName, res.CreatedBranch, res.RepositoryName)
 		}
 	} else if res.CreatedBranch != "" {
-		if targetWorkspaceDir != "" {
-			fmt.Printf("Added branch %q to repository %q from tip commit (workspace: %s/%s)\n", res.CreatedBranch, res.RepositoryName, targetWorkspaceDir, res.CreatedBranch)
+		if res.UpdatedBranch {
+			if targetWorkspaceDir != "" {
+				fmt.Printf("Fast-forwarded branch %q in repository %q to tip commit (workspace: %s/%s)\n", res.CreatedBranch, res.RepositoryName, targetWorkspaceDir, res.CreatedBranch)
+			} else {
+				fmt.Printf("Fast-forwarded branch %q in repository %q to tip commit\n", res.CreatedBranch, res.RepositoryName)
+			}
+		} else if res.AlreadyUpToDate {
+			fmt.Printf("Branch %q in repository %q is already up to date with tip commit\n", res.CreatedBranch, res.RepositoryName)
 		} else {
-			fmt.Printf("Added branch %q to repository %q from tip commit (use 'invariant repository open %s -branch=%s' to open workspace)\n", res.CreatedBranch, res.RepositoryName, res.RepositoryName, res.CreatedBranch)
+			if targetWorkspaceDir != "" {
+				fmt.Printf("Added branch %q to repository %q from tip commit (workspace: %s/%s)\n", res.CreatedBranch, res.RepositoryName, targetWorkspaceDir, res.CreatedBranch)
+			} else {
+				fmt.Printf("Added branch %q to repository %q from tip commit (use 'invariant repository open %s -branch=%s' to open workspace)\n", res.CreatedBranch, res.RepositoryName, res.RepositoryName, res.CreatedBranch)
+			}
 		}
 	}
 }

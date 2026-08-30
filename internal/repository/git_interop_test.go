@@ -589,16 +589,93 @@ func TestGitImport_CreateRepositoryOption(t *testing.T) {
 		t.Errorf("Expected branch name 'feature', got %s", featureMeta.BranchName)
 	}
 
-	// 3. Attempt to re-import into the existing 'feature' branch (should error because branch already exists)
-	_, err = ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+	// 3. Re-import existing 'feature' branch without new commits (should be already up to date)
+	res3, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
 		GitDir:             gitDir,
 		Branch:             "feature",
 		RepositoryName:     repoName,
 		TargetWorkspaceDir: targetRepoDir,
 		Writable:           true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("Expected error for already existing branch, got: %v", err)
+	if err != nil {
+		t.Fatalf("ImportGitRepository re-import failed: %v", err)
+	}
+	if !res3.AlreadyUpToDate {
+		t.Errorf("Expected AlreadyUpToDate=true on identical commit import")
+	}
+
+	// 4. Add a new commit on top of 'feature' in Git and import again (Fast-Forward)
+	os.WriteFile(filepath.Join(gitDir, "feature2.txt"), []byte("feature 2 content"), 0644)
+	wt.Add("feature2.txt")
+	_, err = wt.Commit("Feature branch commit 2", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Git Author",
+			Email: "author@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to commit feature 2 in git: %v", err)
+	}
+
+	res4, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "feature",
+		RepositoryName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	if err != nil {
+		t.Fatalf("ImportGitRepository fast-forward failed: %v", err)
+	}
+	if !res4.UpdatedBranch {
+		t.Errorf("Expected UpdatedBranch=true on fast-forward import")
+	}
+
+	// Verify slot and workspace metadata updated to new commit
+	slotHash, _ := slotsClient.Get(ctx, featureMeta.SlotID)
+	if slotHash != res4.HeadCommit {
+		t.Errorf("Expected slot to be updated to %s, got %s", res4.HeadCommit, slotHash)
+	}
+	featureMetaUpdated, _ := ReadWorkspaceMetadata(featureWsDir)
+	if featureMetaUpdated.CommitHash != res4.HeadCommit {
+		t.Errorf("Expected workspace commit to be updated to %s, got %s", res4.HeadCommit, featureMetaUpdated.CommitHash)
+	}
+
+	// 5. Attempt to import an unrelated/diverged Git repo into 'feature' branch (should fail because current commit is not a predecessor)
+	divergedGitDir := filepath.Join(tempBase, "diverged-git")
+	divergedRepo, _ := createTestGitRepo(t, divergedGitDir)
+	wtDiv, _ := divergedRepo.Worktree()
+	os.WriteFile(filepath.Join(divergedGitDir, "diverged.txt"), []byte("diverged content"), 0644)
+	wtDiv.Add("diverged.txt")
+	_, err = wtDiv.Commit("Diverged independent commit", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Diverged Author",
+			Email: "diverged@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create diverged commit: %v", err)
+	}
+
+	_, err = ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             divergedGitDir,
+		Branch:             "master",
+		RepositoryName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	// Importing master into repository's main branch should fail if diverged, or into feature branch:
+	_, err = ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             divergedGitDir,
+		Branch:             "feature",
+		RepositoryName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a predecessor") {
+		t.Errorf("Expected error for non-predecessor diverged branch, got: %v", err)
 	}
 }
 

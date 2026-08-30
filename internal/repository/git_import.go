@@ -51,6 +51,8 @@ type GitImportResult struct {
 	RepositoryName  string              `json:"repositoryName,omitempty"`
 	CreatedBranch   string              `json:"createdBranch,omitempty"`
 	CreatedRepo     bool                `json:"createdRepo,omitempty"`
+	UpdatedBranch   bool                `json:"updatedBranch,omitempty"`
+	AlreadyUpToDate bool                `json:"alreadyUpToDate,omitempty"`
 	CreatedRepoName string              `json:"createdRepoName,omitempty"`
 }
 
@@ -407,67 +409,143 @@ func ImportGitRepository(
 
 		if repoExists {
 			// Check if target branch already exists in this repository
-			branchExists := false
+			var branchSlotID string
 			if targetBranch == "main" {
-				branchExists = true
+				branchSlotID = repoEntry.Value
+				if branchSlotID == "" {
+					if bMain, errM := namesClient.Get(ctx, repoName+":main"); errM == nil {
+						branchSlotID = bMain.Value
+					}
+				}
 			} else {
 				bEntry, err := namesClient.Get(ctx, repoName+":"+targetBranch)
 				if err == nil && bEntry.Value != "" {
-					branchExists = true
+					branchSlotID = bEntry.Value
 				}
+			}
+
+			if branchSlotID == "" {
+				// Branch does not exist; add the new branch to the existing repository
+				allocatedSlotID, err := AllocateSlot(ctx, slotsClient, headCommit, "")
+				if err != nil {
+					return nil, fmt.Errorf("failed to allocate slot for branch %q: %w", targetBranch, err)
+				}
+				_ = namesClient.Put(ctx, repoName+":"+targetBranch, allocatedSlotID, nil)
+
+				// Only set up workspace directory if TargetWorkspaceDir is supplied
 				if targetDir != "" {
-					if _, err := os.Stat(filepath.Join(targetDir, targetBranch, ".invariant-workspace")); err == nil {
-						branchExists = true
+					branchWsDir := filepath.Join(targetDir, targetBranch)
+					if err := os.MkdirAll(branchWsDir, 0755); err != nil {
+						return nil, fmt.Errorf("failed to create branch workspace directory %s: %w", branchWsDir, err)
+					}
+
+					headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+					if err != nil {
+						return nil, fmt.Errorf("failed to retrieve head commit %s: %w", headCommit, err)
+					}
+					if err := MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store); err != nil {
+						return nil, fmt.Errorf("failed to materialize branch tree in %s: %w", branchWsDir, err)
+					}
+
+					meta := &WorkspaceMetadata{
+						RepoName:     repoName,
+						BranchName:   targetBranch,
+						Upstream:     targetBranch,
+						SlotID:       allocatedSlotID,
+						CommitHash:   headCommit,
+						Writable:     opts.Writable,
+						CreatedAt:    time.Now().Unix(),
+						WorkspaceDir: branchWsDir,
+					}
+					if err := WriteWorkspaceMetadata(branchWsDir, meta); err != nil {
+						return nil, err
+					}
+					_ = ChangeWorkingDirectory(branchWsDir)
+				}
+
+				res.RepositoryName = repoName
+				res.CreatedRepoName = repoName
+				res.CreatedBranch = targetBranch
+				res.CreatedRepo = false
+			} else {
+				// Branch already exists! Check if the imported commit has the existing branch commit as a predecessor.
+				currentCommit, err := slotsClient.Get(ctx, branchSlotID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to retrieve commit from branch slot %s: %w", branchSlotID, err)
+				}
+
+				if currentCommit == "" || currentCommit == headCommit {
+					// Already at headCommit
+					if targetDir != "" {
+						branchWsDir := filepath.Join(targetDir, targetBranch)
+						_ = os.MkdirAll(branchWsDir, 0755)
+						headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+						if err == nil && headCommitObj != nil {
+							_ = MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store)
+						}
+					}
+					res.RepositoryName = repoName
+					res.CreatedRepoName = repoName
+					res.CreatedBranch = targetBranch
+					res.AlreadyUpToDate = true
+				} else {
+					isPredecessor, err := IsCommitAncestor(ctx, commitSvc, currentCommit, headCommit)
+					if err != nil {
+						return nil, fmt.Errorf("failed to check commit history for branch %q: %w", targetBranch, err)
+					}
+
+					if isPredecessor {
+						// Fast-forward: imported commit has the current branch commit as predecessor
+						if err := slotsClient.Update(ctx, branchSlotID, headCommit, currentCommit, nil); err != nil {
+							return nil, fmt.Errorf("failed to update branch slot %s: %w", branchSlotID, err)
+						}
+
+						if targetDir != "" {
+							branchWsDir := filepath.Join(targetDir, targetBranch)
+							_ = os.MkdirAll(branchWsDir, 0755)
+							headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+							if err == nil && headCommitObj != nil {
+								_ = MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store)
+							}
+							meta, err := ReadWorkspaceMetadata(branchWsDir)
+							if err == nil && meta != nil {
+								meta.CommitHash = headCommit
+								_ = WriteWorkspaceMetadata(branchWsDir, meta)
+							} else {
+								meta := &WorkspaceMetadata{
+									RepoName:     repoName,
+									BranchName:   targetBranch,
+									Upstream:     targetBranch,
+									SlotID:       branchSlotID,
+									CommitHash:   headCommit,
+									Writable:     opts.Writable,
+									CreatedAt:    time.Now().Unix(),
+									WorkspaceDir: branchWsDir,
+								}
+								_ = WriteWorkspaceMetadata(branchWsDir, meta)
+							}
+							_ = ChangeWorkingDirectory(branchWsDir)
+						}
+
+						res.RepositoryName = repoName
+						res.CreatedRepoName = repoName
+						res.CreatedBranch = targetBranch
+						res.UpdatedBranch = true
+					} else {
+						// Check if headCommit is an ancestor of currentCommit (branch is already ahead)
+						isDescendant, _ := IsCommitAncestor(ctx, commitSvc, headCommit, currentCommit)
+						if isDescendant {
+							res.RepositoryName = repoName
+							res.CreatedRepoName = repoName
+							res.CreatedBranch = targetBranch
+							res.AlreadyUpToDate = true
+						} else {
+							// Diverged history: current branch commit is not a predecessor of imported commit
+							return nil, fmt.Errorf("cannot fast-forward branch %q in repository %q: current branch commit %s is not a predecessor of imported commit %s", targetBranch, repoName, currentCommit, headCommit)
+						}
 					}
 				}
 			}
-
-			if branchExists {
-				return nil, fmt.Errorf("branch %q already exists in repository %q", targetBranch, repoName)
-			}
-
-			// Branch does not exist; add the new branch to the existing repository
-			branchSlotID, err := AllocateSlot(ctx, slotsClient, headCommit, "")
-			if err != nil {
-				return nil, fmt.Errorf("failed to allocate slot for branch %q: %w", targetBranch, err)
-			}
-			_ = namesClient.Put(ctx, repoName+":"+targetBranch, branchSlotID, nil)
-
-			// Only set up workspace directory if TargetWorkspaceDir is supplied
-			if targetDir != "" {
-				branchWsDir := filepath.Join(targetDir, targetBranch)
-				if err := os.MkdirAll(branchWsDir, 0755); err != nil {
-					return nil, fmt.Errorf("failed to create branch workspace directory %s: %w", branchWsDir, err)
-				}
-
-				headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
-				if err != nil {
-					return nil, fmt.Errorf("failed to retrieve head commit %s: %w", headCommit, err)
-				}
-				if err := MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store); err != nil {
-					return nil, fmt.Errorf("failed to materialize branch tree in %s: %w", branchWsDir, err)
-				}
-
-				meta := &WorkspaceMetadata{
-					RepoName:     repoName,
-					BranchName:   targetBranch,
-					Upstream:     targetBranch,
-					SlotID:       branchSlotID,
-					CommitHash:   headCommit,
-					Writable:     opts.Writable,
-					CreatedAt:    time.Now().Unix(),
-					WorkspaceDir: branchWsDir,
-				}
-				if err := WriteWorkspaceMetadata(branchWsDir, meta); err != nil {
-					return nil, err
-				}
-				_ = ChangeWorkingDirectory(branchWsDir)
-			}
-
-			res.RepositoryName = repoName
-			res.CreatedRepoName = repoName
-			res.CreatedBranch = targetBranch
-			res.CreatedRepo = false
 		} else {
 			// Repository does not exist; create repository with targetBranch as initial branch
 			createOnly := (targetDir == "")
@@ -649,4 +727,41 @@ func importGitTree(
 
 	_ = kvIdx.RecordTreeMapping(ctx, tHashStr, link.Address)
 	return link, nil
+}
+
+// IsCommitAncestor checks whether ancestorHash is reachable from descendantHash in the Invariant commit DAG.
+func IsCommitAncestor(ctx context.Context, commitSvc commit.Service, ancestorHash, descendantHash string) (bool, error) {
+	if ancestorHash == "" || descendantHash == "" {
+		return false, nil
+	}
+	if ancestorHash == descendantHash {
+		return true, nil
+	}
+
+	visited := make(map[string]bool)
+	queue := []string{descendantHash}
+	visited[descendantHash] = true
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if curr == ancestorHash {
+			return true, nil
+		}
+
+		c, err := commitSvc.GetCommit(ctx, curr)
+		if err != nil || c == nil {
+			continue
+		}
+
+		for _, p := range c.Parents {
+			if !visited[p] {
+				visited[p] = true
+				queue = append(queue, p)
+			}
+		}
+	}
+
+	return false, nil
 }
