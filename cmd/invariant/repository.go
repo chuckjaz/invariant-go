@@ -1233,12 +1233,14 @@ func runRepoGit(globalCfg *config.InvariantConfig, args []string) {
 
 func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("repository git import", flag.ExitOnError)
-	branchFlag := fs.String("branch", "", "Git branch to import (default: HEAD)")
+	branchFlag := fs.String("branch", "", "Git branch to import and target Invariant branch name (default: HEAD / 'main')")
 	depthFlag := fs.Int("depth", 0, "Depth of commit history to import (default: 0 = full history)")
 	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
-	var createFlag optionalStringFlag
-	fs.Var(&createFlag, "create", "Create an Invariant repository from imported Git branch (e.g. -create or -create=my-repo)")
-	writableFlag := fs.Bool("writable", false, "Make created repository workspace writable")
+	var repoFlag optionalStringFlag
+	fs.Var(&repoFlag, "repository", "Repository name to import into or create (e.g. -repository or -repository=my-repo)")
+	fs.Var(&repoFlag, "repo", "Alias for -repository")
+	fs.Var(&repoFlag, "create", "Alias for -repository")
+	writableFlag := fs.Bool("writable", false, "Make created repository/branch workspace writable")
 	fs.Parse(args)
 
 	gitDir := "."
@@ -1246,17 +1248,17 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 		gitDir = fs.Arg(0)
 	}
 
-	createRepoName := ""
-	if createFlag.set {
-		if createFlag.value != "" && createFlag.value != "true" {
-			createRepoName = createFlag.value
+	repoName := ""
+	if repoFlag.set {
+		if repoFlag.value != "" && repoFlag.value != "true" {
+			repoName = repoFlag.value
 		} else {
 			base := filepath.Base(gitDir)
 			if base == "." || base == "/" {
 				cwd, _ := os.Getwd()
 				base = filepath.Base(cwd)
 			}
-			createRepoName = base
+			repoName = base
 		}
 	}
 
@@ -1266,7 +1268,7 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	ctx := context.Background()
 
 	targetWorkspaceDir := ""
-	if createRepoName == "" {
+	if repoName == "" {
 		targetWorkspaceDir = cwd
 	}
 
@@ -1277,7 +1279,7 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 		Depth:              *depthFlag,
 		ShowProgress:       true,
 		ProgressWriter:     os.Stdout,
-		CreateRepoName:     createRepoName,
+		RepositoryName:     repoName,
 		Writable:           *writableFlag,
 	})
 	if err != nil {
@@ -1292,8 +1294,10 @@ func runRepoGitImport(globalCfg *config.InvariantConfig, args []string) {
 	linkJSON, _ := json.Marshal(res.HeadCommitLink)
 	fmt.Printf("Successfully imported %d commit(s) from Git branch %q (HEAD: %s)\n", res.ImportedCommits, res.BranchName, shortHead)
 	fmt.Printf("Tip commit content link: %s\n", string(linkJSON))
-	if res.CreatedRepoName != "" {
-		fmt.Printf("Created repository %q from tip commit\n", res.CreatedRepoName)
+	if res.CreatedRepo {
+		fmt.Printf("Created repository %q with branch %q from tip commit\n", res.RepositoryName, res.CreatedBranch)
+	} else if res.CreatedBranch != "" {
+		fmt.Printf("Added branch %q to repository %q from tip commit\n", res.CreatedBranch, res.RepositoryName)
 	}
 }
 

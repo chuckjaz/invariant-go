@@ -501,28 +501,31 @@ func TestGitImport_CreateRepositoryOption(t *testing.T) {
 
 	tempBase := t.TempDir()
 	gitDir := filepath.Join(tempBase, "source-git")
-	_, _ = createTestGitRepo(t, gitDir)
+	gitRepo, _ := createTestGitRepo(t, gitDir)
 
 	repoName := "auto-created-from-git"
 	targetRepoDir := filepath.Join(tempBase, repoName)
 
-	// Import and automatically create repository
-	res, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+	// 1. Import and automatically create repository with initial branch 'main'
+	res1, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
 		GitDir:             gitDir,
-		Branch:             "master",
-		CreateRepoName:     repoName,
+		Branch:             "main",
+		RepositoryName:     repoName,
 		TargetWorkspaceDir: targetRepoDir,
 		Writable:           true,
 	})
 	if err != nil {
-		t.Fatalf("ImportGitRepository with CreateRepoName failed: %v", err)
+		t.Fatalf("ImportGitRepository with RepositoryName failed: %v", err)
 	}
 
-	if res.CreatedRepoName != repoName {
-		t.Errorf("Expected CreatedRepoName %q, got %q", repoName, res.CreatedRepoName)
+	if !res1.CreatedRepo {
+		t.Errorf("Expected CreatedRepo=true for new repository")
 	}
-	if res.HeadCommitLink.Address != res.HeadCommit {
-		t.Errorf("Expected HeadCommitLink address %q, got %q", res.HeadCommit, res.HeadCommitLink.Address)
+	if res1.CreatedBranch != "main" {
+		t.Errorf("Expected CreatedBranch %q, got %q", "main", res1.CreatedBranch)
+	}
+	if res1.HeadCommitLink.Address != res1.HeadCommit {
+		t.Errorf("Expected HeadCommitLink address %q, got %q", res1.HeadCommit, res1.HeadCommitLink.Address)
 	}
 
 	// Verify workspace exists at targetRepoDir/main
@@ -531,8 +534,8 @@ func TestGitImport_CreateRepositoryOption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read workspace metadata: %v", err)
 	}
-	if meta.CommitHash != res.HeadCommit {
-		t.Errorf("Expected workspace commit hash %s, got %s", res.HeadCommit, meta.CommitHash)
+	if meta.CommitHash != res1.HeadCommit {
+		t.Errorf("Expected workspace commit hash %s, got %s", res1.HeadCommit, meta.CommitHash)
 	}
 	if meta.RepoName != repoName {
 		t.Errorf("Expected workspace repo name %s, got %s", repoName, meta.RepoName)
@@ -542,6 +545,60 @@ func TestGitImport_CreateRepositoryOption(t *testing.T) {
 	readmeData, err := os.ReadFile(filepath.Join(wsDir, "README.md"))
 	if err != nil || !strings.Contains(string(readmeData), "Updated documentation") {
 		t.Errorf("README.md not properly materialized: %v", err)
+	}
+
+	// 2. Add a new branch 'feature' to the existing repository
+	wt, _ := gitRepo.Worktree()
+	os.WriteFile(filepath.Join(gitDir, "feature.txt"), []byte("feature content"), 0644)
+	wt.Add("feature.txt")
+	_, err = wt.Commit("Feature branch commit", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Git Author",
+			Email: "author@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to commit feature in git: %v", err)
+	}
+
+	res2, err := ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "feature",
+		RepositoryName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	if err != nil {
+		t.Fatalf("ImportGitRepository adding branch to existing repo failed: %v", err)
+	}
+	if res2.CreatedRepo {
+		t.Errorf("Expected CreatedRepo=false when adding branch to existing repo")
+	}
+	if res2.CreatedBranch != "feature" {
+		t.Errorf("Expected CreatedBranch %q, got %q", "feature", res2.CreatedBranch)
+	}
+
+	// Verify workspace exists at targetRepoDir/feature
+	featureWsDir := filepath.Join(targetRepoDir, "feature")
+	featureMeta, err := ReadWorkspaceMetadata(featureWsDir)
+	if err != nil {
+		t.Fatalf("Failed to read feature workspace metadata: %v", err)
+	}
+	if featureMeta.BranchName != "feature" {
+		t.Errorf("Expected branch name 'feature', got %s", featureMeta.BranchName)
+	}
+
+	// 3. Attempt to re-import into the existing 'feature' branch (should error because branch already exists)
+	_, err = ImportGitRepository(ctx, store, slotsClient, namesClient, commitSvc, kvClient, GitImportOptions{
+		GitDir:             gitDir,
+		Branch:             "feature",
+		RepositoryName:     repoName,
+		TargetWorkspaceDir: targetRepoDir,
+		Writable:           true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("Expected error for already existing branch, got: %v", err)
 	}
 }
 

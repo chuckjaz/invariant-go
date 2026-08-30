@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,13 +30,14 @@ import (
 // GitImportOptions configures the import of a Git repository.
 type GitImportOptions struct {
 	GitDir             string
-	Branch             string
+	Branch             string // Git branch to import and target Invariant branch name
 	TargetWorkspaceDir string
 	RepoName           string
 	Depth              int
 	ShowProgress       bool
 	ProgressWriter     io.Writer
-	CreateRepoName     string
+	RepositoryName     string // If specified, creates repo if not existing, or adds branch if repo exists
+	CreateRepoName     string // Deprecated alias for RepositoryName
 	Writable           bool
 }
 
@@ -46,6 +48,9 @@ type GitImportResult struct {
 	HeadCommit      string              `json:"headCommit"`
 	HeadCommitLink  content.ContentLink `json:"headCommitLink"`
 	BranchName      string              `json:"branchName"`
+	RepositoryName  string              `json:"repositoryName,omitempty"`
+	CreatedBranch   string              `json:"createdBranch,omitempty"`
+	CreatedRepo     bool                `json:"createdRepo,omitempty"`
 	CreatedRepoName string              `json:"createdRepoName,omitempty"`
 }
 
@@ -379,22 +384,106 @@ func ImportGitRepository(
 		BranchName:      branchName,
 	}
 
-	// 5. Create repository or update workspace
-	if opts.CreateRepoName != "" && headCommit != "" {
+	// 5. Create repository or add branch or update workspace
+	repoName := opts.RepositoryName
+	if repoName == "" {
+		repoName = opts.CreateRepoName
+	}
+
+	targetBranch := opts.Branch
+	if targetBranch == "" {
+		targetBranch = branchName
+	}
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+
+	if repoName != "" && headCommit != "" {
 		targetDir := opts.TargetWorkspaceDir
 		if targetDir == "" {
-			targetDir = opts.CreateRepoName
+			targetDir = repoName
 		}
-		_, _, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
-			Name:      opts.CreateRepoName,
-			Content:   headCommit,
-			Writable:  opts.Writable,
-			TargetDir: targetDir,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create repository %q on import: %w", opts.CreateRepoName, err)
+
+		// Check if repository already exists in Names service
+		repoEntry, err := namesClient.Get(ctx, repoName)
+		repoExists := (err == nil && repoEntry.Value != "")
+
+		if repoExists {
+			// Check if target branch already exists in this repository
+			branchExists := false
+			if targetBranch == "main" {
+				branchExists = true
+			} else {
+				bEntry, err := namesClient.Get(ctx, repoName+":"+targetBranch)
+				if err == nil && bEntry.Value != "" {
+					branchExists = true
+				}
+				if _, err := os.Stat(filepath.Join(targetDir, targetBranch, ".invariant-workspace")); err == nil {
+					branchExists = true
+				}
+			}
+
+			if branchExists {
+				return nil, fmt.Errorf("branch %q already exists in repository %q", targetBranch, repoName)
+			}
+
+			// Branch does not exist; add the new branch to the existing repository
+			branchSlotID, err := AllocateSlot(ctx, slotsClient, headCommit, "")
+			if err != nil {
+				return nil, fmt.Errorf("failed to allocate slot for branch %q: %w", targetBranch, err)
+			}
+			_ = namesClient.Put(ctx, repoName+":"+targetBranch, branchSlotID, nil)
+
+			// Set up workspace directory for the new branch
+			branchWsDir := filepath.Join(targetDir, targetBranch)
+			if err := os.MkdirAll(branchWsDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create branch workspace directory %s: %w", branchWsDir, err)
+			}
+
+			headCommitObj, err := commitSvc.GetCommit(ctx, headCommit)
+			if err != nil {
+				return nil, fmt.Errorf("failed to retrieve head commit %s: %w", headCommit, err)
+			}
+			if err := MaterializeTree(ctx, headCommitObj.Tree, branchWsDir, store); err != nil {
+				return nil, fmt.Errorf("failed to materialize branch tree in %s: %w", branchWsDir, err)
+			}
+
+			meta := &WorkspaceMetadata{
+				RepoName:     repoName,
+				BranchName:   targetBranch,
+				Upstream:     targetBranch,
+				SlotID:       branchSlotID,
+				CommitHash:   headCommit,
+				Writable:     opts.Writable,
+				CreatedAt:    time.Now().Unix(),
+				WorkspaceDir: branchWsDir,
+			}
+			if err := WriteWorkspaceMetadata(branchWsDir, meta); err != nil {
+				return nil, err
+			}
+			_ = ChangeWorkingDirectory(branchWsDir)
+
+			res.RepositoryName = repoName
+			res.CreatedRepoName = repoName
+			res.CreatedBranch = targetBranch
+			res.CreatedRepo = false
+		} else {
+			// Repository does not exist; create repository with targetBranch as initial branch
+			_, _, err := CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, CreateOptions{
+				Name:      repoName,
+				Branch:    targetBranch,
+				Content:   headCommit,
+				Writable:  opts.Writable,
+				TargetDir: targetDir,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create repository %q on import: %w", repoName, err)
+			}
+			res.RepositoryName = repoName
+			res.CreatedRepoName = repoName
+			res.CreatedBranch = targetBranch
+			res.CreatedRepo = true
 		}
-		res.CreatedRepoName = opts.CreateRepoName
 	} else if opts.TargetWorkspaceDir != "" && headCommit != "" {
 		wsRoot, meta, err := FindWorkspaceRoot(opts.TargetWorkspaceDir)
 		if err == nil && meta != nil {

@@ -19,6 +19,7 @@ import (
 // CreateOptions specifies parameters for creating a new repository.
 type CreateOptions struct {
 	Name       string
+	Branch     string // Initial branch name (default: "main")
 	Directory  string // Initial content path on disk
 	Content    string // Initial CAS address / content link
 	CreateOnly bool
@@ -53,6 +54,11 @@ func CreateRepository(
 ) (*RepositoryConfig, string, error) {
 	if opts.Name == "" {
 		return nil, "", fmt.Errorf("repository name cannot be empty")
+	}
+
+	branchName := opts.Branch
+	if branchName == "" {
+		branchName = "main"
 	}
 
 	// 1. Determine initial content
@@ -95,7 +101,7 @@ func CreateRepository(
 	if rootCommitHash == "" {
 		_, newHash, err := commitSvc.CreateCommit(ctx, commit.CreateRequest{
 			RepoName:   opts.Name,
-			BranchName: "main",
+			BranchName: branchName,
 			TreeLink:   initialTree,
 			Message:    "Initial commit",
 		})
@@ -113,7 +119,7 @@ func CreateRepository(
 
 	// 4. Create and store RepositoryConfig
 	cfg := &RepositoryConfig{
-		DefaultBranch:  "main",
+		DefaultBranch:  branchName,
 		MainSlotID:     mainSlotID,
 		Encrypted:      opts.Encrypted,
 		Compressed:     opts.Compressed,
@@ -135,6 +141,9 @@ func CreateRepository(
 	if err := RegisterRepositoryName(ctx, namesClient, opts.Name, mainSlotID); err != nil {
 		return nil, "", fmt.Errorf("failed to register repository %s in names service: %w", opts.Name, err)
 	}
+	if branchName != "main" {
+		_ = namesClient.Put(ctx, opts.Name+":"+branchName, mainSlotID, nil)
+	}
 
 	// 6. Set up local workspace if not CreateOnly
 	if !opts.CreateOnly {
@@ -142,31 +151,31 @@ func CreateRepository(
 		if targetRoot == "" {
 			targetRoot = opts.Name
 		}
-		mainDir := filepath.Join(targetRoot, "main")
-		if err := os.MkdirAll(mainDir, 0755); err != nil {
-			return nil, "", fmt.Errorf("failed to create main workspace directory %s: %w", mainDir, err)
+		branchDir := filepath.Join(targetRoot, branchName)
+		if err := os.MkdirAll(branchDir, 0755); err != nil {
+			return nil, "", fmt.Errorf("failed to create main workspace directory %s: %w", branchDir, err)
 		}
 
 		// Materialize initial files
-		if err := MaterializeTree(ctx, initialTree, mainDir, store); err != nil {
-			return nil, "", fmt.Errorf("failed to materialize initial tree in %s: %w", mainDir, err)
+		if err := MaterializeTree(ctx, initialTree, branchDir, store); err != nil {
+			return nil, "", fmt.Errorf("failed to materialize initial tree in %s: %w", branchDir, err)
 		}
 
 		// Write workspace metadata
 		meta := &WorkspaceMetadata{
 			RepoName:     opts.Name,
-			BranchName:   "main",
-			Upstream:     "main",
+			BranchName:   branchName,
+			Upstream:     branchName,
 			SlotID:       mainSlotID,
 			CommitHash:   rootCommitHash,
 			Writable:     opts.Writable,
 			CreatedAt:    time.Now().Unix(),
-			WorkspaceDir: mainDir,
+			WorkspaceDir: branchDir,
 		}
-		if err := WriteWorkspaceMetadata(mainDir, meta); err != nil {
+		if err := WriteWorkspaceMetadata(branchDir, meta); err != nil {
 			return nil, "", err
 		}
-		_ = ChangeWorkingDirectory(mainDir)
+		_ = ChangeWorkingDirectory(branchDir)
 	}
 
 	return cfg, rootCommitHash, nil

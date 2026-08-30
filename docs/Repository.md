@@ -703,17 +703,17 @@ The path to the source Git repository (defaults to `.`).
 
 #### Options
 
+##### `-repository[=<name>]`, `-repo[=<name>]`
+Create the repository if it does not already exist with the target branch, or add the branch to the repository if the repository already exists. If the branch already exists in the repository, an error is reported. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
+
 ##### `-branch=<branch>`
-Git branch or revision to import (defaults to HEAD).
+Git branch to import and target Invariant branch name (defaults to HEAD / `main`).
 
 ##### `-depth=<depth>`
 Depth of commit history to import (`0` = full history).
 
-##### `-create[=<name>]`
-Create a new Invariant repository rooted at the imported tip commit. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
-
 ##### `-writable`
-Make the created repository workspace writable.
+Make the created repository or branch workspace writable.
 
 ##### `-tag=<tag>`
 Storage service write tag (defaults to `originals`).
