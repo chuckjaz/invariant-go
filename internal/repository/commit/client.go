@@ -5,12 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"invariant/internal/content"
+	"invariant/internal/httputil"
+	"invariant/internal/identity"
 )
+
+// Assert that Client implements identity.Identity and Service
+var _ identity.Identity = (*Client)(nil)
+var _ Service = (*Client)(nil)
 
 // Client implements Service over HTTP.
 type Client struct {
@@ -23,15 +30,37 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	httpClient = httputil.NewDiagnosticClient(httpClient)
 	return &Client{
 		baseURL:    strings.TrimSuffix(baseURL, "/"),
 		httpClient: httpClient,
 	}
 }
 
+// ID fetched from the remote commit service endpoint.
+func (c *Client) ID() string {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/id", c.baseURL), nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
+}
+
 // GetCommit retrieves a commit by hash over HTTP.
 func (c *Client) GetCommit(ctx context.Context, commitHash string) (*Commit, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/commit/%s", c.baseURL, commitHash)
+	reqURL := fmt.Sprintf("%s/commit/%s", c.baseURL, commitHash)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -59,7 +88,7 @@ func (c *Client) CreateCommit(ctx context.Context, req CreateRequest) (*Commit, 
 	if err != nil {
 		return nil, "", err
 	}
-	reqURL := fmt.Sprintf("%s/api/v1/commit", c.baseURL)
+	reqURL := fmt.Sprintf("%s/commit", c.baseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
 	if err != nil {
 		return nil, "", err
@@ -97,7 +126,7 @@ func (c *Client) GetHistory(ctx context.Context, headHash string, spineOnly bool
 		params.Set("path", pathFilter)
 	}
 
-	reqURL := fmt.Sprintf("%s/api/v1/history?%s", c.baseURL, params.Encode())
+	reqURL := fmt.Sprintf("%s/history?%s", c.baseURL, params.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, nil, err
@@ -122,24 +151,28 @@ func (c *Client) GetHistory(ctx context.Context, headHash string, spineOnly bool
 	return res.Commits, res.Hashes, nil
 }
 
-// ComputeDiff calculates unified diff and stats over HTTP.
+// ComputeDiff calculates unified diff over HTTP.
 func (c *Client) ComputeDiff(ctx context.Context, fromTree, toTree content.ContentLink) (string, DiffStat, error) {
-	payload := struct {
+	reqBody := struct {
 		FromTree content.ContentLink `json:"fromTree"`
 		ToTree   content.ContentLink `json:"toTree"`
 	}{
 		FromTree: fromTree,
 		ToTree:   toTree,
 	}
-	data, _ := json.Marshal(payload)
-	reqURL := fmt.Sprintf("%s/api/v1/diff", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", DiffStat{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	reqURL := fmt.Sprintf("%s/diff", c.baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	if err != nil {
+		return "", DiffStat{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", DiffStat{}, err
 	}
@@ -159,24 +192,28 @@ func (c *Client) ComputeDiff(ctx context.Context, fromTree, toTree content.Conte
 	return res.Diff, res.Stat, nil
 }
 
-// SyncBranch performs branch sync/rebase over HTTP.
+// SyncBranch rebases change branch over HTTP.
 func (c *Client) SyncBranch(ctx context.Context, repoName, changeBranch string) (string, []string, error) {
-	payload := struct {
+	reqBody := struct {
 		RepoName     string `json:"repoName"`
 		ChangeBranch string `json:"changeBranch"`
 	}{
 		RepoName:     repoName,
 		ChangeBranch: changeBranch,
 	}
-	data, _ := json.Marshal(payload)
-	reqURL := fmt.Sprintf("%s/api/v1/sync", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	reqURL := fmt.Sprintf("%s/sync", c.baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	if err != nil {
+		return "", nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", nil, err
 	}
@@ -196,15 +233,20 @@ func (c *Client) SyncBranch(ctx context.Context, repoName, changeBranch string) 
 	return res.NewHead, res.Conflicts, nil
 }
 
-// AbortSync aborts sync over HTTP.
+// AbortSync restores pre-sync state over HTTP.
 func (c *Client) AbortSync(ctx context.Context, repoName, changeBranch string) error {
+	// AbortSync is handled at the workspace level
 	return nil
 }
 
-// SubmitChange submits a change branch over HTTP.
+// SubmitChange submits a change over HTTP.
 func (c *Client) SubmitChange(ctx context.Context, req SubmitRequest) (*SubmitResponse, error) {
-	data, _ := json.Marshal(req)
-	reqURL := fmt.Sprintf("%s/api/v1/submit", c.baseURL)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	reqURL := fmt.Sprintf("%s/submit", c.baseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -228,13 +270,13 @@ func (c *Client) SubmitChange(ctx context.Context, req SubmitRequest) (*SubmitRe
 	return &res, nil
 }
 
-// Blame computes attribution over HTTP.
+// Blame calculates line attribution over HTTP.
 func (c *Client) Blame(ctx context.Context, commitHash, filePath string) ([]BlameLine, error) {
 	params := url.Values{}
 	params.Set("commit", commitHash)
 	params.Set("file", filePath)
 
-	reqURL := fmt.Sprintf("%s/api/v1/blame?%s", c.baseURL, params.Encode())
+	reqURL := fmt.Sprintf("%s/blame?%s", c.baseURL, params.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -256,24 +298,28 @@ func (c *Client) Blame(ctx context.Context, commitHash, filePath string) ([]Blam
 	return lines, nil
 }
 
-// Bisect computes candidate commit over HTTP.
+// Bisect calculates candidate midpoint commit over HTTP.
 func (c *Client) Bisect(ctx context.Context, goodCommits, badCommits []string) (string, int, error) {
-	payload := struct {
+	reqBody := struct {
 		Good []string `json:"good"`
 		Bad  []string `json:"bad"`
 	}{
 		Good: goodCommits,
 		Bad:  badCommits,
 	}
-	data, _ := json.Marshal(payload)
-	reqURL := fmt.Sprintf("%s/api/v1/bisect", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", 0, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	reqURL := fmt.Sprintf("%s/bisect", c.baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	if err != nil {
+		return "", 0, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", 0, err
 	}
@@ -293,9 +339,9 @@ func (c *Client) Bisect(ctx context.Context, goodCommits, badCommits []string) (
 	return res.Candidate, res.Remaining, nil
 }
 
-// InteractiveRebase applies a rebase plan over HTTP.
+// InteractiveRebase applies rebase plan over HTTP.
 func (c *Client) InteractiveRebase(ctx context.Context, repoName, changeBranch, baseCommit string, plan []RebaseAction) (string, error) {
-	payload := struct {
+	reqBody := struct {
 		RepoName     string         `json:"repoName"`
 		ChangeBranch string         `json:"changeBranch"`
 		BaseCommit   string         `json:"baseCommit"`
@@ -306,15 +352,19 @@ func (c *Client) InteractiveRebase(ctx context.Context, repoName, changeBranch, 
 		BaseCommit:   baseCommit,
 		Plan:         plan,
 	}
-	data, _ := json.Marshal(payload)
-	reqURL := fmt.Sprintf("%s/api/v1/rebase", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	reqURL := fmt.Sprintf("%s/rebase", c.baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", err
 	}

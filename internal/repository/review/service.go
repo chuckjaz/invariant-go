@@ -30,10 +30,11 @@ type ReviewComment struct {
 type Status string
 
 const (
-	StatusPending   Status = "pending"
-	StatusApproved  Status = "approved"
-	StatusRejected  Status = "rejected"
-	StatusAbandoned Status = "abandoned"
+	StatusPending    Status = "pending"
+	StatusInProgress Status = "in_progress"
+	StatusApproved   Status = "approved"
+	StatusRejected   Status = "rejected"
+	StatusAbandoned  Status = "abandoned"
 )
 
 // Record holds the complete metadata and comment threads for a code review.
@@ -53,11 +54,15 @@ type Record struct {
 
 // Service defines the interface for managing code reviews, tokens, and comment threads.
 type Service interface {
-	// RequestReview creates a review record for a change branch and emits a unique review token.
+	// RequestReview creates a review record for a change branch and emits a unique review token (StatusPending).
 	RequestReview(ctx context.Context, repoName, branchName string, author identity.Identity) (*Record, error)
 
-	// GetReview retrieves review metadata and comment threads by token, commit hash, or branch name.
+	// GetReview retrieves review metadata and comment threads by token, commit hash, or branch name without altering review state.
+	// Used by 'ir review open' to view reviews in any state (pending, in-progress, or closed).
 	GetReview(ctx context.Context, identifier string) (*Record, error)
+
+	// StartReview officially starts a review and transitions its state to StatusInProgress.
+	StartReview(ctx context.Context, token string, reviewer identity.Identity) error
 
 	// AddComments appends or updates structured comments on a review.
 	AddComments(ctx context.Context, token string, comments []ReviewComment, author identity.Identity) error

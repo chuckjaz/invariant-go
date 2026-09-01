@@ -1,39 +1,82 @@
 package commit
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"invariant/internal/content"
+	"invariant/internal/discovery"
+	"invariant/internal/identity"
 )
+
+// Assert that Server implements identity.Identity
+var _ identity.Identity = (*Server)(nil)
 
 // Server exposes a commit.Service over HTTP REST API.
 type Server struct {
-	svc     Service
-	handler http.Handler
+	id        string
+	svc       Service
+	discovery discovery.Discovery
+	handler   http.Handler
 }
 
 // NewServer creates a new HTTP server wrapping a commit.Service.
 func NewServer(svc Service) *Server {
-	s := &Server{svc: svc}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/commit", s.handleCommit)
-	mux.HandleFunc("/api/v1/commit/", s.handleGetCommit)
-	mux.HandleFunc("/api/v1/history", s.handleHistory)
-	mux.HandleFunc("/api/v1/diff", s.handleDiff)
-	mux.HandleFunc("/api/v1/sync", s.handleSync)
-	mux.HandleFunc("/api/v1/submit", s.handleSubmit)
-	mux.HandleFunc("/api/v1/blame", s.handleBlame)
-	mux.HandleFunc("/api/v1/bisect", s.handleBisect)
-	mux.HandleFunc("/api/v1/rebase", s.handleRebase)
-	s.handler = mux
+	var id string
+	if idSvc, ok := svc.(identity.Identity); ok {
+		id = idSvc.ID()
+	} else {
+		b := make([]byte, 32)
+		rand.Read(b)
+		id = hex.EncodeToString(b)
+	}
+
+	s := &Server{
+		id:  id,
+		svc: svc,
+	}
+	s.handler = s.Handler()
 	return s
+}
+
+// ID returns the unique 32-byte hex ID of the commit service instance.
+func (s *Server) ID() string {
+	return s.id
+}
+
+// WithDiscovery attaches a Discovery client to the server.
+func (s *Server) WithDiscovery(d discovery.Discovery) *Server {
+	s.discovery = d
+	return s
+}
+
+// Handler returns the HTTP handler with all commit service routes registered.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /id", s.handleGetID)
+	mux.HandleFunc("POST /commit", s.handleCommit)
+	mux.HandleFunc("GET /commit/", s.handleGetCommit)
+	mux.HandleFunc("GET /history", s.handleHistory)
+	mux.HandleFunc("POST /diff", s.handleDiff)
+	mux.HandleFunc("POST /sync", s.handleSync)
+	mux.HandleFunc("POST /submit", s.handleSubmit)
+	mux.HandleFunc("GET /blame", s.handleBlame)
+	mux.HandleFunc("POST /bisect", s.handleBisect)
+	mux.HandleFunc("POST /rebase", s.handleRebase)
+	return mux
 }
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
+}
+
+func (s *Server) handleGetID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(s.id))
 }
 
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +110,7 @@ func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	hash := strings.TrimPrefix(r.URL.Path, "/api/v1/commit/")
+	hash := strings.TrimPrefix(r.URL.Path, "/commit/")
 	if hash == "" {
 		http.Error(w, "Missing commit hash", http.StatusBadRequest)
 		return

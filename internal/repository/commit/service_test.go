@@ -335,6 +335,11 @@ func TestHTTPServerAndClient(t *testing.T) {
 
 	client := NewClient(ts.URL, ts.Client())
 
+	// Test ID protocol
+	if client.ID() == "" || client.ID() != server.ID() {
+		t.Errorf("ID protocol mismatch: client.ID()=%q, server.ID()=%q", client.ID(), server.ID())
+	}
+
 	// Test GetCommit
 	c, err := client.GetCommit(ctx, initHash)
 	if err != nil {

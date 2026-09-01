@@ -466,8 +466,9 @@ sequenceDiagram
 
 - [x] **Step 2.1: `CommitService` Local & HTTP Implementation (`internal/repository/commit/`)**
   - Implement `LocalService` executing commit operations directly against CAS and Slots.
-  - Implement HTTP handlers (`POST /api/v1/commit`, `GET /api/v1/commit/{sha}`, `GET /api/v1/history`, `POST /api/v1/sync`, `POST /api/v1/submit`, `POST /api/v1/diff`, `GET /api/v1/blame`, `POST /api/v1/bisect`, `POST /api/v1/rebase`).
-  - Implement `Client` implementing `commit.Service` over HTTP.
+  - Implement HTTP handlers modeled on Storage service (`GET /id` ID protocol, `POST /commit`, `GET /commit/{sha}`, `GET /history`, `POST /sync`, `POST /submit`, `POST /diff`, `GET /blame`, `POST /bisect`, `POST /rebase`).
+  - Implement `Client` implementing `commit.Service` and `identity.Identity` over HTTP.
+  - Support discovery registration as `commit-v1` via `discovery.AdvertiseAndRegister`.
 
 - [x] **Step 2.2: `invariant repository create <name> [<content>]` (`internal/repository/create.go`, `cmd/invariant/repository.go`)**
   - Parse CLI arguments: `<name>`, initial content or `-d=<path>`, `-create-only`, `-encrypt`, `-compress`, `-writable`, `-tag=<tag>`.
@@ -753,17 +754,19 @@ stateDiagram-v2
     end note
 ```
 
-- [ ] **Step 6.1: `ReviewService` Local & HTTP REST Server (`internal/repository/review_service.go`, `internal/repository/review_server.go`, `internal/repository/review_client.go`)**
+- [ ] **Step 6.1: `ReviewService` Local & HTTP REST Server (`internal/repository/review/server.go`, `internal/repository/review/client.go`)**
   - Implement `LocalReviewService` managing review records and comment trees in CAS.
-  - Implement HTTP REST endpoints:
-    - `POST /api/v1/reviews/request`: Create review record in `pending` status, return token and URL.
-    - `GET /api/v1/reviews/{token}`: Retrieve review metadata and comments without changing review state (used by `ir review open`).
-    - `POST /api/v1/reviews/{token}/start`: Mark review as `in_progress` (used by `ir review start`).
-    - `POST /api/v1/reviews/{token}/comments`: Add/update comments.
-    - `POST /api/v1/reviews/{token}/approve`: Approve review (transitions to `approved`).
-    - `POST /api/v1/reviews/{token}/reject`: Reject review (transitions to `rejected`).
-    - `POST /api/v1/reviews/{token}/abandon`: Abandon review (transitions to `abandoned`).
-  - Implement `RemoteReviewClient` implementing `ReviewService`.
+  - Implement HTTP REST endpoints modeled on Storage service (`GET /id` ID protocol):
+    - `GET /id`: Retrieve unique service ID (ID protocol).
+    - `POST /reviews/request`: Create review record in `pending` status, return token and URL.
+    - `GET /reviews/{token}`: Retrieve review metadata and comments without changing review state (used by `ir review open`).
+    - `POST /reviews/{token}/start`: Mark review as `in_progress` (used by `ir review start`).
+    - `POST /reviews/{token}/comments`: Add/update comments.
+    - `POST /reviews/{token}/approve`: Approve review (transitions to `approved`).
+    - `POST /reviews/{token}/reject`: Reject review (transitions to `rejected`).
+    - `POST /reviews/{token}/abandon`: Abandon review (transitions to `abandoned`).
+  - Implement `Client` implementing `ReviewService` and `identity.Identity`.
+  - Support discovery registration as `review-v1` via `discovery.AdvertiseAndRegister`.
 
 - [ ] **Step 6.2: `ir review request [<directory>]` (`internal/repository/review_request.go`)**
   - Call `ReviewService.RequestReview`.
