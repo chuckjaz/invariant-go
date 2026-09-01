@@ -149,3 +149,37 @@ func TestFuseOperations_NodeMethods(t *testing.T) {
 		t.Fatalf("Unlink failed with errno: %d", errno)
 	}
 }
+
+func TestFuseNodeCachingTimeouts(t *testing.T) {
+	filesrv := setupTestFuseFiles(t)
+	defer filesrv.Close()
+
+	ctx := context.Background()
+	_ = filesrv.CreateEntry(ctx, 1, "cached.txt", "File", "", nil, nil)
+
+	rootNode := NewNode(filesrv, 1)
+	_ = fs.NewNodeFS(rootNode, &fs.Options{})
+
+	// 1. Check Getattr sets timeout
+	var attrOut fuse.AttrOut
+	errno := rootNode.Getattr(ctx, nil, &attrOut)
+	if errno != 0 {
+		t.Fatalf("Getattr failed: %d", errno)
+	}
+	if attrOut.Timeout() == 0 {
+		t.Errorf("Expected non-zero Timeout in Getattr, got %v", attrOut.Timeout())
+	}
+
+	// 2. Check Lookup sets timeout
+	var entryOut fuse.EntryOut
+	_, errno = rootNode.Lookup(ctx, "cached.txt", &entryOut)
+	if errno != 0 {
+		t.Fatalf("Lookup failed: %d", errno)
+	}
+	if entryOut.AttrTimeout() == 0 {
+		t.Errorf("Expected non-zero AttrTimeout in Lookup, got %v", entryOut.AttrTimeout())
+	}
+	if entryOut.EntryTimeout() == 0 {
+		t.Errorf("Expected non-zero EntryTimeout in Lookup, got %v", entryOut.EntryTimeout())
+	}
+}

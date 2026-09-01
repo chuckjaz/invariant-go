@@ -7,12 +7,20 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 
 	"invariant/internal/files"
 	"invariant/internal/filetree"
+)
+
+// Default FUSE kernel caching timeouts for high performance VFS stat/lookup resolution.
+const (
+	DefaultAttrTimeout     = 10 * time.Second
+	DefaultEntryTimeout    = 10 * time.Second
+	DefaultNegativeTimeout = 2 * time.Second
 )
 
 type Node struct {
@@ -91,6 +99,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		out.Mtime = *attrs.ModifyTime
 	}
 
+	out.SetTimeout(DefaultAttrTimeout)
 	return 0
 }
 
@@ -166,6 +175,8 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 		out.Attr.Mtime = *attrs.ModifyTime
 	}
 
+	out.SetEntryTimeout(DefaultEntryTimeout)
+	out.SetAttrTimeout(DefaultAttrTimeout)
 	return inode, 0
 }
 
@@ -405,6 +416,9 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	smode := strconv.FormatUint(uint64(mode&07777), 8)
 	_, _ = n.filesrv.SetAttributes(ctx, out.Ino, files.EntryAttributes{Mode: &smode})
 
+	out.SetEntryTimeout(DefaultEntryTimeout)
+	out.SetAttrTimeout(DefaultAttrTimeout)
+
 	fh := &fileHandle{node: inode.Operations().(*Node)}
 
 	return inode, fh, 0, 0
@@ -425,6 +439,9 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 	smode := strconv.FormatUint(uint64(mode&07777), 8)
 	_, _ = n.filesrv.SetAttributes(ctx, out.Ino, files.EntryAttributes{Mode: &smode})
 
+	out.SetEntryTimeout(DefaultEntryTimeout)
+	out.SetAttrTimeout(DefaultAttrTimeout)
+
 	return inode, 0
 }
 
@@ -434,7 +451,15 @@ func (n *Node) Symlink(ctx context.Context, target, name string, out *fuse.Entry
 		return nil, syscall.EIO
 	}
 
-	return n.Lookup(ctx, name, out)
+	inode, errno := n.Lookup(ctx, name, out)
+	if errno != 0 {
+		return nil, errno
+	}
+
+	out.SetEntryTimeout(DefaultEntryTimeout)
+	out.SetAttrTimeout(DefaultAttrTimeout)
+
+	return inode, 0
 }
 
 func (n *Node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {

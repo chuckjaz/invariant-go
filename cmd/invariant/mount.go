@@ -61,9 +61,16 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		}
 	}
 
+	entryTimeout := fuse.DefaultEntryTimeout
+	attrTimeout := fuse.DefaultAttrTimeout
+	negativeTimeout := fuse.DefaultNegativeTimeout
+
 	server, err := fs.Mount(mountpoint, rootNode, &fs.Options{
-		UID: uid,
-		GID: gid,
+		EntryTimeout:    &entryTimeout,
+		AttrTimeout:     &attrTimeout,
+		NegativeTimeout: &negativeTimeout,
+		UID:             uid,
+		GID:             gid,
 	})
 	if err != nil {
 		log.Fatalf("Mount fail: %v\n", err)
