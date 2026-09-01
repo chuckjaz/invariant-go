@@ -100,13 +100,13 @@ graph LR
 ---
 
 ### Phase B: Consolidated Inode Resolution & Fast-Path Attributes
-- [ ] **Step B.1: Consolidated `GetNodeInfo` in File Service (`internal/files/files.go`, `internal/files/inmemory_files.go`)**
+- [x] **Step B.1: Consolidated `GetNodeInfo` in File Service (`internal/files/files.go`, `internal/files/inmemory_files.go`)**
   - Define `NodeInfo` combining metadata, size, mode, mtime, and ctime.
-  - Implement atomic `GetNodeInfo(ctx, nodeID)` eliminating double-hop `GetInfo` + `GetAttributes`.
-- [ ] **Step B.2: Fast-Path In-Memory Attributes in `fuse.Node` (`internal/fuse/fuse.go`)**
-  - Cache immutable node attributes directly in `fuse.Node` to serve user-space queries in sub-microsecond time.
-- [ ] **Phase B Quality & Verification Gate**
-  - Benchmark verifying CPU reduction and throughput gains.
+  - Implement atomic `GetNodeInfo(ctx, nodeID)` and `LookupNodeInfo(ctx, parentID, name)` eliminating double-hop `GetInfo` + `GetAttributes`.
+- [x] **Step B.2: Fast-Path In-Memory Attributes in `fuse.Node` (`internal/fuse/fuse.go`)**
+  - Cache immutable node attributes directly in `fuse.Node` to serve user-space queries in sub-microsecond time with invalidation on mutation.
+- [x] **Phase B Quality & Verification Gate**
+  - Benchmark verifying CPU reduction and throughput gains (single file rebuild down to 108.15 ms vs 371.58 ms on Git).
   - Full test suite passing.
 
 ---

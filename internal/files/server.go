@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("PUT /{node}/{name}", s.handlePutEntry)
 	mux.HandleFunc("GET /lookup/{node}/{name}", s.handleLookup)
+	mux.HandleFunc("GET /lookup-nodeinfo/{node}/{name}", s.handleLookupNodeInfo)
 
 	mux.HandleFunc("GET /file/{node}", s.handleGetFile)
 	mux.HandleFunc("POST /file/{node}", s.handlePostFile)
@@ -51,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /content/{node}", s.handleGetContent)
 	mux.HandleFunc("GET /info/{node}", s.handleGetInfo)
+	mux.HandleFunc("GET /nodeinfo/{node}", s.handleGetNodeInfo)
 
 	mux.HandleFunc("PUT /sync", s.handleSync)
 
@@ -294,6 +296,23 @@ func (s *Server) handleGetInfo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(info)
 }
 
+func (s *Server) handleGetNodeInfo(w http.ResponseWriter, r *http.Request) {
+	nodeID, err := parseNodeID(r.PathValue("node"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	info, err := s.files.GetNodeInfo(r.Context(), nodeID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
 func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	parentID, err := parseNodeID(r.PathValue("node"))
 	if err != nil {
@@ -304,6 +323,25 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
 	info, err := s.files.Lookup(r.Context(), parentID, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+func (s *Server) handleLookupNodeInfo(w http.ResponseWriter, r *http.Request) {
+	parentID, err := parseNodeID(r.PathValue("node"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	name := r.PathValue("name")
+
+	info, err := s.files.LookupNodeInfo(r.Context(), parentID, name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

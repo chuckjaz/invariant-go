@@ -27,6 +27,9 @@ type Node struct {
 	fs.Inode
 	filesrv files.Files
 	nodeID  uint64
+	mu      sync.RWMutex
+	cached  bool
+	info    files.NodeInfo
 }
 
 var _ = (fs.NodeGetattrer)((*Node)(nil))
@@ -53,24 +56,33 @@ func NewNode(filesrv files.Files, nodeID uint64) *Node {
 	}
 }
 
+// InvalidateCache clears the fast-path attribute cache for this node.
+func (n *Node) InvalidateCache() {
+	n.mu.Lock()
+	n.cached = false
+	n.mu.Unlock()
+}
+
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	info, err := n.filesrv.GetInfo(ctx, n.nodeID)
+	n.mu.RLock()
+	if n.cached {
+		out.Ino = n.info.Node
+		out.Size = n.info.Size
+		out.Mode = n.info.Mode
+		out.Ctime = n.info.CreateTime
+		out.Mtime = n.info.ModifyTime
+		n.mu.RUnlock()
+		out.SetTimeout(DefaultAttrTimeout)
+		return 0
+	}
+	n.mu.RUnlock()
+
+	info, err := n.filesrv.GetNodeInfo(ctx, n.nodeID)
 	if err != nil {
 		return syscall.ENOENT
 	}
 
-	attrs, err := n.filesrv.GetAttributes(ctx, n.nodeID)
-	if err != nil {
-		return syscall.ENOENT
-	}
-
-	out.Ino = n.nodeID
-
-	if attrs.Size != nil {
-		out.Size = *attrs.Size
-	}
-
-	mode := uint32(0)
+	mode := info.Mode
 	switch info.Kind {
 	case string(filetree.DirectoryKind):
 		mode |= fuse.S_IFDIR
@@ -79,25 +91,18 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 	case string(filetree.SymbolicLinkKind):
 		mode |= fuse.S_IFLNK
 	}
+	info.Mode = mode
 
-	if attrs.Mode != nil {
-		parsed, _ := strconv.ParseUint(*attrs.Mode, 8, 32)
-		mode |= uint32(parsed)
-	} else {
-		if info.Kind == string(filetree.DirectoryKind) {
-			mode |= 0755
-		} else {
-			mode |= 0644
-		}
-	}
+	n.mu.Lock()
+	n.info = info
+	n.cached = true
+	n.mu.Unlock()
 
+	out.Ino = info.Node
+	out.Size = info.Size
 	out.Mode = mode
-	if attrs.CreateTime != nil {
-		out.Ctime = *attrs.CreateTime
-	}
-	if attrs.ModifyTime != nil {
-		out.Mtime = *attrs.ModifyTime
-	}
+	out.Ctime = info.CreateTime
+	out.Mtime = info.ModifyTime
 
 	out.SetTimeout(DefaultAttrTimeout)
 	return 0
@@ -123,21 +128,17 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 		return syscall.EIO
 	}
 
+	n.InvalidateCache()
 	return n.Getattr(ctx, f, out)
 }
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	info, err := n.filesrv.Lookup(ctx, n.nodeID, name)
+	info, err := n.filesrv.LookupNodeInfo(ctx, n.nodeID, name)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
-	attrs, err := n.filesrv.GetAttributes(ctx, info.Node)
-	if err != nil {
-		return nil, syscall.ENOENT
-	}
-
-	mode := uint32(0)
+	mode := info.Mode
 	switch info.Kind {
 	case string(filetree.DirectoryKind):
 		mode |= fuse.S_IFDIR
@@ -146,34 +147,21 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	case string(filetree.SymbolicLinkKind):
 		mode |= fuse.S_IFLNK
 	}
+	info.Mode = mode
 
-	if attrs.Mode != nil {
-		parsed, _ := strconv.ParseUint(*attrs.Mode, 8, 32)
-		mode |= uint32(parsed)
-	} else {
-		if info.Kind == string(filetree.DirectoryKind) {
-			mode |= 0755
-		} else {
-			mode |= 0644
-		}
+	childNode := &Node{
+		filesrv: n.filesrv,
+		nodeID:  info.Node,
+		cached:  true,
+		info:    info,
 	}
-
-	childNode := NewNode(n.filesrv, info.Node)
 	inode := n.NewInode(ctx, childNode, fs.StableAttr{Ino: info.Node, Mode: mode})
 
 	out.Ino = info.Node
-
-	if attrs.Size != nil {
-		out.Attr.Size = *attrs.Size
-	}
-
+	out.Attr.Size = info.Size
 	out.Attr.Mode = mode
-	if attrs.CreateTime != nil {
-		out.Attr.Ctime = *attrs.CreateTime
-	}
-	if attrs.ModifyTime != nil {
-		out.Attr.Mtime = *attrs.ModifyTime
-	}
+	out.Attr.Ctime = info.CreateTime
+	out.Attr.Mtime = info.ModifyTime
 
 	out.SetEntryTimeout(DefaultEntryTimeout)
 	out.SetAttrTimeout(DefaultAttrTimeout)
@@ -311,6 +299,7 @@ func (fh *fileHandle) Flush(ctx context.Context) syscall.Errno {
 			return syscall.EIO
 		}
 		fh.dirty = false
+		fh.node.InvalidateCache()
 	}
 	return 0
 }
@@ -398,6 +387,7 @@ func (n *Node) Write(ctx context.Context, f fs.FileHandle, data []byte, off int6
 		return 0, syscall.EIO
 	}
 
+	n.InvalidateCache()
 	return uint32(len(data)), 0
 }
 

@@ -39,8 +39,14 @@ type Files interface {
 	// GetInfo gets the content information of a node
 	GetInfo(ctx context.Context, nodeID uint64) (ContentInformationCommon, error)
 
+	// GetNodeInfo returns consolidated metadata and attributes in a single fast call
+	GetNodeInfo(ctx context.Context, nodeID uint64) (NodeInfo, error)
+
 	// Lookup looks up a name in a directory
 	Lookup(ctx context.Context, parentID uint64, name string) (ContentInformationCommon, error)
+
+	// LookupNodeInfo looks up a name and returns consolidated metadata and attributes in a single fast call
+	LookupNodeInfo(ctx context.Context, parentID uint64, name string) (NodeInfo, error)
 
 	// Remove removes an entry from a directory
 	Remove(ctx context.Context, parentID uint64, name string) error
@@ -175,4 +181,17 @@ type EntryAttributes struct {
 	Mode       *string `json:"mode,omitempty"`
 	Size       *uint64 `json:"size,omitempty"`
 	Type       *string `json:"type,omitempty"`
+}
+
+// NodeInfo contains consolidated metadata and attributes for a node in a single struct.
+type NodeInfo struct {
+	Node       uint64 `json:"node"`
+	Kind       string `json:"kind"`
+	Size       uint64 `json:"size"`
+	Mode       uint32 `json:"mode"`
+	CreateTime uint64 `json:"createTime"`
+	ModifyTime uint64 `json:"modifyTime"`
+	Executable bool   `json:"executable"`
+	Writable   bool   `json:"writable"`
+	Etag       string `json:"etag"`
 }

@@ -1185,3 +1185,88 @@ func TestFilesService_WorkspacePseudoNode(t *testing.T) {
 		t.Errorf(".invariant-workspace should not be present in ReadDirectory for mount")
 	}
 }
+
+func TestFilesService_NodeInfo(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	memSlots := slots.NewMemorySlots("test-slot-id")
+
+	dirData, _ := json.Marshal(filetree.Directory{})
+	initLink, _ := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
+	err := memSlots.Create(context.Background(), "test-slot-nodeinfo", initLink.Address, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootLink := content.ContentLink{
+		Address: "test-slot-nodeinfo",
+		Slot:    true,
+	}
+
+	filesService, err := NewInMemoryFiles(Options{
+		Storage:  store,
+		Slots:    memSlots,
+		RootLink: rootLink,
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	defer filesService.Close()
+
+	ctx := context.Background()
+	contentBuf := []byte("hello node info")
+	err = filesService.CreateEntry(ctx, 1, "test.txt", filetree.FileKind, "", nil, bytes.NewReader(contentBuf))
+	if err != nil {
+		t.Fatalf("CreateEntry failed: %v", err)
+	}
+
+	// 1. LookupNodeInfo
+	info, err := filesService.LookupNodeInfo(ctx, 1, "test.txt")
+	if err != nil {
+		t.Fatalf("LookupNodeInfo failed: %v", err)
+	}
+	if info.Kind != "File" {
+		t.Errorf("Expected Kind File, got %s", info.Kind)
+	}
+	if info.Size != uint64(len(contentBuf)) {
+		t.Errorf("Expected Size %d, got %d", len(contentBuf), info.Size)
+	}
+
+	// 2. GetNodeInfo
+	info2, err := filesService.GetNodeInfo(ctx, info.Node)
+	if err != nil {
+		t.Fatalf("GetNodeInfo failed: %v", err)
+	}
+	if info2.Node != info.Node {
+		t.Errorf("Expected Node %d, got %d", info.Node, info2.Node)
+	}
+	if info2.Size != info.Size {
+		t.Errorf("Expected Size %d, got %d", info.Size, info2.Size)
+	}
+
+	// 3. HTTP Server Endpoints
+	server := NewServer(filesService)
+	handler := server.Handler()
+
+	// GET /lookup-nodeinfo/1/test.txt
+	req := httptest.NewRequest(http.MethodGet, "/lookup-nodeinfo/1/test.txt", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK from /lookup-nodeinfo, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var httpInfo NodeInfo
+	if err := json.NewDecoder(rr.Body).Decode(&httpInfo); err != nil {
+		t.Fatalf("Decode HTTP response failed: %v", err)
+	}
+	if httpInfo.Node != info.Node || httpInfo.Size != info.Size {
+		t.Errorf("HTTP response mismatch: %+v vs %+v", httpInfo, info)
+	}
+
+	// GET /nodeinfo/:node
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/nodeinfo/%d", info.Node), nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK from /nodeinfo, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

@@ -930,6 +930,58 @@ func (s *InMemoryFiles) getInfoLocked(nodeID uint64, node *Node) (ContentInforma
 	return info, nil
 }
 
+func (s *InMemoryFiles) getNodeInfoLocked(nodeID uint64, node *Node) NodeInfo {
+	var mode uint32
+	if node.Mode != nil {
+		parsed, _ := strconv.ParseUint(*node.Mode, 8, 32)
+		mode = uint32(parsed)
+	} else {
+		if node.Kind == filetree.DirectoryKind {
+			mode = 0755
+		} else {
+			mode = 0644
+		}
+	}
+
+	info := NodeInfo{
+		Node:       nodeID,
+		Kind:       string(node.Kind),
+		Size:       node.Size,
+		Mode:       mode,
+		Writable:   s.isWritable(),
+		Executable: (mode & 0111) != 0,
+	}
+
+	if node.ModifyTime != nil {
+		info.ModifyTime = *node.ModifyTime
+	}
+	if node.CreateTime != nil {
+		info.CreateTime = *node.CreateTime
+	}
+
+	if node.Content.Expected != "" {
+		info.Etag = node.Content.Expected
+	} else if node.Content.Address != "" {
+		info.Etag = node.Content.Address
+	} else {
+		info.Etag = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	}
+
+	return info
+}
+
+func (s *InMemoryFiles) GetNodeInfo(ctx context.Context, nodeID uint64) (NodeInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	node, ok := s.nodes[nodeID]
+	if !ok {
+		return NodeInfo{}, errors.New("node not found")
+	}
+
+	return s.getNodeInfoLocked(nodeID, node), nil
+}
+
 func (s *InMemoryFiles) Lookup(ctx context.Context, parentID uint64, name string) (ContentInformationCommon, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -954,6 +1006,32 @@ func (s *InMemoryFiles) Lookup(ctx context.Context, parentID uint64, name string
 	}
 
 	return s.getInfoLocked(childNode.ID, childNode)
+}
+
+func (s *InMemoryFiles) LookupNodeInfo(ctx context.Context, parentID uint64, name string) (NodeInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureLoaded(parentID); err != nil {
+		return NodeInfo{}, err
+	}
+
+	parentNode, ok := s.nodes[parentID]
+	if !ok || parentNode.Kind != filetree.DirectoryKind {
+		return NodeInfo{}, fmt.Errorf("parent directory %d not found or invalid", parentID)
+	}
+
+	childID, ok := parentNode.Children[name]
+	if !ok {
+		return NodeInfo{}, fmt.Errorf("entry %q not found in directory %d", name, parentID)
+	}
+
+	childNode, ok := s.nodes[childID]
+	if !ok {
+		return NodeInfo{}, fmt.Errorf("internal error: child node %d not found", childID)
+	}
+
+	return s.getNodeInfoLocked(childNode.ID, childNode), nil
 }
 
 func (s *InMemoryFiles) Remove(ctx context.Context, parentID uint64, name string) error {

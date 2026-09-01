@@ -183,3 +183,52 @@ func TestFuseNodeCachingTimeouts(t *testing.T) {
 		t.Errorf("Expected non-zero EntryTimeout in Lookup, got %v", entryOut.EntryTimeout())
 	}
 }
+
+func TestFuseFastPathAttributes(t *testing.T) {
+	filesrv := setupTestFuseFiles(t)
+	defer filesrv.Close()
+
+	ctx := context.Background()
+	_ = filesrv.CreateEntry(ctx, 1, "fastpath.txt", "File", "", nil, nil)
+
+	rootNode := NewNode(filesrv, 1)
+	_ = fs.NewNodeFS(rootNode, &fs.Options{})
+
+	var entryOut fuse.EntryOut
+	childInode, errno := rootNode.Lookup(ctx, "fastpath.txt", &entryOut)
+	if errno != 0 {
+		t.Fatalf("Lookup failed: %d", errno)
+	}
+
+	childNode, ok := childInode.Operations().(*Node)
+	if !ok {
+		t.Fatalf("Expected *Node operations, got %T", childInode.Operations())
+	}
+
+	// 1. Initial cached state
+	childNode.mu.RLock()
+	isCached := childNode.cached
+	childNode.mu.RUnlock()
+	if !isCached {
+		t.Errorf("Expected childNode to be cached after Lookup")
+	}
+
+	// 2. Getattr should hit in-memory cache directly
+	var attrOut fuse.AttrOut
+	errno = childNode.Getattr(ctx, nil, &attrOut)
+	if errno != 0 {
+		t.Fatalf("Getattr failed: %d", errno)
+	}
+	if attrOut.Ino != entryOut.Ino {
+		t.Errorf("Expected Ino %d, got %d", entryOut.Ino, attrOut.Ino)
+	}
+
+	// 3. InvalidateCache resets cached flag
+	childNode.InvalidateCache()
+	childNode.mu.RLock()
+	isCached = childNode.cached
+	childNode.mu.RUnlock()
+	if isCached {
+		t.Errorf("Expected childNode cache to be invalidated")
+	}
+}
