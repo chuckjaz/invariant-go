@@ -50,7 +50,7 @@ User identity (author/committer name, email, and authentication token) is automa
 
 If the upstream branch is configured to require approved commits, you can use the `ir review request` command to request that the change be reviewed by a review system. For example, the branch may require a peer code review and presubmit tests to pass before submission. `review request` kicks this process off and returns a unique review token and an optional Web UI review URL.
 
-Reviewers can use `ir review start <token>` or `ir review open <token>` to create a review workspace. If `-writable` is passed, a writable suggestion side-branch is created where the reviewer can commit suggested patches that the author can cherry-pick. Review comments can be submitted via `ir review comment` using a structured JSON format or reviewed in markdown/JSON format via `ir review comments`. Once the review is complete, the reviewer uses `ir review approve` to approve the change and close the review workspace. The review lifecycle is exposed over HTTP REST endpoints so that external Web UIs can directly drive reviews, post comments, and grant approvals.
+Reviewers and readers can use `ir review open <token>` to view a review in a workspace without recording any state change (this can be used on pending, in-progress, or closed reviews). To actively start reviewing, use `ir review start <token>` which transitions the review status to in-progress and creates the review workspace directory (if not already opened). If `-writable` is passed, a writable suggestion side-branch is created where the reviewer can commit suggested patches that the author can cherry-pick. Review comments can be submitted via `ir review comment` using a structured JSON format or reviewed in markdown/JSON format via `ir review comments`. Once the review is complete, the reviewer uses `ir review approve` to approve the change and close the review workspace. The review lifecycle is exposed over HTTP REST endpoints so that external Web UIs can directly drive reviews, post comments, and grant approvals.
 
 ### Getting the status and diff of changes
 
@@ -586,7 +586,9 @@ Display the raw JSON of the review comments instead of formatted markdown.
 ### `ir review open <sha>|<token>|<name>`
 **Status:** Unimplemented
 
-Open a read-only review branch without marking the review as started. This creates the review branch directory.
+Open a review workspace to view the review, commit diffs, and comment threads without recording any state change. This creates and mounts the review branch directory (read-only by default, or as a writable suggestion side-branch if `-writable` is passed).
+
+Reviews in any state (pending, in-progress, or closed reviews such as approved, rejected, or abandoned) can be opened at any time for viewing without altering their recorded review state.
 
 #### Arguments
 
@@ -623,7 +625,7 @@ The directory of the review branch. If not supplied, it is inferred from the cur
 
 Request a code review for the changes in the specified branch directory (or inferred current directory).
 
-Returns a unique review `<token>` and an optional HTTP link to a Web UI service for the review.
+Returns a unique review `<token>` and an optional HTTP link to a Web UI service for the review. Initial review status is set to `pending`.
 
 #### Arguments
 
@@ -635,7 +637,9 @@ The directory of the workspace branch being reviewed. If not supplied, the branc
 ### `ir review start <sha>|<token>|<name>|[<directory>]`
 **Status:** Unimplemented
 
-Start a review. This creates the review branch directory (if not already opened) and marks the review status as in-progress.
+Start a review. This records a state transition to `in_progress` (or `started`).
+
+If the review branch directory is not already opened, this creates and mounts the review workspace. If the review was previously opened with `ir review open` for viewing, `ir review start` transitions the review from `pending` to `in_progress`.
 
 #### Arguments
 

@@ -173,11 +173,17 @@ type ReviewComment struct {
 type ReviewStatus string
 
 const (
-    ReviewStatusPending   ReviewStatus = "pending"
-    ReviewStatusApproved  ReviewStatus = "approved"
-    ReviewStatusRejected  ReviewStatus = "rejected"
-    ReviewStatusAbandoned ReviewStatus = "abandoned"
+    ReviewStatusPending    ReviewStatus = "pending"     // Review requested, awaiting start
+    ReviewStatusInProgress ReviewStatus = "in_progress" // Review started and actively being reviewed
+    ReviewStatusApproved   ReviewStatus = "approved"    // Review approved (closed)
+    ReviewStatusRejected   ReviewStatus = "rejected"    // Review rejected (closed)
+    ReviewStatusAbandoned  ReviewStatus = "abandoned"   // Review abandoned (closed)
 )
+
+// Note: "open" is not a status/state transition. Opening a review ('ir review open')
+// creates/mounts the workspace for inspection at any stage (pending, in-progress, or closed)
+// without mutating the review's recorded state. Starting a review ('ir review start')
+// transitions its state to ReviewStatusInProgress.
 
 type ReviewRecord struct {
     Token        string          `json:"token"`
@@ -300,22 +306,26 @@ Controls the review lifecycle, review tokens, and comment threads for both CLI a
 
 ```go
 type ReviewService interface {
-    // RequestReview creates a review record for a change branch and emits a unique review token.
+    // RequestReview creates a review record for a change branch and emits a unique review token (ReviewStatusPending).
     RequestReview(ctx context.Context, repoName, branchName string, author Identity) (*ReviewRecord, error)
 
-    // GetReview retrieves review metadata and comment threads by token, commit hash, or branch name.
+    // GetReview retrieves review metadata and comment threads by token, commit hash, or branch name without altering review state.
+    // Used by 'ir review open' to view reviews in any state (pending, in-progress, or closed).
     GetReview(ctx context.Context, identifier string) (*ReviewRecord, error)
+
+    // StartReview officially starts a review and transitions its state to ReviewStatusInProgress.
+    StartReview(ctx context.Context, token string, reviewer Identity) error
 
     // AddComments appends or updates structured comments on a review.
     AddComments(ctx context.Context, token string, comments []ReviewComment, author Identity) error
 
-    // ApproveReview marks the review as approved.
+    // ApproveReview marks the review as approved (closed).
     ApproveReview(ctx context.Context, token string, reviewer Identity) error
 
-    // RejectReview marks the review as rejected.
+    // RejectReview marks the review as rejected (closed).
     RejectReview(ctx context.Context, token string, reviewer Identity) error
 
-    // AbandonReview marks the review as abandoned.
+    // AbandonReview marks the review as abandoned (closed).
     AbandonReview(ctx context.Context, token string, author Identity) error
 }
 ```
@@ -723,38 +733,53 @@ Implement `ReviewService` (in-process and HTTP REST API), review token generatio
 ```mermaid
 stateDiagram-v2
     [*] --> Requested: ir review request
-    Requested --> Opened: ir review open or start
-    Opened --> Opened: ir review comment
-    Opened --> Approved: ir review approve
-    Opened --> Rejected: ir review reject
-    Opened --> Abandoned: ir review abandon
+    Requested --> InProgress: ir review start
+    InProgress --> InProgress: ir review comment
+    InProgress --> Approved: ir review approve
+    InProgress --> Rejected: ir review reject
+    Requested --> Abandoned: ir review abandon
+    InProgress --> Abandoned: ir review abandon
     Approved --> [*]: ir submit
     Rejected --> [*]: Closed
     Abandoned --> [*]: Closed
+
+    note right of Requested
+        ir review open creates/mounts review workspace
+        to view review WITHOUT recording state change
+    end note
+    note right of Approved
+        Closed reviews (approved/rejected/abandoned) can
+        also be opened via ir review open for viewing
+    end note
 ```
 
 - [ ] **Step 6.1: `ReviewService` Local & HTTP REST Server (`internal/repository/review_service.go`, `internal/repository/review_server.go`, `internal/repository/review_client.go`)**
   - Implement `LocalReviewService` managing review records and comment trees in CAS.
   - Implement HTTP REST endpoints:
-    - `POST /api/v1/reviews/request`: Create review record, return token and URL.
-    - `GET /api/v1/reviews/{token}`: Retrieve review metadata and comments.
+    - `POST /api/v1/reviews/request`: Create review record in `pending` status, return token and URL.
+    - `GET /api/v1/reviews/{token}`: Retrieve review metadata and comments without changing review state (used by `ir review open`).
+    - `POST /api/v1/reviews/{token}/start`: Mark review as `in_progress` (used by `ir review start`).
     - `POST /api/v1/reviews/{token}/comments`: Add/update comments.
-    - `POST /api/v1/reviews/{token}/approve`: Approve review.
-    - `POST /api/v1/reviews/{token}/reject`: Reject review.
-    - `POST /api/v1/reviews/{token}/abandon`: Abandon review.
+    - `POST /api/v1/reviews/{token}/approve`: Approve review (transitions to `approved`).
+    - `POST /api/v1/reviews/{token}/reject`: Reject review (transitions to `rejected`).
+    - `POST /api/v1/reviews/{token}/abandon`: Abandon review (transitions to `abandoned`).
   - Implement `RemoteReviewClient` implementing `ReviewService`.
 
 - [ ] **Step 6.2: `ir review request [<directory>]` (`internal/repository/review_request.go`)**
   - Call `ReviewService.RequestReview`.
   - Add tag `Tags["review"] = "<token>"` to the change branch HEAD commit via `CommitService`.
-  - Return review token and Web UI review URL.
+  - Return review token and Web UI review URL (initial status: `pending`).
   - Update `docs/Repository.md`: mark `ir review request` as `**Status:** Implemented`.
 
-- [ ] **Step 6.3: `ir review open` & `ir review start` (`internal/repository/review_open.go`)**
-  - Resolve review record by SHA, token, or name.
-  - Create review workspace directory.
-  - Option `-writeable`: create a writable suggestion side-branch so reviewers can commit suggestion patches.
-  - `ir review start`: mark review in-progress.
+- [ ] **Step 6.3: `ir review open` & `ir review start` (`internal/repository/review_open.go`, `internal/repository/review_start.go`)**
+  - **`ir review open <sha>|<token>|<name>`**:
+    - Resolves review record by SHA, token, or name via `ReviewService.GetReview`.
+    - Creates/mounts review workspace directory to inspect diffs and comments without modifying the review's recorded state.
+    - Supports viewing pending, in-progress, or closed (approved, rejected, abandoned) reviews.
+    - Option `-writable`: create a writable suggestion side-branch so reviewers can commit suggestion patches.
+  - **`ir review start <sha>|<token>|<name>|[<directory>]`**:
+    - Marks review as `in_progress` via `ReviewService.StartReview`.
+    - Creates and mounts the review workspace directory if not already opened. If already opened via `ir review open`, records the status transition to `in_progress`.
   - Update `docs/Repository.md`: mark `ir review open` and `ir review start` as `**Status:** Implemented`.
 
 - [ ] **Step 6.4: `ir review comment` & `ir review comments` (`internal/repository/review_comment.go`)**
@@ -765,8 +790,9 @@ stateDiagram-v2
   - Update `docs/Repository.md`: mark `ir review comment` and `ir review comments` as `**Status:** Implemented`.
 
 - [ ] **Step 6.5: `ir review approve`, `ir review reject`, `ir review abandon` (`internal/repository/review_actions.go`)**
-  - Update review state in `ReviewService`.
+  - Update review state in `ReviewService` (`approved`, `rejected`, or `abandoned`).
   - Unmount and clean up review workspace directory.
+  - Note: Closed reviews remain accessible for read-only inspection at any time via `ir review open`.
   - Update `docs/Repository.md`: mark `ir review approve`, `ir review reject`, and `ir review abandon` as `**Status:** Implemented`.
 
 - [ ] **Step 6.6: Submit Review Gating in `CommitService` (`internal/repository/submit.go`)**
