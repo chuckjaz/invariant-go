@@ -754,7 +754,7 @@ stateDiagram-v2
     end note
 ```
 
-- [ ] **Step 6.1: `ReviewService` Local & HTTP REST Server (`internal/repository/review/server.go`, `internal/repository/review/client.go`)**
+- [x] **Step 6.1: `ReviewService` Local & HTTP REST Server (`internal/repository/review/server.go`, `internal/repository/review/client.go`, `internal/repository/review/local_service.go`)**
   - Implement `LocalReviewService` managing review records and comment trees in CAS.
   - Implement HTTP REST endpoints modeled on Storage service (`GET /id` ID protocol):
     - `GET /id`: Retrieve unique service ID (ID protocol).
@@ -768,13 +768,13 @@ stateDiagram-v2
   - Implement `Client` implementing `ReviewService` and `identity.Identity`.
   - Support discovery registration as `review-v1` via `discovery.AdvertiseAndRegister`.
 
-- [ ] **Step 6.2: `ir review request [<directory>]` (`internal/repository/review_request.go`)**
+- [x] **Step 6.2: `ir review request [<directory>]` (`internal/repository/review_request.go`)**
   - Call `ReviewService.RequestReview`.
   - Add tag `Tags["review"] = "<token>"` to the change branch HEAD commit via `CommitService`.
   - Return review token and Web UI review URL (initial status: `pending`).
   - Update `docs/Repository.md`: mark `ir review request` as `**Status:** Implemented`.
 
-- [ ] **Step 6.3: `ir review open` & `ir review start` (`internal/repository/review_open.go`, `internal/repository/review_start.go`)**
+- [x] **Step 6.3: `ir review open` & `ir review start` (`internal/repository/review_open.go`, `internal/repository/review_start.go`)**
   - **`ir review open <sha>|<token>|<name>`**:
     - Resolves review record by SHA, token, or name via `ReviewService.GetReview`.
     - Creates/mounts review workspace directory to inspect diffs and comments without modifying the review's recorded state.
@@ -785,24 +785,24 @@ stateDiagram-v2
     - Creates and mounts the review workspace directory if not already opened. If already opened via `ir review open`, records the status transition to `in_progress`.
   - Update `docs/Repository.md`: mark `ir review open` and `ir review start` as `**Status:** Implemented`.
 
-- [ ] **Step 6.4: `ir review comment` & `ir review comments` (`internal/repository/review_comment.go`)**
+- [x] **Step 6.4: `ir review comment` & `ir review comments` (`internal/repository/review_comment.go`)**
   - `ir review comment [<comment-file>]`: Parse JSON comments matching `ReviewCommentFile` schema; append/update in `ReviewService`.
   - `ir review comments [<directory>]`:
     - Default: render formatted markdown with surrounding code context for file/offset/line.
     - `-json`: render raw JSON comments array.
   - Update `docs/Repository.md`: mark `ir review comment` and `ir review comments` as `**Status:** Implemented`.
 
-- [ ] **Step 6.5: `ir review approve`, `ir review reject`, `ir review abandon` (`internal/repository/review_actions.go`)**
+- [x] **Step 6.5: `ir review approve`, `ir review reject`, `ir review abandon` (`internal/repository/review_actions.go`)**
   - Update review state in `ReviewService` (`approved`, `rejected`, or `abandoned`).
   - Unmount and clean up review workspace directory.
   - Note: Closed reviews remain accessible for read-only inspection at any time via `ir review open`.
   - Update `docs/Repository.md`: mark `ir review approve`, `ir review reject`, and `ir review abandon` as `**Status:** Implemented`.
 
-- [ ] **Step 6.6: Submit Review Gating in `CommitService` (`internal/repository/submit.go`)**
+- [x] **Step 6.6: Submit Review Gating in `CommitService` (`internal/repository/submit.go`)**
   - If `RepositoryConfig.ReviewRequired` is enabled: verify that the change branch HEAD commit has an associated review in `approved` status before updating upstream branch slot.
 
-- [ ] **Phase 6 Quality & Verification Gate**
-  - Review integration tests in `internal/repository/review_test.go` verifying full CLI and HTTP REST API flows.
+- [x] **Phase 6 Quality & Verification Gate**
+  - Review integration tests in `internal/repository/review_test.go` and `internal/repository/review_workflow_test.go` verifying full CLI and HTTP REST API flows.
   - Compliance check (`go fmt`, `go vet`, `go fix`).
   - Package documentation check.
   - Update `plans/repository_implementation_plan.md` with Phase 6 completion status.

@@ -18,6 +18,7 @@ import (
 	"invariant/internal/repository"
 	"invariant/internal/repository/commit"
 	repoconfig "invariant/internal/repository/config"
+	"invariant/internal/repository/review"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
@@ -79,6 +80,7 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "  tag          Create, list, or delete release tags\n")
 		fmt.Fprintf(os.Stderr, "  config       Get, set, list, or unset repository or user settings\n")
 		fmt.Fprintf(os.Stderr, "  layer        Manage pinned sub-repository dependency layers\n")
+		fmt.Fprintf(os.Stderr, "  review       Manage code reviews, comments, and approvals\n")
 		fmt.Fprintf(os.Stderr, "  git          Import or export commits and trees to/from a Git repository\n")
 		fmt.Fprintf(os.Stderr, "  mount        Mount an existing repository workspace\n")
 		fmt.Fprintf(os.Stderr, "  unmount      Unmount repository workspace\n")
@@ -134,6 +136,8 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 		runRepoConfig(globalCfg, args[1:])
 	case "layer":
 		runRepoLayer(globalCfg, args[1:])
+	case "review":
+		runRepoReview(globalCfg, args[1:])
 	case "git":
 		runRepoGit(globalCfg, args[1:])
 	case "mount":
@@ -231,6 +235,21 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 
 	commitSvc := commit.NewLocalService(storageClient, slotsClient, namesClient, nil)
 	return storageClient, slotsClient, namesClient, commitSvc
+}
+
+func initReviewClient(globalCfg *config.InvariantConfig, storageClient storage.Storage, slotsClient slots.Slots, namesClient names.Names) review.Service {
+	if globalCfg != nil && globalCfg.Discovery != "" {
+		discClient := discovery.NewClient(globalCfg.Discovery, nil)
+		rAddr, err := discovery.ResolveName(context.Background(), discClient, "review-v1")
+		if err == nil && rAddr != "" {
+			return review.NewClient(rAddr, nil)
+		}
+		ids, err := discClient.Find(context.Background(), "review-v1", "", 1)
+		if err == nil && len(ids) > 0 {
+			return review.NewClient(ids[0].Address, nil)
+		}
+	}
+	return review.NewLocalService(storageClient, slotsClient, namesClient)
 }
 
 func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
@@ -569,11 +588,13 @@ func runRepoSubmit(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
 	ctx := context.Background()
 
 	resp, err := repository.ExecuteSubmit(ctx, store, slotsClient, namesClient, commitSvc, repository.SubmitOptions{
-		WorkspaceDir: cwd,
-		TargetBranch: *target,
+		WorkspaceDir:  cwd,
+		TargetBranch:  *target,
+		ReviewService: reviewSvc,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error submitting change: %v\n", err)
@@ -1434,4 +1455,320 @@ func runRepoGitExport(globalCfg *config.InvariantConfig, args []string) {
 		shortHead = shortHead[:8]
 	}
 	fmt.Printf("Successfully exported %d commit(s) to Git repository at %s (branch: %s, HEAD: %s)\n", res.ExportedCommits, targetGitDir, res.GitBranch, shortHead)
+}
+
+func runRepoReview(globalCfg *config.InvariantConfig, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository review <command> [options]\n\n")
+		fmt.Fprintf(os.Stderr, "  request      Request a code review on the active change branch\n")
+		fmt.Fprintf(os.Stderr, "  open         Open a review workspace for viewing (read-only or -writable)\n")
+		fmt.Fprintf(os.Stderr, "  start        Officially start a review (transitions status to in_progress)\n")
+		fmt.Fprintf(os.Stderr, "  comment      Add structured review comments from file or CLI flags\n")
+		fmt.Fprintf(os.Stderr, "  comments     Display formatted review comments or raw JSON\n")
+		fmt.Fprintf(os.Stderr, "  approve      Approve a code review and retire the review workspace\n")
+		fmt.Fprintf(os.Stderr, "  reject       Reject a code review and retire the review workspace\n")
+		fmt.Fprintf(os.Stderr, "  abandon      Abandon a code review and retire the review workspace\n")
+		fmt.Fprintf(os.Stderr, "  update       Update a review record with latest change commit\n")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "request":
+		runRepoReviewRequest(globalCfg, args[1:])
+	case "open":
+		runRepoReviewOpen(globalCfg, args[1:])
+	case "start":
+		runRepoReviewStart(globalCfg, args[1:])
+	case "comment":
+		runRepoReviewComment(globalCfg, args[1:])
+	case "comments":
+		runRepoReviewComments(globalCfg, args[1:])
+	case "approve":
+		runRepoReviewApprove(globalCfg, args[1:])
+	case "reject":
+		runRepoReviewReject(globalCfg, args[1:])
+	case "abandon":
+		runRepoReviewAbandon(globalCfg, args[1:])
+	case "update":
+		runRepoReviewUpdate(globalCfg, args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown review command: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func runRepoReviewRequest(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review request", flag.ExitOnError)
+	authorFlag := fs.String("author", "", "Author name requesting review")
+	fs.Parse(args)
+
+	cwd, _ := os.Getwd()
+	if fs.NArg() > 0 {
+		cwd, _ = filepath.Abs(fs.Arg(0))
+	}
+
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	rec, reviewURL, err := repository.RequestReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.RequestReviewOptions{
+		WorkspaceDir: cwd,
+		AuthorName:   *authorFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error requesting review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Requested review for repository %q (branch %q)\n", rec.RepoName, rec.BranchName)
+	fmt.Printf("Review Token: %s\n", rec.Token)
+	fmt.Printf("Review Status: %s\n", rec.Status)
+	fmt.Printf("Review Web URL: %s\n", reviewURL)
+}
+
+func runRepoReviewOpen(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review open", flag.ExitOnError)
+	writable := fs.Bool("writable", false, "Create a writable suggestion side-branch workspace")
+	targetDir := fs.String("d", "", "Target directory path to open the review workspace in")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository review open <sha>|<token>|<name> [-d=<dir>] [-writable]\n")
+		os.Exit(1)
+	}
+	identifier := fs.Arg(0)
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	wsDir, rec, err := repository.OpenReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.OpenReviewOptions{
+		Identifier:   identifier,
+		TargetDir:    *targetDir,
+		Writable:     *writable,
+		WorkspaceDir: cwd,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening review workspace: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Opened review workspace for %s at %s (Status: %s)\n", rec.Token, wsDir, rec.Status)
+}
+
+func runRepoReviewStart(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review start", flag.ExitOnError)
+	writable := fs.Bool("writable", false, "Create a writable suggestion side-branch workspace")
+	targetDir := fs.String("d", "", "Target directory path to open the review workspace in")
+	reviewerFlag := fs.String("reviewer", "", "Reviewer name")
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	wsDir, rec, err := repository.StartReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.StartReviewOptions{
+		Identifier:   identifier,
+		TargetDir:    *targetDir,
+		Writable:     *writable,
+		WorkspaceDir: cwd,
+		ReviewerName: *reviewerFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Started review for %s at %s (Reviewer: %s, Status: %s)\n", rec.Token, wsDir, rec.Reviewer, rec.Status)
+}
+
+func runRepoReviewComment(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review comment", flag.ExitOnError)
+	tokenFlag := fs.String("token", "", "Review token or branch name")
+	msgFlag := fs.String("m", "", "Comment text")
+	fileFlag := fs.String("file", "", "Target file for inline comment")
+	lineFlag := fs.Int("line", 0, "Target start line for inline comment")
+	endLineFlag := fs.Int("end-line", 0, "Target end line for inline comment")
+	authorFlag := fs.String("author", "", "Author name of comment")
+	fs.Parse(args)
+
+	var commentFile string
+	if fs.NArg() > 0 {
+		commentFile = fs.Arg(0)
+	}
+
+	var startLinePtr, endLinePtr *int
+	if *lineFlag > 0 {
+		startLinePtr = lineFlag
+	}
+	if *endLineFlag > 0 {
+		endLinePtr = endLineFlag
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	err := repository.AddReviewComment(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.AddCommentOptions{
+		WorkspaceDir: cwd,
+		Identifier:   *tokenFlag,
+		CommentFile:  commentFile,
+		AuthorName:   *authorFlag,
+		CommentText:  *msgFlag,
+		File:         *fileFlag,
+		StartLine:    startLinePtr,
+		EndLine:      endLinePtr,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error adding review comment: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully added review comment\n")
+}
+
+func runRepoReviewComments(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review comments", flag.ExitOnError)
+	jsonFlag := fs.Bool("json", false, "Output comments array as JSON")
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	out, err := repository.GetReviewComments(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.GetCommentsOptions{
+		WorkspaceDir: cwd,
+		Identifier:   identifier,
+		JSON:         *jsonFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting review comments: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print(out)
+}
+
+func runRepoReviewApprove(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review approve", flag.ExitOnError)
+	reviewerFlag := fs.String("reviewer", "", "Reviewer name approving the review")
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	rec, err := repository.ApproveReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.ReviewActionOptions{
+		WorkspaceDir: cwd,
+		Identifier:   identifier,
+		ReviewerName: *reviewerFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error approving review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Approved review %s for repository %s (branch %s)\n", rec.Token, rec.RepoName, rec.BranchName)
+}
+
+func runRepoReviewReject(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review reject", flag.ExitOnError)
+	reviewerFlag := fs.String("reviewer", "", "Reviewer name rejecting the review")
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	rec, err := repository.RejectReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.ReviewActionOptions{
+		WorkspaceDir: cwd,
+		Identifier:   identifier,
+		ReviewerName: *reviewerFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error rejecting review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Rejected review %s for repository %s (branch %s)\n", rec.Token, rec.RepoName, rec.BranchName)
+}
+
+func runRepoReviewAbandon(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review abandon", flag.ExitOnError)
+	authorFlag := fs.String("author", "", "Author name abandoning the review")
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	rec, err := repository.AbandonReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.ReviewActionOptions{
+		WorkspaceDir: cwd,
+		Identifier:   identifier,
+		ReviewerName: *authorFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error abandoning review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Abandoned review %s for repository %s (branch %s)\n", rec.Token, rec.RepoName, rec.BranchName)
+}
+
+func runRepoReviewUpdate(globalCfg *config.InvariantConfig, args []string) {
+	fs := flag.NewFlagSet("repository review update", flag.ExitOnError)
+	fs.Parse(args)
+
+	var identifier string
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
+	}
+
+	cwd, _ := os.Getwd()
+	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, "")
+	reviewSvc := initReviewClient(globalCfg, store, slotsClient, namesClient)
+	ctx := context.Background()
+
+	rec, err := repository.UpdateReview(ctx, store, slotsClient, namesClient, commitSvc, reviewSvc, repository.ReviewActionOptions{
+		WorkspaceDir: cwd,
+		Identifier:   identifier,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error updating review: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Updated review %s with latest HEAD commit %s\n", rec.Token, rec.HeadCommit)
 }

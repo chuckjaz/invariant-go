@@ -8,15 +8,17 @@ import (
 
 	"invariant/internal/names"
 	"invariant/internal/repository/commit"
+	"invariant/internal/repository/review"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 )
 
 // SubmitOptions specifies parameters for submitting a change workspace.
 type SubmitOptions struct {
-	WorkspaceDir string
-	TargetBranch string
-	AuthorName   string
+	WorkspaceDir  string
+	TargetBranch  string
+	AuthorName    string
+	ReviewService review.Service
 }
 
 // ExecuteSubmit submits the active change branch to its upstream branch and retires the workspace.
@@ -35,6 +37,20 @@ func ExecuteSubmit(
 
 	if meta.BranchName == "main" {
 		return nil, fmt.Errorf("cannot submit main branch into itself")
+	}
+
+	// Check review gating if review service is available
+	if opts.ReviewService != nil {
+		cfg, _, _, _ := loadRepoConfigForTag(ctx, store, slotsClient, namesClient, meta.RepoName)
+		if cfg != nil && cfg.ReviewRequired {
+			rec, err := opts.ReviewService.GetReview(ctx, meta.BranchName)
+			if err != nil || rec == nil {
+				return nil, fmt.Errorf("submit blocked: change requires an approved code review before submission")
+			}
+			if rec.Status != review.StatusApproved {
+				return nil, fmt.Errorf("submit blocked: review status is %s (approved review required)", rec.Status)
+			}
+		}
 	}
 
 	target := opts.TargetBranch

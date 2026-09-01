@@ -487,7 +487,7 @@ Open the workspace as writable.
 ---
 
 ### `ir review abandon [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Abandon a review. This marks the review as abandoned and closes/removes the directory containing the review without additional comment.
 
@@ -499,7 +499,7 @@ The directory of the review branch. If not supplied, it is inferred from the cur
 ---
 
 ### `ir review approve [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Approve the review. This marks the review branch as approved and closes the review workspace.
 
@@ -511,7 +511,7 @@ The directory of the review branch. If not supplied, it is inferred from the cur
 ---
 
 ### `ir review comment [<comment-file>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Add or update comments on a review using a JSON comment file matching the schema below.
 
@@ -567,7 +567,7 @@ If `offset` and `len` are used, `startLine` and `endLine` are ignored. If `offse
 ---
 
 ### `ir review comments [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Display the current comments for a review. By default, this produces markdown-formatted text showing comments beneath the relevant code snippet with surrounding context.
 
@@ -584,7 +584,7 @@ Display the raw JSON of the review comments instead of formatted markdown.
 ---
 
 ### `ir review open <sha>|<token>|<name>`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Open a review workspace to view the review, commit diffs, and comment threads without recording any state change. This creates and mounts the review branch directory (read-only by default, or as a writable suggestion side-branch if `-writable` is passed).
 
@@ -609,7 +609,7 @@ Open the branch as writable, creating a suggestion side-branch where proposed ch
 ---
 
 ### `ir review reject [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Mark the review as rejected and close the review workspace.
 
@@ -621,7 +621,7 @@ The directory of the review branch. If not supplied, it is inferred from the cur
 ---
 
 ### `ir review request [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Request a code review for the changes in the specified branch directory (or inferred current directory).
 
@@ -635,7 +635,7 @@ The directory of the workspace branch being reviewed. If not supplied, the branc
 ---
 
 ### `ir review start <sha>|<token>|<name>|[<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Start a review. This records a state transition to `in_progress` (or `started`).
 
@@ -663,7 +663,7 @@ Open the review branch as writable.
 ---
 
 ### `ir review update [<directory>]`
-**Status:** Unimplemented
+**Status:** Implemented
 
 Update an existing code review with newly committed changes in the workspace branch.
 

@@ -9,6 +9,8 @@ import (
 
 	"invariant/internal/identity"
 	repoid "invariant/internal/repository/identity"
+	"invariant/internal/slots"
+	"invariant/internal/storage"
 )
 
 type mockReviewService struct {
@@ -190,5 +192,90 @@ func TestReviewServerAndClient(t *testing.T) {
 	}
 	if gotClosed.Status != StatusApproved {
 		t.Errorf("Expected StatusApproved for closed review, got %s", gotClosed.Status)
+	}
+}
+
+func TestLocalService(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewInMemoryStorage()
+	slotsClient := slots.NewMemorySlots("slots-id")
+
+	localSvc := NewLocalService(store, slotsClient, nil)
+
+	// ID protocol
+	if localSvc.ID() == "" {
+		t.Errorf("Expected non-empty ID for LocalService")
+	}
+
+	// 1. RequestReview
+	author := repoid.Identity{Name: "Alice", Email: "alice@example.com"}
+	rec, err := localSvc.RequestReview(ctx, "my-repo", "feat-branch", author)
+	if err != nil {
+		t.Fatalf("RequestReview failed: %v", err)
+	}
+	if rec.Status != StatusPending || rec.Token == "" {
+		t.Errorf("Unexpected record: %+v", rec)
+	}
+
+	// 2. GetReview (pending)
+	got, err := localSvc.GetReview(ctx, rec.Token)
+	if err != nil {
+		t.Fatalf("GetReview failed: %v", err)
+	}
+	if got.Status != StatusPending {
+		t.Errorf("Expected StatusPending, got %s", got.Status)
+	}
+
+	// Also test GetReview by branch name
+	gotByBranch, err := localSvc.GetReview(ctx, "feat-branch")
+	if err != nil || gotByBranch.Token != rec.Token {
+		t.Errorf("GetReview by branch name failed: got=%+v, err=%v", gotByBranch, err)
+	}
+
+	// 3. StartReview
+	reviewer := repoid.Identity{Name: "Bob", Email: "bob@example.com"}
+	if err := localSvc.StartReview(ctx, rec.Token, reviewer); err != nil {
+		t.Fatalf("StartReview failed: %v", err)
+	}
+	startedRec, _ := localSvc.GetReview(ctx, rec.Token)
+	if startedRec.Status != StatusInProgress || startedRec.Reviewer != "Bob" {
+		t.Errorf("Expected StatusInProgress with reviewer Bob, got: %+v", startedRec)
+	}
+
+	// 4. AddComments
+	comments := []ReviewComment{
+		{
+			File: "cmd/main.go",
+			Comments: []Comment{
+				{Comment: "Please add comments.", Author: "Bob"},
+			},
+		},
+	}
+	if err := localSvc.AddComments(ctx, rec.Token, comments, reviewer); err != nil {
+		t.Fatalf("AddComments failed: %v", err)
+	}
+	withComments, _ := localSvc.GetReview(ctx, rec.Token)
+	if len(withComments.Comments) != 1 {
+		t.Errorf("Expected 1 comment thread, got %d", len(withComments.Comments))
+	}
+
+	// 5. ApproveReview
+	if err := localSvc.ApproveReview(ctx, rec.Token, reviewer); err != nil {
+		t.Fatalf("ApproveReview failed: %v", err)
+	}
+	approvedRec, _ := localSvc.GetReview(ctx, rec.Token)
+	if approvedRec.Status != StatusApproved {
+		t.Errorf("Expected StatusApproved, got %s", approvedRec.Status)
+	}
+
+	// 6. Verify cannot start closed review
+	if err := localSvc.StartReview(ctx, rec.Token, reviewer); err == nil {
+		t.Errorf("Expected error when starting already approved review")
+	}
+
+	// 7. Verify can open/view closed review
+	closedRec, err := localSvc.GetReview(ctx, rec.Token)
+	if err != nil || closedRec.Status != StatusApproved {
+		t.Errorf("Failed to open closed review: %+v, err=%v", closedRec, err)
 	}
 }
