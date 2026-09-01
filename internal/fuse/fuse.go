@@ -344,7 +344,11 @@ func (fh *fileHandle) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	return &fileHandle{node: n}, 0, 0
+	var fuseFlags uint32
+	if flags&syscall.O_ACCMODE == syscall.O_RDONLY {
+		fuseFlags |= fuse.FOPEN_KEEP_CACHE
+	}
+	return &fileHandle{node: n}, fuseFlags, 0
 }
 
 func (n *Node) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {

@@ -747,6 +747,16 @@ func (s *InMemoryFiles) WriteFile(ctx context.Context, nodeID uint64, offset int
 }
 
 func (s *InMemoryFiles) ReadDirectory(ctx context.Context, nodeID uint64, offset, length int64) (filetree.Directory, error) {
+	// Fast path: RLock if already loaded
+	s.mu.RLock()
+	node, ok := s.nodes[nodeID]
+	if ok && node.Kind == filetree.DirectoryKind && node.IsLoaded {
+		entries := s.readDirectoryEntriesLocked(node)
+		s.mu.RUnlock()
+		return entries, nil
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -754,11 +764,17 @@ func (s *InMemoryFiles) ReadDirectory(ctx context.Context, nodeID uint64, offset
 		return nil, err
 	}
 
-	node := s.nodes[nodeID]
+	node = s.nodes[nodeID]
+	return s.readDirectoryEntriesLocked(node), nil
+}
 
+func (s *InMemoryFiles) readDirectoryEntriesLocked(node *Node) filetree.Directory {
 	var entries filetree.Directory
 	for name, childID := range node.Children {
-		child := s.nodes[childID]
+		child, ok := s.nodes[childID]
+		if !ok {
+			continue
+		}
 		switch child.Kind {
 		case filetree.FileKind:
 			entries = append(entries, &filetree.FileEntry{
@@ -798,8 +814,7 @@ func (s *InMemoryFiles) ReadDirectory(ctx context.Context, nodeID uint64, offset
 			})
 		}
 	}
-
-	return entries, nil
+	return entries
 }
 
 func (s *InMemoryFiles) GetAttributes(ctx context.Context, nodeID uint64) (EntryAttributes, error) {
@@ -983,6 +998,24 @@ func (s *InMemoryFiles) GetNodeInfo(ctx context.Context, nodeID uint64) (NodeInf
 }
 
 func (s *InMemoryFiles) Lookup(ctx context.Context, parentID uint64, name string) (ContentInformationCommon, error) {
+	// Fast path: RLock if already loaded
+	s.mu.RLock()
+	parentNode, ok := s.nodes[parentID]
+	if ok && parentNode.Kind == filetree.DirectoryKind && parentNode.IsLoaded {
+		childID, childOk := parentNode.Children[name]
+		if childOk {
+			if childNode, ok := s.nodes[childID]; ok {
+				info, err := s.getInfoLocked(childNode.ID, childNode)
+				s.mu.RUnlock()
+				return info, err
+			}
+		} else {
+			s.mu.RUnlock()
+			return ContentInformationCommon{}, fmt.Errorf("entry %q not found in directory %d", name, parentID)
+		}
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -990,7 +1023,7 @@ func (s *InMemoryFiles) Lookup(ctx context.Context, parentID uint64, name string
 		return ContentInformationCommon{}, err
 	}
 
-	parentNode, ok := s.nodes[parentID]
+	parentNode, ok = s.nodes[parentID]
 	if !ok || parentNode.Kind != filetree.DirectoryKind {
 		return ContentInformationCommon{}, fmt.Errorf("parent directory %d not found or invalid", parentID)
 	}
@@ -1009,6 +1042,24 @@ func (s *InMemoryFiles) Lookup(ctx context.Context, parentID uint64, name string
 }
 
 func (s *InMemoryFiles) LookupNodeInfo(ctx context.Context, parentID uint64, name string) (NodeInfo, error) {
+	// Fast path: RLock if already loaded
+	s.mu.RLock()
+	parentNode, ok := s.nodes[parentID]
+	if ok && parentNode.Kind == filetree.DirectoryKind && parentNode.IsLoaded {
+		childID, childOk := parentNode.Children[name]
+		if childOk {
+			if childNode, ok := s.nodes[childID]; ok {
+				info := s.getNodeInfoLocked(childNode.ID, childNode)
+				s.mu.RUnlock()
+				return info, nil
+			}
+		} else {
+			s.mu.RUnlock()
+			return NodeInfo{}, fmt.Errorf("entry %q not found in directory %d", name, parentID)
+		}
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1016,7 +1067,7 @@ func (s *InMemoryFiles) LookupNodeInfo(ctx context.Context, parentID uint64, nam
 		return NodeInfo{}, err
 	}
 
-	parentNode, ok := s.nodes[parentID]
+	parentNode, ok = s.nodes[parentID]
 	if !ok || parentNode.Kind != filetree.DirectoryKind {
 		return NodeInfo{}, fmt.Errorf("parent directory %d not found or invalid", parentID)
 	}
