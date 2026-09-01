@@ -856,7 +856,7 @@ graph TD
     Bottlenecks --> FuseTune
 ```
 
-- [ ] **Step 7.1: Comprehensive Tracing Instrumentation (`internal/repository/trace.go`)**
+- [x] **Step 7.1: Comprehensive Tracing Instrumentation (`internal/repository/trace.go`)**
   - Integrate [`trace.Tracer`](file:///home/chuckjaz/src/invariant-go/internal/trace/trace.go#L90) across `CommitService`, `ReviewService`, FUSE filesystem handlers, and storage adapters.
   - Add child trace spans for:
     - Working tree walking and dirty file detection
@@ -866,7 +866,7 @@ graph TD
     - Bisect DAG midpoint evaluations
     - HTTP service serialization and network transit
 
-- [ ] **Step 7.2: Automated Benchmark Suite vs Git Baseline (`internal/repository/perf_test.go`)**
+- [x] **Step 7.2: Automated Benchmark Suite vs Git Baseline (`internal/repository/perf_test.go`)**
   - Implement comprehensive benchmark harness comparing `ir` against `git` across standardized synthetic repositories:
     1. **Small repo** (100 files, 1 MB total)
     2. **Medium repo** (5,000 files, 50 MB total)
@@ -884,16 +884,16 @@ graph TD
     - `ir sync` vs `git rebase`
     - `ir git import` & `ir git export` throughput (MB/s and commits/s)
 
-- [ ] **Step 7.3: Gap Analysis & Performance Profiling**
+- [x] **Step 7.3: Gap Analysis & Performance Profiling**
   - Output statistical comparison tables detailing min, mean, p50, p95, p99, max latency and memory consumption.
   - Identify operations where `ir` exhibits gaps relative to Git (e.g. initial FUSE inode lookup latency vs Git direct directory scan).
 
-- [ ] **Step 7.4: Optimization & Gap Mitigation**
+- [x] **Step 7.4: Optimization & Gap Mitigation**
   - Implement tree manifest caching in `internal/repository` to avoid re-reading unchanged subtrees from CAS during `status` and `diff`.
   - Enable concurrent worker pipelines for blob chunking and CAS uploads during `commit`.
   - Optimize FUSE entry and attribute cache timeouts on read-only base layers.
 
-- [ ] **Phase 7 Quality & Verification Gate**
+- [x] **Phase 7 Quality & Verification Gate**
   - Performance test suite passes with zero errors and trace summaries exported to JSON.
   - All operations meet or exceed target latency thresholds relative to Git baseline.
   - Full compliance check (`go fmt`, `go vet`, `go fix`).

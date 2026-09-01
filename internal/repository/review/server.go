@@ -11,6 +11,7 @@ import (
 	"invariant/internal/discovery"
 	"invariant/internal/identity"
 	repoid "invariant/internal/repository/identity"
+	"invariant/internal/trace"
 )
 
 // Assert that Server implements identity.Identity
@@ -22,6 +23,7 @@ type Server struct {
 	svc       Service
 	discovery discovery.Discovery
 	handler   http.Handler
+	tracer    *trace.Tracer
 }
 
 // NewServer creates a new HTTP server wrapping a review.Service.
@@ -54,6 +56,13 @@ func (s *Server) WithDiscovery(d discovery.Discovery) *Server {
 	return s
 }
 
+// WithTracer attaches a Tracer to the review server.
+func (s *Server) WithTracer(t *trace.Tracer) *Server {
+	s.tracer = t
+	s.handler = s.Handler()
+	return s
+}
+
 // Register registers this review service instance with the discovery service.
 func (s *Server) Register(ctx context.Context, disc discovery.Discovery, advertiseAddr string, port int, tags []string) error {
 	return discovery.AdvertiseAndRegister(ctx, disc, s.ID(), advertiseAddr, port, []string{"review-v1"}, tags)
@@ -66,7 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /reviews/request", s.handleRequest)
 	mux.HandleFunc("GET /reviews/", s.handleGet)
 	mux.HandleFunc("POST /reviews/", s.handlePostAction)
-	return mux
+	return trace.Middleware("review", s.tracer)(mux)
 }
 
 // ServeHTTP implements http.Handler.

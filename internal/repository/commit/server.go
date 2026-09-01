@@ -10,6 +10,7 @@ import (
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/identity"
+	"invariant/internal/trace"
 )
 
 // Assert that Server implements identity.Identity
@@ -21,6 +22,7 @@ type Server struct {
 	svc       Service
 	discovery discovery.Discovery
 	handler   http.Handler
+	tracer    *trace.Tracer
 }
 
 // NewServer creates a new HTTP server wrapping a commit.Service.
@@ -53,6 +55,13 @@ func (s *Server) WithDiscovery(d discovery.Discovery) *Server {
 	return s
 }
 
+// WithTracer attaches a Tracer to the commit server.
+func (s *Server) WithTracer(t *trace.Tracer) *Server {
+	s.tracer = t
+	s.handler = s.Handler()
+	return s
+}
+
 // Handler returns the HTTP handler with all commit service routes registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -66,7 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /blame", s.handleBlame)
 	mux.HandleFunc("POST /bisect", s.handleBisect)
 	mux.HandleFunc("POST /rebase", s.handleRebase)
-	return mux
+	return trace.Middleware("commit", s.tracer)(mux)
 }
 
 // ServeHTTP implements http.Handler.
