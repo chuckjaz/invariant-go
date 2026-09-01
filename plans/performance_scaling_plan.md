@@ -13,19 +13,19 @@ This plan details the technical architecture and phased execution to optimize th
 ```mermaid
 graph TD
     subgraph Current_Unoptimized ["Current Architecture (Zero-Timeout FUSE)"]
-        Build1["ninja (stat all files)"] -->|Syscall| VFS1["Linux VFS Kernel"]
-        VFS1 -->|Context Switch (/dev/fuse)| Daemon1["Invariant FUSE Daemon"]
-        Daemon1 -->|Mutex + Map Lookup 1| Info["GetInfo()"]
-        Daemon1 -->|Mutex + Map Lookup 2| Attr["GetAttributes()"]
-        Attr -->|Return AttrOut| VFS1
-        VFS1 -->|Return| Build1
+        Build1["ninja (stat all files)"] -->|"Syscall"| VFS1["Linux VFS Kernel"]
+        VFS1 -->|"Context Switch (/dev/fuse)"| Daemon1["Invariant FUSE Daemon"]
+        Daemon1 -->|"Mutex + Map Lookup 1"| Info["GetInfo()"]
+        Daemon1 -->|"Mutex + Map Lookup 2"| Attr["GetAttributes()"]
+        Attr -->|"Return AttrOut"| VFS1
+        VFS1 -->|"Return"| Build1
     end
 
     subgraph Optimized_Architecture ["Target Architecture (Kernel-Cached VFS + Invalidation)"]
-        Build2["ninja (stat all files)"] -->|Syscall| VFS2["Linux VFS Kernel Dentry/Inode Cache"]
+        Build2["ninja (stat all files)"] -->|"Syscall"| VFS2["Linux VFS Kernel Dentry/Inode Cache"]
         VFS2 -- "Cached (AttrTimeout / EntryTimeout)" --> Build2
         VFS2 -. "Cache Miss / Dirty Inode Only" .-> Daemon2["Invariant FUSE Daemon"]
-        Daemon2 -->|Fast Atomic Struct| FastLookup["GetNodeInfoAndAttrs() (RAM)"]
+        Daemon2 -->|"Fast Atomic Struct"| FastLookup["GetNodeInfoAndAttrs() (RAM)"]
         Daemon2 -. "On Write / Truncate" .-> Invalidate["NotifyEntry / NotifyInvalInode()"]
         Invalidate -. "Invalidate Specific Kernel Entry" .-> VFS2
     end
