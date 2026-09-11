@@ -1217,6 +1217,9 @@ func (s *InMemoryFiles) parseNodeID(nodeStr string) (uint64, error) {
 }
 
 func (s *InMemoryFiles) autoSyncLoop() {
+	if s.opts.AutoSyncTimeout <= 0 {
+		return
+	}
 	ticker := time.NewTicker(s.opts.AutoSyncTimeout)
 	defer ticker.Stop()
 
@@ -1489,21 +1492,43 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 	delete(s.dirtyNodes, id)
 
 	if id == 1 && s.opts.Slots != nil {
-		if syncer, ok := s.opts.Storage.(storage.SyncStorage); ok {
+		type slotUpdate struct {
+			slotAddr    string
+			contentAddr string
+			lastAddr    string
+			layerIdx    int
+		}
+		var updates []slotUpdate
+		for layerIdx := range node.LayerMembership {
+			l := s.opts.Layers[layerIdx]
+			if l.RootLink.Slot {
+				updates = append(updates, slotUpdate{
+					slotAddr:    l.RootLink.Address,
+					contentAddr: node.LayerContents[layerIdx].Address,
+					lastAddr:    s.lastSlotAddresses[layerIdx],
+					layerIdx:    layerIdx,
+				})
+			}
+		}
+		syncer, hasSyncer := s.opts.Storage.(storage.SyncStorage)
+		slotsClient := s.opts.Slots
+
+		s.mu.Unlock()
+		if hasSyncer {
 			if err := syncer.Sync(context.Background()); err != nil {
 				log.Printf("Failed to sync storage before slot update: %v", err)
 			}
 		}
 
-		for layerIdx := range node.LayerMembership {
-			l := s.opts.Layers[layerIdx]
-			if l.RootLink.Slot {
-				err := s.opts.Slots.Update(context.Background(), l.RootLink.Address, node.LayerContents[layerIdx].Address, s.lastSlotAddresses[layerIdx], nil)
-				if err == nil {
-					s.lastSlotAddresses[layerIdx] = node.LayerContents[layerIdx].Address
-				}
+		for _, u := range updates {
+			err := slotsClient.Update(context.Background(), u.slotAddr, u.contentAddr, u.lastAddr, nil)
+			if err == nil {
+				s.mu.Lock()
+				s.lastSlotAddresses[u.layerIdx] = u.contentAddr
+				s.mu.Unlock()
 			}
 		}
+		s.mu.Lock()
 	}
 
 	return nil

@@ -371,7 +371,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		Discovery:        dClient,
 		RootLink:         wsInfo.Content,
 		Layers:           layers,
-		AutoSyncTimeout:  time.Minute,
+		AutoSyncTimeout:  commonFlags.AutoSync,
 		SlotPollInterval: 5 * time.Minute,
 		MountConfig:      mountConfig,
 	}

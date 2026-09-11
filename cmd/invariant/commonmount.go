@@ -33,6 +33,7 @@ type CommonMountFlags struct {
 	Encrypt         bool
 	KeyPolicyStr    string
 	KeyStr          string
+	AutoSync        time.Duration
 }
 
 func (f *CommonMountFlags) Register(fsFlags *flag.FlagSet) {
@@ -47,6 +48,7 @@ func (f *CommonMountFlags) Register(fsFlags *flag.FlagSet) {
 	fsFlags.BoolVar(&f.Encrypt, "encrypt", false, "Encrypt the written content")
 	fsFlags.StringVar(&f.KeyPolicyStr, "key-policy", "Deterministic", "Encryption key policy (RandomPerBlock, RandomAllKey, Deterministic, SuppliedAllKey)")
 	fsFlags.StringVar(&f.KeyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
+	fsFlags.DurationVar(&f.AutoSync, "auto-sync", time.Minute, "Interval for periodic background sync (0 to disable)")
 }
 
 func SetupCacheStorage(f *CommonMountFlags, baseStorage storage.Storage) (storage.Storage, storage.Storage) {
@@ -222,7 +224,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		Discovery:        dClient,
 		Slots:            slotsClient,
 		RootLink:         content.ContentLink{Address: f.RootAddr, Slot: rootIsSlot},
-		AutoSyncTimeout:  time.Minute,
+		AutoSyncTimeout:  f.AutoSync,
 		SlotPollInterval: 5 * time.Minute,
 		WriterOptions:    writerOpts,
 		MountConfig:      mountConfig,
