@@ -25,6 +25,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/utils/merkletrie"
 )
 
 // GitImportOptions configures the import of a Git repository.
@@ -273,14 +274,16 @@ func ImportGitRepository(
 		itemHashStr := item.hash.String()
 		// Check if commit has already been imported into Invariant
 		if existingInv, err := kvIdx.GetCommitInvariantHash(ctx, itemHashStr); err == nil && existingInv != "" {
-			if _, err := commitSvc.GetCommit(ctx, existingInv); err == nil {
-				gitToInvCommit[itemHashStr] = existingInv
-				if headCommit == "" && item.hash == *targetHash {
-					headCommit = existingInv
-					rootCommit = existingInv
+			if existingCommit, err := commitSvc.GetCommit(ctx, existingInv); err == nil {
+				if _, _, ok := checkExistingTreeTimestamps(ctx, store, existingCommit.Tree.Address); ok {
+					gitToInvCommit[itemHashStr] = existingInv
+					if headCommit == "" && item.hash == *targetHash {
+						headCommit = existingInv
+						rootCommit = existingInv
+					}
+					// Assume all predecessor commits are already converted and imported; stop walking this ancestor path!
+					continue
 				}
-				// Assume all predecessor commits are already converted and imported; stop walking this ancestor path!
-				continue
 			}
 		}
 
@@ -309,6 +312,9 @@ func ImportGitRepository(
 		defer stopProgress()
 	}
 
+	fileMtimes := make(map[string]uint64)
+	fileCtimes := make(map[string]uint64)
+
 	// 4. Import new commits and trees into CAS
 	for i, gc := range gitCommits {
 		gHashStr := gc.Hash.String()
@@ -316,23 +322,73 @@ func ImportGitRepository(
 			tracker.SetCommit(i+1, len(gitCommits), gHashStr, gc.Message)
 		}
 
+		commitTime := uint64(gc.Author.When.Unix())
+		if commitTime == 0 {
+			commitTime = uint64(gc.Committer.When.Unix())
+		}
+		if commitTime == 0 {
+			commitTime = uint64(time.Now().Unix())
+		}
+
+		if currTree, err := gc.Tree(); err == nil {
+			if len(gc.ParentHashes) == 0 {
+				_ = currTree.Files().ForEach(func(f *object.File) error {
+					fileMtimes[f.Name] = commitTime
+					fileCtimes[f.Name] = commitTime
+					return nil
+				})
+			} else {
+				if parentCommit, err := gitRepo.CommitObject(gc.ParentHashes[0]); err == nil {
+					if parentTree, err := parentCommit.Tree(); err == nil {
+						if changes, err := object.DiffTree(parentTree, currTree); err == nil {
+							for _, ch := range changes {
+								action, _ := ch.Action()
+								switch action {
+								case merkletrie.Insert:
+									fileMtimes[ch.To.Name] = commitTime
+									fileCtimes[ch.To.Name] = commitTime
+								case merkletrie.Modify:
+									fileMtimes[ch.To.Name] = commitTime
+									if _, ok := fileCtimes[ch.To.Name]; !ok {
+										fileCtimes[ch.To.Name] = commitTime
+									}
+								case merkletrie.Delete:
+									delete(fileMtimes, ch.From.Name)
+									delete(fileCtimes, ch.From.Name)
+								}
+							}
+						}
+					}
+				}
+				_ = currTree.Files().ForEach(func(f *object.File) error {
+					if _, ok := fileMtimes[f.Name]; !ok {
+						fileMtimes[f.Name] = commitTime
+						fileCtimes[f.Name] = commitTime
+					}
+					return nil
+				})
+			}
+		}
+
 		// Check if already mapped
 		if existingInv, err := kvIdx.GetCommitInvariantHash(ctx, gHashStr); err == nil && existingInv != "" {
-			if _, err := commitSvc.GetCommit(ctx, existingInv); err == nil {
-				gitToInvCommit[gHashStr] = existingInv
-				if rootCommit == "" {
-					rootCommit = existingInv
+			if existingCommit, err := commitSvc.GetCommit(ctx, existingInv); err == nil {
+				if _, _, ok := checkExistingTreeTimestamps(ctx, store, existingCommit.Tree.Address); ok {
+					gitToInvCommit[gHashStr] = existingInv
+					if rootCommit == "" {
+						rootCommit = existingInv
+					}
+					headCommit = existingInv
+					if tracker != nil {
+						atomic.AddUint64(&tracker.CommitsSkipped, 1)
+					}
+					continue
 				}
-				headCommit = existingInv
-				if tracker != nil {
-					atomic.AddUint64(&tracker.CommitsSkipped, 1)
-				}
-				continue
 			}
 		}
 
 		// Import tree
-		treeLink, err := importGitTree(ctx, gitRepo, gc.TreeHash, store, kvIdx, tracker)
+		treeLink, _, _, err := importGitTree(ctx, gitRepo, gc.TreeHash, "", store, kvIdx, tracker, fileMtimes, fileCtimes, commitTime)
 		if err != nil {
 			return nil, fmt.Errorf("failed to import tree for git commit %s: %w", gHashStr, err)
 		}
@@ -355,7 +411,7 @@ func ImportGitRepository(
 			Parents:   invParents,
 			Author:    author,
 			Message:   gc.Message,
-			Timestamp: gc.Author.When.Unix(),
+			Timestamp: int64(commitTime),
 			Tags: map[string]string{
 				"git-commit": gHashStr,
 			},
@@ -593,14 +649,72 @@ func ImportGitRepository(
 	return res, nil
 }
 
+func checkExistingTreeTimestamps(ctx context.Context, store storage.Storage, addr string) (uint64, uint64, bool) {
+	if addr == "" {
+		return 0, 0, false
+	}
+	rc, err := content.Read(content.ContentLink{Address: addr}, store, nil)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return 0, 0, false
+	}
+	var d filetree.Directory
+	if err := json.Unmarshal(data, &d); err != nil {
+		return 0, 0, false
+	}
+	if len(d) == 0 {
+		return 0, 0, true
+	}
+	var minC, maxM uint64
+	hasTimes := false
+	for _, entry := range d {
+		var mtime, ctime *uint64
+		switch e := entry.(type) {
+		case *filetree.FileEntry:
+			mtime = e.ModifyTime
+			ctime = e.CreateTime
+		case *filetree.DirectoryEntry:
+			mtime = e.ModifyTime
+			ctime = e.CreateTime
+		case *filetree.SymbolicLinkEntry:
+			mtime = e.ModifyTime
+			ctime = e.CreateTime
+		}
+		if mtime != nil && *mtime > 0 {
+			hasTimes = true
+			if *mtime > maxM {
+				maxM = *mtime
+			}
+			if ctime != nil && (minC == 0 || *ctime < minC) {
+				minC = *ctime
+			}
+		}
+	}
+	if !hasTimes {
+		return 0, 0, false
+	}
+	if minC == 0 {
+		minC = maxM
+	}
+	return minC, maxM, true
+}
+
 func importGitTree(
 	ctx context.Context,
 	gitRepo *git.Repository,
 	treeHash plumbing.Hash,
+	dirPath string,
 	store storage.Storage,
 	kvIdx *GitKVIndex,
 	tracker *GitImportProgressTracker,
-) (content.ContentLink, error) {
+	fileMtimes map[string]uint64,
+	fileCtimes map[string]uint64,
+	commitTime uint64,
+) (content.ContentLink, uint64, uint64, error) {
 	if tracker != nil {
 		atomic.AddInt64(&tracker.DirsChecking, 1)
 		defer atomic.AddInt64(&tracker.DirsChecking, -1)
@@ -608,41 +722,106 @@ func importGitTree(
 
 	tHashStr := treeHash.String()
 
-	// Check KV index for existing conversion
+	// Check KV index for existing conversion with valid timestamps
 	if existingAddr, err := kvIdx.GetTreeInvariantAddress(ctx, tHashStr); err == nil && existingAddr != "" {
-		if tracker != nil {
-			atomic.AddUint64(&tracker.DirsSkipped, 1)
+		if minC, maxM, ok := checkExistingTreeTimestamps(ctx, store, existingAddr); ok {
+			if tracker != nil {
+				atomic.AddUint64(&tracker.DirsSkipped, 1)
+			}
+			return content.ContentLink{Address: existingAddr}, minC, maxM, nil
 		}
-		return content.ContentLink{Address: existingAddr}, nil
 	}
 
 	t, err := gitRepo.TreeObject(treeHash)
 	if err != nil {
-		return content.ContentLink{}, fmt.Errorf("failed to load git tree %s: %w", tHashStr, err)
+		return content.ContentLink{}, 0, 0, fmt.Errorf("failed to load git tree %s: %w", tHashStr, err)
 	}
 
 	var dir filetree.Directory
+	var minCtime, maxMtime uint64
 	for _, e := range t.Entries {
 		name := e.Name
 		if name == ".git" || strings.HasPrefix(name, ".invariant-") || strings.HasPrefix(name, ".ir-") {
 			continue
 		}
 
+		childPath := name
+		if dirPath != "" {
+			childPath = dirPath + "/" + name
+		}
+
 		if e.Mode == filemode.Dir {
-			childLink, err := importGitTree(ctx, gitRepo, e.Hash, store, kvIdx, tracker)
+			childLink, subMinC, subMaxM, err := importGitTree(ctx, gitRepo, e.Hash, childPath, store, kvIdx, tracker, fileMtimes, fileCtimes, commitTime)
 			if err != nil {
-				return content.ContentLink{}, err
+				return content.ContentLink{}, 0, 0, err
 			}
+			dirModeStr := "0755"
 			dir = append(dir, &filetree.DirectoryEntry{
 				BaseEntry: filetree.BaseEntry{
-					Name: name,
-					Kind: filetree.DirectoryKind,
+					Name:       name,
+					Kind:       filetree.DirectoryKind,
+					Mode:       &dirModeStr,
+					CreateTime: &subMinC,
+					ModifyTime: &subMaxM,
 				},
 				Content: childLink,
 			})
+			if subMaxM > maxMtime {
+				maxMtime = subMaxM
+			}
+			if minCtime == 0 || (subMinC > 0 && subMinC < minCtime) {
+				minCtime = subMinC
+			}
+		} else if e.Mode == filemode.Symlink {
+			mtimeVal := fileMtimes[childPath]
+			if mtimeVal == 0 {
+				mtimeVal = commitTime
+			}
+			ctimeVal := fileCtimes[childPath]
+			if ctimeVal == 0 {
+				ctimeVal = mtimeVal
+			}
+
+			blobObj, err := gitRepo.BlobObject(e.Hash)
+			if err != nil {
+				return content.ContentLink{}, 0, 0, fmt.Errorf("failed to load git symlink blob %s: %w", e.Hash, err)
+			}
+			reader, err := blobObj.Reader()
+			if err != nil {
+				return content.ContentLink{}, 0, 0, fmt.Errorf("failed to read git symlink blob %s: %w", e.Hash, err)
+			}
+			targetBytes, _ := io.ReadAll(reader)
+			reader.Close()
+			target := string(targetBytes)
+			modeStr := "0777"
+			dir = append(dir, &filetree.SymbolicLinkEntry{
+				BaseEntry: filetree.BaseEntry{
+					Name:       name,
+					Kind:       filetree.SymbolicLinkKind,
+					Mode:       &modeStr,
+					CreateTime: &ctimeVal,
+					ModifyTime: &mtimeVal,
+				},
+				Target: target,
+			})
+			if mtimeVal > maxMtime {
+				maxMtime = mtimeVal
+			}
+			if minCtime == 0 || (ctimeVal > 0 && ctimeVal < minCtime) {
+				minCtime = ctimeVal
+			}
 		} else if e.Mode.IsFile() {
 			if tracker != nil {
 				atomic.AddInt64(&tracker.FilesChecking, 1)
+			}
+
+			mtimeVal := fileMtimes[childPath]
+			if mtimeVal == 0 {
+				mtimeVal = commitTime
+			}
+			ctimeVal := fileCtimes[childPath]
+			if ctimeVal == 0 {
+				ctimeVal = mtimeVal
 			}
 
 			fHashStr := e.Hash.String()
@@ -666,7 +845,7 @@ func importGitTree(
 					if tracker != nil {
 						atomic.AddInt64(&tracker.FilesChecking, -1)
 					}
-					return content.ContentLink{}, fmt.Errorf("failed to load git blob %s: %w", fHashStr, err)
+					return content.ContentLink{}, 0, 0, fmt.Errorf("failed to load git blob %s: %w", fHashStr, err)
 				}
 				fileSize = uint64(blobObj.Size)
 
@@ -675,7 +854,7 @@ func importGitTree(
 					if tracker != nil {
 						atomic.AddInt64(&tracker.FilesChecking, -1)
 					}
-					return content.ContentLink{}, fmt.Errorf("failed to read git blob %s: %w", fHashStr, err)
+					return content.ContentLink{}, 0, 0, fmt.Errorf("failed to read git blob %s: %w", fHashStr, err)
 				}
 
 				var r io.Reader = reader
@@ -689,7 +868,7 @@ func importGitTree(
 					atomic.AddInt64(&tracker.FilesChecking, -1)
 				}
 				if err != nil {
-					return content.ContentLink{}, fmt.Errorf("failed to write blob %s to CAS: %w", fHashStr, err)
+					return content.ContentLink{}, 0, 0, fmt.Errorf("failed to write blob %s to CAS: %w", fHashStr, err)
 				}
 				if tracker != nil {
 					atomic.AddUint64(&tracker.FilesChecked, 1)
@@ -698,27 +877,42 @@ func importGitTree(
 				_ = kvIdx.RecordBlobMapping(ctx, fHashStr, fileLink.Address)
 			}
 
-			modeStr := fmt.Sprintf("%04o", uint32(e.Mode))
+			modeStr := fmt.Sprintf("%04o", uint32(e.Mode&07777))
 			dir = append(dir, &filetree.FileEntry{
 				BaseEntry: filetree.BaseEntry{
-					Name: name,
-					Kind: filetree.FileKind,
-					Mode: &modeStr,
+					Name:       name,
+					Kind:       filetree.FileKind,
+					Mode:       &modeStr,
+					CreateTime: &ctimeVal,
+					ModifyTime: &mtimeVal,
 				},
 				Content: fileLink,
 				Size:    fileSize,
 			})
+			if mtimeVal > maxMtime {
+				maxMtime = mtimeVal
+			}
+			if minCtime == 0 || (ctimeVal > 0 && ctimeVal < minCtime) {
+				minCtime = ctimeVal
+			}
 		}
+	}
+
+	if maxMtime == 0 {
+		maxMtime = commitTime
+	}
+	if minCtime == 0 {
+		minCtime = maxMtime
 	}
 
 	dirData, err := json.Marshal(dir)
 	if err != nil {
-		return content.ContentLink{}, fmt.Errorf("failed to marshal directory: %w", err)
+		return content.ContentLink{}, 0, 0, fmt.Errorf("failed to marshal directory: %w", err)
 	}
 
 	link, err := content.Write(bytes.NewReader(dirData), store, content.WriterOptions{})
 	if err != nil {
-		return content.ContentLink{}, fmt.Errorf("failed to write directory tree to CAS: %w", err)
+		return content.ContentLink{}, 0, 0, fmt.Errorf("failed to write directory tree to CAS: %w", err)
 	}
 
 	if tracker != nil {
@@ -726,7 +920,7 @@ func importGitTree(
 	}
 
 	_ = kvIdx.RecordTreeMapping(ctx, tHashStr, link.Address)
-	return link, nil
+	return link, minCtime, maxMtime, nil
 }
 
 // IsCommitAncestor checks whether ancestorHash is reachable from descendantHash in the Invariant commit DAG.

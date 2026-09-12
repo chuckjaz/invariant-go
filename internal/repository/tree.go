@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"invariant/internal/content"
 	"invariant/internal/filetree"
@@ -56,10 +58,23 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 				if err != nil {
 					return content.ContentLink{}, err
 				}
+				dirInfo, _ := os.Stat(fullPath)
+				var dirMtime, dirCtime *uint64
+				var dirModeStr *string
+				if dirInfo != nil {
+					mt := uint64(dirInfo.ModTime().Unix())
+					dirMtime = &mt
+					dirCtime = &mt
+					ms := fmt.Sprintf("%04o", uint32(dirInfo.Mode().Perm()))
+					dirModeStr = &ms
+				}
 				dir = append(dir, &filetree.DirectoryEntry{
 					BaseEntry: filetree.BaseEntry{
-						Name: name,
-						Kind: filetree.DirectoryKind,
+						Name:       name,
+						Kind:       filetree.DirectoryKind,
+						Mode:       dirModeStr,
+						CreateTime: dirCtime,
+						ModifyTime: dirMtime,
 					},
 					Content: childLink,
 				})
@@ -70,8 +85,15 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 				}
 				fi, _ := f.Stat()
 				sz := uint64(0)
+				var fileMtime, fileCtime *uint64
+				var fileModeStr *string
 				if fi != nil {
 					sz = uint64(fi.Size())
+					mt := uint64(fi.ModTime().Unix())
+					fileMtime = &mt
+					fileCtime = &mt
+					ms := fmt.Sprintf("%04o", uint32(fi.Mode().Perm()))
+					fileModeStr = &ms
 				}
 
 				fileLink, err := content.Write(f, store, content.WriterOptions{})
@@ -82,8 +104,11 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 
 				dir = append(dir, &filetree.FileEntry{
 					BaseEntry: filetree.BaseEntry{
-						Name: name,
-						Kind: filetree.FileKind,
+						Name:       name,
+						Kind:       filetree.FileKind,
+						Mode:       fileModeStr,
+						CreateTime: fileCtime,
+						ModifyTime: fileMtime,
 					},
 					Content: fileLink,
 					Size:    sz,
@@ -144,6 +169,10 @@ func MaterializeTree(ctx context.Context, tree content.ContentLink, destDir stri
 						return err
 					}
 				}
+				if dirEntry != nil && dirEntry.ModifyTime != nil && *dirEntry.ModifyTime > 0 {
+					mt := time.Unix(int64(*dirEntry.ModifyTime), 0)
+					_ = os.Chtimes(targetPath, mt, mt)
+				}
 			} else if e.GetKind() == filetree.FileKind {
 				fileEntry, _ := e.(*filetree.FileEntry)
 				fLink := content.ContentLink{Address: fileEntry.Content.Address}
@@ -155,7 +184,13 @@ func MaterializeTree(ctx context.Context, tree content.ContentLink, destDir stri
 					fr.Close()
 					return err
 				}
-				outF, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				perm := os.FileMode(0644)
+				if fileEntry != nil && fileEntry.Mode != nil {
+					if p, err := strconv.ParseUint(*fileEntry.Mode, 8, 32); err == nil {
+						perm = os.FileMode(p)
+					}
+				}
+				outF, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 				if err != nil {
 					fr.Close()
 					return err
@@ -165,6 +200,18 @@ func MaterializeTree(ctx context.Context, tree content.ContentLink, destDir stri
 				outF.Close()
 				if copyErr != nil {
 					return copyErr
+				}
+				if fileEntry != nil && fileEntry.ModifyTime != nil && *fileEntry.ModifyTime > 0 {
+					mt := time.Unix(int64(*fileEntry.ModifyTime), 0)
+					_ = os.Chtimes(targetPath, mt, mt)
+				}
+			} else if e.GetKind() == filetree.SymbolicLinkKind {
+				symEntry, _ := e.(*filetree.SymbolicLinkEntry)
+				_ = os.Remove(targetPath)
+				if symEntry != nil {
+					if err := os.Symlink(symEntry.Target, targetPath); err != nil {
+						return err
+					}
 				}
 			}
 		}

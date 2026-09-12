@@ -232,3 +232,102 @@ func TestFuseFastPathAttributes(t *testing.T) {
 		t.Errorf("Expected childNode cache to be invalidated")
 	}
 }
+
+func TestFuseTimestamps_NonZero(t *testing.T) {
+	storageClient := storage.NewInMemoryStorage()
+	slotClient := slots.NewMemorySlots("fuse-slot-times")
+	_ = slotClient.Create(context.Background(), "time-slot", "", "")
+
+	// Create directory with one entry with explicit times and one with nil times
+	modTime := uint64(1700000000)
+	testDir := filetree.Directory{
+		&filetree.FileEntry{
+			BaseEntry: filetree.BaseEntry{
+				Name:       "explicit.txt",
+				Kind:       filetree.FileKind,
+				ModifyTime: &modTime,
+				CreateTime: &modTime,
+			},
+			Content: content.ContentLink{Address: "mock-content-1"},
+			Size:    10,
+		},
+		&filetree.FileEntry{
+			BaseEntry: filetree.BaseEntry{
+				Name: "legacy.txt",
+				Kind: filetree.FileKind,
+			},
+			Content: content.ContentLink{Address: "mock-content-2"},
+			Size:    20,
+		},
+	}
+	dirBytes, err := testDir.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	link, err := content.Write(bytes.NewReader(dirBytes), storageClient, content.WriterOptions{})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	_ = slotClient.Update(context.Background(), "time-slot", link.Address, "", nil)
+
+	opts := files.Options{
+		Storage:  storageClient,
+		Slots:    slotClient,
+		RootLink: content.ContentLink{Slot: true, Address: "time-slot"},
+	}
+
+	filesrv, err := files.NewInMemoryFiles(opts)
+	if err != nil {
+		t.Fatalf("Failed to initialize files service: %v", err)
+	}
+	defer filesrv.Close()
+
+	ctx := context.Background()
+	rootNode := NewNode(filesrv, 1)
+	_ = fs.NewNodeFS(rootNode, &fs.Options{})
+
+	// 1. Root directory timestamps
+	var rootAttr fuse.AttrOut
+	if errno := rootNode.Getattr(ctx, nil, &rootAttr); errno != 0 {
+		t.Fatalf("Root Getattr failed: %d", errno)
+	}
+	if rootAttr.Mtime == 0 || rootAttr.Ctime == 0 || rootAttr.Atime == 0 {
+		t.Errorf("Root directory has zero timestamp: Mtime=%d, Ctime=%d, Atime=%d", rootAttr.Mtime, rootAttr.Ctime, rootAttr.Atime)
+	}
+
+	// 2. Explicit file timestamps
+	var explicitEntry fuse.EntryOut
+	explicitInode, errno := rootNode.Lookup(ctx, "explicit.txt", &explicitEntry)
+	if errno != 0 {
+		t.Fatalf("Lookup explicit.txt failed: %d", errno)
+	}
+	if explicitEntry.Attr.Mtime != modTime || explicitEntry.Attr.Ctime != modTime {
+		t.Errorf("Expected explicit.txt Mtime %d, got Mtime=%d Ctime=%d", modTime, explicitEntry.Attr.Mtime, explicitEntry.Attr.Ctime)
+	}
+	explicitNode := explicitInode.Operations().(*Node)
+	var explicitAttr fuse.AttrOut
+	if errno := explicitNode.Getattr(ctx, nil, &explicitAttr); errno != 0 {
+		t.Fatalf("Getattr explicit.txt failed: %d", errno)
+	}
+	if explicitAttr.Mtime != modTime {
+		t.Errorf("Expected explicit.txt Getattr Mtime %d, got %d", modTime, explicitAttr.Mtime)
+	}
+
+	// 3. Legacy file without timestamps (must NOT be 0)
+	var legacyEntry fuse.EntryOut
+	legacyInode, errno := rootNode.Lookup(ctx, "legacy.txt", &legacyEntry)
+	if errno != 0 {
+		t.Fatalf("Lookup legacy.txt failed: %d", errno)
+	}
+	if legacyEntry.Attr.Mtime == 0 || legacyEntry.Attr.Ctime == 0 || legacyEntry.Attr.Atime == 0 {
+		t.Errorf("legacy.txt has zero timestamp (Dec 31 1969 bug!): Mtime=%d, Ctime=%d, Atime=%d", legacyEntry.Attr.Mtime, legacyEntry.Attr.Ctime, legacyEntry.Attr.Atime)
+	}
+	legacyNode := legacyInode.Operations().(*Node)
+	var legacyAttr fuse.AttrOut
+	if errno := legacyNode.Getattr(ctx, nil, &legacyAttr); errno != 0 {
+		t.Fatalf("Getattr legacy.txt failed: %d", errno)
+	}
+	if legacyAttr.Mtime == 0 || legacyAttr.Ctime == 0 || legacyAttr.Atime == 0 {
+		t.Errorf("legacy.txt Getattr has zero timestamp: Mtime=%d, Ctime=%d, Atime=%d", legacyAttr.Mtime, legacyAttr.Ctime, legacyAttr.Atime)
+	}
+}

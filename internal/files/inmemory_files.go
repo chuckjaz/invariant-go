@@ -105,6 +105,14 @@ func NewInMemoryFiles(opts Options) (*InMemoryFiles, error) {
 	}
 
 	now := uint64(time.Now().Unix())
+	if opts.MountConfig != nil && len(opts.MountConfig.WorkspaceInfo) > 0 {
+		var wsMeta struct {
+			CreatedAt int64 `json:"createdAt"`
+		}
+		if err := json.Unmarshal(opts.MountConfig.WorkspaceInfo, &wsMeta); err == nil && wsMeta.CreatedAt > 0 {
+			now = uint64(wsMeta.CreatedAt)
+		}
+	}
 
 	membership := make(map[int]bool)
 	contents := make(map[int]content.ContentLink)
@@ -303,6 +311,18 @@ func (s *InMemoryFiles) ensureLoaded(id uint64) error {
 				childNode.ModifyTime = e.ModifyTime
 				childNode.Mode = e.Mode
 				childNode.Target = e.Target
+			}
+
+			if childNode.ModifyTime == nil || *childNode.ModifyTime == 0 {
+				if childNode.CreateTime != nil && *childNode.CreateTime > 0 {
+					childNode.ModifyTime = childNode.CreateTime
+				} else if node.ModifyTime != nil && *node.ModifyTime > 0 {
+					childNode.ModifyTime = node.ModifyTime
+					childNode.CreateTime = node.ModifyTime
+				}
+			}
+			if childNode.CreateTime == nil || *childNode.CreateTime == 0 {
+				childNode.CreateTime = childNode.ModifyTime
 			}
 
 			s.nodes[childID] = childNode
@@ -881,11 +901,12 @@ func (s *InMemoryFiles) SetAttributes(ctx context.Context, nodeID uint64, attrs 
 
 func (s *InMemoryFiles) getAttributesLocked(nodeID uint64) (EntryAttributes, error) {
 	node := s.nodes[nodeID]
+	nodeInfo := s.getNodeInfoLocked(nodeID, node)
 	writable := s.isWritable()
 	attrs := EntryAttributes{
 		Writable:   &writable,
-		ModifyTime: node.ModifyTime,
-		CreateTime: node.CreateTime,
+		ModifyTime: &nodeInfo.ModifyTime,
+		CreateTime: &nodeInfo.CreateTime,
 		Mode:       node.Mode,
 	}
 
@@ -921,17 +942,13 @@ func (s *InMemoryFiles) GetInfo(ctx context.Context, nodeID uint64) (ContentInfo
 }
 
 func (s *InMemoryFiles) getInfoLocked(nodeID uint64, node *Node) (ContentInformationCommon, error) {
+	nodeInfo := s.getNodeInfoLocked(nodeID, node)
 	info := ContentInformationCommon{
-		Node:     nodeID,
-		Kind:     string(node.Kind),
-		Writable: s.isWritable(),
-	}
-
-	if node.ModifyTime != nil {
-		info.ModifyTime = *node.ModifyTime
-	}
-	if node.CreateTime != nil {
-		info.CreateTime = *node.CreateTime
+		Node:       nodeID,
+		Kind:       string(node.Kind),
+		ModifyTime: nodeInfo.ModifyTime,
+		CreateTime: nodeInfo.CreateTime,
+		Writable:   s.isWritable(),
 	}
 
 	if node.Content.Expected != "" {
@@ -943,6 +960,39 @@ func (s *InMemoryFiles) getInfoLocked(nodeID uint64, node *Node) (ContentInforma
 	}
 
 	return info, nil
+}
+
+func (s *InMemoryFiles) getFallbackTimeLocked(node *Node) uint64 {
+	visited := make(map[uint64]bool)
+	curr := node
+	for curr != nil {
+		if curr.ModifyTime != nil && *curr.ModifyTime != 0 {
+			return *curr.ModifyTime
+		}
+		if curr.CreateTime != nil && *curr.CreateTime != 0 {
+			return *curr.CreateTime
+		}
+		visited[curr.ID] = true
+		var next *Node
+		for pID := range curr.Parents {
+			if !visited[pID] {
+				if parent, ok := s.nodes[pID]; ok {
+					next = parent
+					break
+				}
+			}
+		}
+		curr = next
+	}
+	if root, ok := s.nodes[s.root]; ok && root != nil {
+		if root.ModifyTime != nil && *root.ModifyTime != 0 {
+			return *root.ModifyTime
+		}
+		if root.CreateTime != nil && *root.CreateTime != 0 {
+			return *root.CreateTime
+		}
+	}
+	return uint64(time.Now().Unix())
 }
 
 func (s *InMemoryFiles) getNodeInfoLocked(nodeID uint64, node *Node) NodeInfo {
@@ -958,20 +1008,31 @@ func (s *InMemoryFiles) getNodeInfoLocked(nodeID uint64, node *Node) NodeInfo {
 		}
 	}
 
+	var mtime uint64
+	if node.ModifyTime != nil && *node.ModifyTime != 0 {
+		mtime = *node.ModifyTime
+	} else if node.CreateTime != nil && *node.CreateTime != 0 {
+		mtime = *node.CreateTime
+	} else {
+		mtime = s.getFallbackTimeLocked(node)
+	}
+
+	var ctime uint64
+	if node.CreateTime != nil && *node.CreateTime != 0 {
+		ctime = *node.CreateTime
+	} else {
+		ctime = mtime
+	}
+
 	info := NodeInfo{
 		Node:       nodeID,
 		Kind:       string(node.Kind),
 		Size:       node.Size,
 		Mode:       mode,
+		ModifyTime: mtime,
+		CreateTime: ctime,
 		Writable:   s.isWritable(),
 		Executable: (mode & 0111) != 0,
-	}
-
-	if node.ModifyTime != nil {
-		info.ModifyTime = *node.ModifyTime
-	}
-	if node.CreateTime != nil {
-		info.CreateTime = *node.CreateTime
 	}
 
 	if node.Content.Expected != "" {

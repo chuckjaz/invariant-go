@@ -71,6 +71,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		out.Mode = n.info.Mode
 		out.Ctime = n.info.CreateTime
 		out.Mtime = n.info.ModifyTime
+		out.Atime = n.info.ModifyTime
 		n.mu.RUnlock()
 		out.SetTimeout(DefaultAttrTimeout)
 		return 0
@@ -103,6 +104,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 	out.Mode = mode
 	out.Ctime = info.CreateTime
 	out.Mtime = info.ModifyTime
+	out.Atime = info.ModifyTime
 
 	out.SetTimeout(DefaultAttrTimeout)
 	return 0
@@ -162,6 +164,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	out.Attr.Mode = mode
 	out.Attr.Ctime = info.CreateTime
 	out.Attr.Mtime = info.ModifyTime
+	out.Attr.Atime = info.ModifyTime
 
 	out.SetEntryTimeout(DefaultEntryTimeout)
 	out.SetAttrTimeout(DefaultAttrTimeout)

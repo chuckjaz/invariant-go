@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"invariant/internal/content"
 	"invariant/internal/files"
+	"invariant/internal/filetree"
 	"invariant/internal/kv"
 	"invariant/internal/names"
 	"invariant/internal/repository/commit"
@@ -197,6 +199,76 @@ func TestGitImport(t *testing.T) {
 	}
 	if headCommitObj.Tags["git-commit"] != headGitHash.String() {
 		t.Errorf("Expected tag git-commit %s, got %s", headGitHash.String(), headCommitObj.Tags["git-commit"])
+	}
+
+	// Verify commit tree timestamps in CAS
+	treeRc, err := content.Read(headCommitObj.Tree, store, nil)
+	if err != nil {
+		t.Fatalf("Failed to read head commit tree: %v", err)
+	}
+	treeData, err := io.ReadAll(treeRc)
+	treeRc.Close()
+	if err != nil {
+		t.Fatalf("Failed to read tree bytes: %v", err)
+	}
+	var rootDir filetree.Directory
+	if err := json.Unmarshal(treeData, &rootDir); err != nil {
+		t.Fatalf("Failed to unmarshal root directory: %v", err)
+	}
+
+	var foundReadme, foundSrc bool
+	for _, entry := range rootDir {
+		if entry.GetName() == "README.md" {
+			foundReadme = true
+			fe, ok := entry.(*filetree.FileEntry)
+			if !ok {
+				t.Errorf("README.md is not a FileEntry")
+			} else {
+				if fe.ModifyTime == nil || *fe.ModifyTime != 1700001000 {
+					t.Errorf("Expected README.md ModifyTime 1700001000, got %v", fe.ModifyTime)
+				}
+				if fe.CreateTime == nil || *fe.CreateTime != 1700000000 {
+					t.Errorf("Expected README.md CreateTime 1700000000, got %v", fe.CreateTime)
+				}
+			}
+		} else if entry.GetName() == "src" {
+			foundSrc = true
+			de, ok := entry.(*filetree.DirectoryEntry)
+			if !ok {
+				t.Errorf("src is not a DirectoryEntry")
+			} else {
+				if de.ModifyTime == nil || *de.ModifyTime != 1700001000 {
+					t.Errorf("Expected src ModifyTime 1700001000, got %v", de.ModifyTime)
+				}
+				subRc, err := content.Read(de.Content, store, nil)
+				if err == nil {
+					subData, _ := io.ReadAll(subRc)
+					subRc.Close()
+					var subDir filetree.Directory
+					if err := json.Unmarshal(subData, &subDir); err == nil {
+						for _, subEntry := range subDir {
+							if subEntry.GetName() == "main.go" {
+								sfe := subEntry.(*filetree.FileEntry)
+								if sfe.ModifyTime == nil || *sfe.ModifyTime != 1700000000 {
+									t.Errorf("Expected src/main.go ModifyTime 1700000000, got %v", sfe.ModifyTime)
+								}
+							} else if subEntry.GetName() == "utils.go" {
+								sfe := subEntry.(*filetree.FileEntry)
+								if sfe.ModifyTime == nil || *sfe.ModifyTime != 1700001000 {
+									t.Errorf("Expected src/utils.go ModifyTime 1700001000, got %v", sfe.ModifyTime)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if !foundReadme {
+		t.Errorf("README.md not found in root dir")
+	}
+	if !foundSrc {
+		t.Errorf("src not found in root dir")
 	}
 }
 
