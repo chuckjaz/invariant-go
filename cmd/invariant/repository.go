@@ -270,12 +270,14 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 	createOnly := fs.Bool("create-only", false, "Create repository in CAS without mounting local workspace")
 	encrypted := fs.Bool("encrypt", false, "Enable encryption for repository objects")
 	compressed := fs.Bool("compress", false, "Enable compression for repository objects")
-	writable := fs.Bool("writable", false, "Make main branch workspace writable")
+	writable := fs.Bool("writable", true, "Make main branch workspace writable (default: true)")
+	readonly := fs.Bool("readonly", false, "Make main branch workspace read-only")
+	fs.BoolVar(readonly, "read-only", false, "Make main branch workspace read-only")
 	tagFlag := fs.String("tag", "", "Storage write tag to restrict CAS writes (default: 'originals', use 'any' to write to any server)")
 
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-content=<link>] [-d=<dir>] [-tag=<tag>] [-create-only] [-encrypt] [-compress] [-writable]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository create <name> [<content>] [-content=<link>] [-d=<dir>] [-tag=<tag>] [-create-only] [-encrypt] [-compress] [-writable] [-readonly]\n")
 		os.Exit(1)
 	}
 
@@ -288,6 +290,8 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 	store, slotsClient, namesClient, commitSvc := initRepoClients(globalCfg, *tagFlag)
 	ctx := context.Background()
 
+	isWritable := *writable && !*readonly
+
 	cfg, rootCommit, err := repository.CreateRepository(ctx, store, slotsClient, namesClient, commitSvc, repository.CreateOptions{
 		Name:       name,
 		Directory:  *dirFlag,
@@ -295,7 +299,8 @@ func runRepoCreate(globalCfg *config.InvariantConfig, args []string) {
 		CreateOnly: *createOnly,
 		Encrypted:  *encrypted,
 		Compressed: *compressed,
-		Writable:   *writable,
+		Writable:   isWritable,
+		ReadOnly:   !isWritable,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating repository: %v\n", err)

@@ -23,7 +23,7 @@ By default, this performs the following actions:
 
 Steps 3 and 4 are optional and can be skipped by using the `-create-only` option.
 
-By default, `main` is opened in a read-only workspace. No changes can be made directly. This can be overridden by using the `-writable` flag; this should only be used temporarily for a quick fix or for small projects with one or two contributors. While read-only, the workspace will always show the most recent source. To make changes to `main`, use `ir change <name>`, which creates a writable change workspace branched from `main` called `<name>` and switches to its directory. By default, `main` is a shared branch and the branch created by `change` is a private branch, private to the user that created it.
+By default, `main` is opened in a writable workspace. Changes can be committed directly to `main`, or isolated change workspaces can be branched using `ir change <name>`. The workspace can also be opened as read-only by using the `-readonly` flag. While read-only, the workspace will always show the most recent source. To make changes when read-only, use `ir change <name>`, which creates a writable change workspace branched from `main` called `<name>` and switches to its directory. By default, `main` is a shared branch and the branch created by `change` is a private branch, private to the user that created it.
 
 ### Committing a change (commit, review, and submit)
 
@@ -134,7 +134,10 @@ Encrypt the content of the repository. The repository will be encrypted at rest 
 Compress the content of the repository. The repository will be compressed at rest. It will only be decompressed when read. Files will be compressed when written.
 
 ##### `-writable`
-The workspace is opened as `-writable` instead of read-only.
+The workspace is opened as `-writable` (the default).
+
+##### `-readonly`, `-read-only`
+The workspace is opened as read-only instead of writable.
 
 ---
 

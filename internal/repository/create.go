@@ -26,6 +26,7 @@ type CreateOptions struct {
 	Encrypted  bool
 	Compressed bool
 	Writable   bool
+	ReadOnly   bool
 	TargetDir  string // Target directory where repo root will be mounted (default: ./<name>)
 }
 
@@ -163,13 +164,14 @@ func CreateRepository(
 		}
 
 		// Write workspace metadata
+		isWritable := opts.Writable || !opts.ReadOnly
 		meta := &WorkspaceMetadata{
 			RepoName:     opts.Name,
 			BranchName:   branchName,
 			Upstream:     branchName,
 			SlotID:       mainSlotID,
 			CommitHash:   rootCommitHash,
-			Writable:     opts.Writable,
+			Writable:     isWritable,
 			CreatedAt:    time.Now().Unix(),
 			WorkspaceDir: branchDir,
 		}

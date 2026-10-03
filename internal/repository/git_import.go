@@ -610,6 +610,7 @@ func ImportGitRepository(
 				Branch:     targetBranch,
 				Content:    headCommit,
 				Writable:   opts.Writable,
+				ReadOnly:   !opts.Writable,
 				TargetDir:  targetDir,
 				CreateOnly: createOnly,
 			})
