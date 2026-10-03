@@ -35,10 +35,15 @@ type CachingStorage struct {
 
 	destHasMu sync.RWMutex
 	destHas   map[string]struct{}
+
+	writeThrough bool
 }
 
 // Assert that CachingStorage implements the Storage interface
 var _ Storage = (*CachingStorage)(nil)
+
+// Assert that CachingStorage implements the TaggedStorage interface
+var _ TaggedStorage = (*CachingStorage)(nil)
 
 func NewCachingStorage(local ControlledStorage, destination Storage, maxSize, desiredSize int64, delegateOnMax bool) *CachingStorage {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -174,7 +179,7 @@ type asyncTeeReadCloser struct {
 	mu     sync.Mutex
 }
 
-func newAsyncTeeReadCloser(c io.ReadCloser, ctx context.Context, onComplete func(r io.Reader)) *asyncTeeReadCloser {
+func newAsyncTeeReadCloser(c io.ReadCloser, ctx context.Context, maxSize int64, onComplete func(r io.Reader)) *asyncTeeReadCloser {
 	t := &asyncTeeReadCloser{
 		c:    c,
 		ch:   make(chan []byte, 64),
@@ -184,14 +189,21 @@ func newAsyncTeeReadCloser(c io.ReadCloser, ctx context.Context, onComplete func
 	go func() {
 		defer close(t.done)
 		var buf bytes.Buffer
+		tooBig := false
 		for chunk := range t.ch {
-			buf.Write(chunk)
+			if !tooBig {
+				buf.Write(chunk)
+				if maxSize > 0 && int64(buf.Len()) > maxSize {
+					tooBig = true
+					buf.Reset()
+				}
+			}
 		}
 		t.mu.Lock()
 		readErr := t.err
 		t.mu.Unlock()
 
-		if (readErr == nil || readErr == io.EOF) && onComplete != nil {
+		if !tooBig && (readErr == nil || readErr == io.EOF) && onComplete != nil {
 			select {
 			case <-ctx.Done():
 				return
@@ -230,11 +242,15 @@ func (t *asyncTeeReadCloser) Close() error {
 	t.mu.Lock()
 	if !t.closed {
 		t.closed = true
-		t.err = io.ErrClosedPipe
+		if t.err == nil {
+			t.err = io.ErrClosedPipe
+		}
 		close(t.ch)
 	}
 	t.mu.Unlock()
-	return t.c.Close()
+	err := t.c.Close()
+	<-t.done
+	return err
 }
 
 func (s *CachingStorage) Has(ctx context.Context, address string) bool {
@@ -278,25 +294,15 @@ func (s *CachingStorage) Get(ctx context.Context, address string) (io.ReadCloser
 				s.destHas[address] = struct{}{}
 				s.destHasMu.Unlock()
 			}
-			destSize, hasSize := src.Size(ctx, address)
-			if hasSize {
-				s.mu.Lock()
-				hasRoom := destSize <= s.maxSize
-				s.mu.Unlock()
-
-				if hasRoom {
-					return newAsyncTeeReadCloser(rcSrc, s.ctx, func(r io.Reader) {
-						okL, errL := s.local.StoreAt(s.ctx, address, r)
-						if errL == nil && okL {
-							actualSize, hasSizeL := s.local.Size(s.ctx, address)
-							if hasSizeL {
-								s.addUsed(address, actualSize)
-							}
-						}
-					}), true
+			return newAsyncTeeReadCloser(rcSrc, s.ctx, s.maxSize, func(r io.Reader) {
+				okL, errL := s.local.StoreAt(s.ctx, address, r)
+				if errL == nil && okL {
+					actualSize, hasSizeL := s.local.Size(s.ctx, address)
+					if hasSizeL {
+						s.addUsed(address, actualSize)
+					}
 				}
-			}
-			return rcSrc, true
+			}), true
 		}
 		return nil, false
 	}
@@ -382,6 +388,12 @@ func (tr *trackingReader) Close() error {
 	return nil
 }
 
+func (s *CachingStorage) SetWriteThrough(wt bool) {
+	s.mu.Lock()
+	s.writeThrough = wt
+	s.mu.Unlock()
+}
+
 func (s *CachingStorage) Store(ctx context.Context, r io.Reader) (string, error) {
 	s.mu.Lock()
 	if s.currentSize >= s.maxSize {
@@ -434,14 +446,59 @@ func (s *CachingStorage) Store(ctx context.Context, r io.Reader) (string, error)
 
 	s.addUsed(addr, actualSize)
 
+	s.mu.Lock()
+	wt := s.writeThrough
+	dest := s.destination
+	s.mu.Unlock()
+
+	if wt && dest != nil {
+		rc, ok := s.local.Get(ctx, addr)
+		if ok {
+			defer rc.Close()
+			_, err := dest.StoreAt(ctx, addr, rc)
+			if err != nil {
+				return "", err
+			}
+			s.destHasMu.Lock()
+			s.destHas[addr] = struct{}{}
+			s.destHasMu.Unlock()
+		}
+	}
+
 	return addr, nil
 }
 
 func (s *CachingStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	s.mu.Lock()
+	wt := s.writeThrough
+	dest := s.destination
+	s.mu.Unlock()
+
 	if s.local.Has(ctx, address) {
 		s.markUsed(address)
 		if closer, ok := r.(io.Closer); ok {
 			closer.Close()
+		}
+		if wt && dest != nil {
+			s.destHasMu.RLock()
+			_, hasDest := s.destHas[address]
+			s.destHasMu.RUnlock()
+			if !hasDest && !dest.Has(ctx, address) {
+				rc, okGet := s.local.Get(ctx, address)
+				if okGet {
+					defer rc.Close()
+					destOk, err := dest.StoreAt(ctx, address, rc)
+					if err != nil {
+						return false, err
+					}
+					if destOk {
+						s.destHasMu.Lock()
+						s.destHas[address] = struct{}{}
+						s.destHasMu.Unlock()
+					}
+					return destOk, nil
+				}
+			}
 		}
 		return true, nil
 	}
@@ -494,6 +551,23 @@ func (s *CachingStorage) StoreAt(ctx context.Context, address string, r io.Reade
 			actualSize = finalSize
 		}
 		s.addUsed(address, actualSize)
+	}
+
+	if ok && wt && dest != nil {
+		rc, okGet := s.local.Get(ctx, address)
+		if okGet {
+			defer rc.Close()
+			destOk, err := dest.StoreAt(ctx, address, rc)
+			if err != nil {
+				return false, err
+			}
+			if destOk {
+				s.destHasMu.Lock()
+				s.destHas[address] = struct{}{}
+				s.destHasMu.Unlock()
+			}
+			return destOk, nil
+		}
 	}
 
 	return ok, nil
@@ -778,4 +852,22 @@ func (s *CachingStorage) BatchStore(ctx context.Context, blocks map[string]io.Re
 		}
 	}
 	return nil
+}
+
+// WithWriteTag creates a new CachingStorage wrapping destination.WithWriteTag if available.
+func (s *CachingStorage) WithWriteTag(tag string) Storage {
+	s.mu.Lock()
+	dest := s.destination
+	wt := s.writeThrough
+	s.mu.Unlock()
+
+	var newDest Storage = dest
+	if dest != nil {
+		if ts, ok := dest.(TaggedStorage); ok {
+			newDest = ts.WithWriteTag(tag)
+		}
+	}
+	newCS := NewCachingStorageNoScan(s.local, newDest, s.maxSize, s.desiredSize, s.delegateOnMax)
+	newCS.SetWriteThrough(wt)
+	return newCS
 }

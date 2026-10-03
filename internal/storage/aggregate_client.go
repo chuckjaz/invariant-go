@@ -199,46 +199,53 @@ func (c *AggregateClient) removeLiveServer(serverID string) {
 	}
 }
 
-// addLiveServer adds a server to the live list.
-func (c *AggregateClient) addLiveServer(serverID string) Storage {
+// addLiveService adds a service to the live list using its ServiceDescription directly.
+func (c *AggregateClient) addLiveService(svc discovery.ServiceDescription) Storage {
 	c.liveMu.Lock()
 	defer c.liveMu.Unlock()
-	if client, ok := c.liveServers[serverID]; ok {
+	if client, ok := c.liveServers[svc.ID]; ok {
 		return client.client
-	}
-
-	if c.discovery == nil {
-		return nil
-	}
-
-	// For adding live server, we're not inside a specific request, so we use Background.
-	// Normally we might want to attach a context to `addLiveServer`, but it's internal caching.
-	svc, ok := c.discovery.Get(context.Background(), serverID)
-	if !ok {
-		return nil
 	}
 
 	transport := &errorTrackingTransport{
 		base:     http.DefaultTransport,
-		serverID: serverID,
-		onError:  c.removeLiveServer, // This will be called asynchronously upon failure
+		serverID: svc.ID,
+		onError:  c.removeLiveServer,
 	}
 
 	httpClient := &http.Client{
 		Transport: transport,
 	}
 
-	// Assuming svc.Address is the base URL
 	client := NewClient(svc.Address, httpClient)
-
 	supportsBatch := slices.Contains(svc.Protocols, "batch-storage-v1")
 
-	c.liveServers[serverID] = liveServerEntry{
+	c.liveServers[svc.ID] = liveServerEntry{
 		client:        client,
 		supportsBatch: supportsBatch,
 	}
-	c.liveIDs = append(c.liveIDs, serverID)
+	c.liveIDs = append(c.liveIDs, svc.ID)
 	return client
+}
+
+// addLiveServer adds a server to the live list.
+func (c *AggregateClient) addLiveServer(serverID string) Storage {
+	c.liveMu.Lock()
+	if client, ok := c.liveServers[serverID]; ok {
+		c.liveMu.Unlock()
+		return client.client
+	}
+	c.liveMu.Unlock()
+
+	if c.discovery == nil {
+		return nil
+	}
+
+	svc, ok := c.discovery.Get(context.Background(), serverID)
+	if !ok {
+		return nil
+	}
+	return c.addLiveService(svc)
 }
 
 // markBlockUsed updates the LRU for the given address indicating which servers have it.
@@ -303,8 +310,6 @@ func (c *AggregateClient) getServersForBlock(address string) []string {
 func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	doOp func(client Storage) (any, bool)) (any, bool) {
 
-	_ = c.ensureLiveServers()
-
 	// 1. Check LRU
 	cachedServerIDs := c.getServersForBlock(address)
 	for _, id := range cachedServerIDs {
@@ -325,32 +330,24 @@ func (c *AggregateClient) readOperation(ctx context.Context, address string,
 	if c.finder != nil {
 		responses, err := c.finder.Find(ctx, address)
 		if err == nil {
-			var successfulIDs []string
-			var finalVal any
-			var success bool
-
 			for _, resp := range responses {
 				if resp.Protocol != "storage-v1" {
 					continue
 				}
 				client := c.addLiveServer(resp.ID)
-				if client != nil && !success {
+				if client != nil {
 					val, okOp := doOp(client)
 					if okOp {
-						successfulIDs = append(successfulIDs, resp.ID)
-						finalVal = val
-						success = true
+						c.markBlockUsed(address, []string{resp.ID})
+						return val, true
 					}
 				}
-			}
-			if success {
-				c.markBlockUsed(address, successfulIDs)
-				return finalVal, true
 			}
 		}
 	}
 
 	// 3. Try all live services as a fallback
+	_ = c.ensureLiveServers()
 	c.liveMu.RLock()
 	liveIDsCopy := append([]string(nil), c.liveIDs...)
 	c.liveMu.RUnlock()
@@ -453,7 +450,7 @@ func (c *AggregateClient) ensureLiveServers() error {
 	}
 
 	for _, svc := range services {
-		c.addLiveServer(svc.ID)
+		c.addLiveService(svc)
 	}
 
 	c.liveMu.Lock()

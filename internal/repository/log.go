@@ -45,14 +45,12 @@ func StreamLog(
 			return err
 		}
 
-		if meta.SlotID != "" {
+		startHash = meta.CommitHash
+		if startHash == "" && meta.SlotID != "" && slotsClient != nil {
 			slotAddr, err := slotsClient.Get(ctx, meta.SlotID)
 			if err == nil && slotAddr != "" {
 				startHash = slotAddr
 			}
-		}
-		if startHash == "" {
-			startHash = meta.CommitHash
 		}
 	}
 

@@ -283,3 +283,52 @@ func TestCachingStorageExtra(t *testing.T) {
 		t.Errorf("Expected missing to be ['b3'], got %v", missing)
 	}
 }
+
+func TestCachingStorageWriteThrough(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+	cs := NewCachingStorage(local, remote, 1000, 800, false)
+	defer cs.Close()
+	cs.SetWriteThrough(true)
+
+	data := []byte("write-through data")
+	addr, err := cs.Store(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("cs.Store failed: %v", err)
+	}
+
+	if !local.Has(context.Background(), addr) {
+		t.Errorf("expected local storage to have block %s", addr)
+	}
+	if !remote.Has(context.Background(), addr) {
+		t.Errorf("expected remote storage to have block %s via write-through", addr)
+	}
+
+	// Test StoreAt with write-through
+	data2 := []byte("write-through store-at data")
+	h2 := sha256.Sum256(data2)
+	addr2 := hex.EncodeToString(h2[:])
+	ok, err := cs.StoreAt(context.Background(), addr2, bytes.NewReader(data2))
+	if err != nil || !ok {
+		t.Fatalf("cs.StoreAt failed: ok=%v, err=%v", ok, err)
+	}
+
+	if !local.Has(context.Background(), addr2) {
+		t.Errorf("expected local storage to have block %s", addr2)
+	}
+	if !remote.Has(context.Background(), addr2) {
+		t.Errorf("expected remote storage to have block %s via write-through StoreAt", addr2)
+	}
+}
+
+func TestCachingStorageWithWriteTag(t *testing.T) {
+	local := NewInMemoryStorage()
+	remote := NewInMemoryStorage()
+	cs := NewCachingStorage(local, remote, 1000, 800, false)
+	defer cs.Close()
+
+	tagged := cs.WithWriteTag("fast")
+	if tagged == nil {
+		t.Fatalf("expected WithWriteTag to return non-nil Storage")
+	}
+}

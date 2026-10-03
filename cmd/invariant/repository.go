@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"invariant/internal/config"
 	"invariant/internal/discovery"
@@ -161,15 +163,196 @@ func runRepository(globalCfg *config.InvariantConfig, args []string) {
 	}
 }
 
+type lazyStorage struct {
+	initFn func() storage.Storage
+	once   sync.Once
+	s      storage.Storage
+}
+
+func (l *lazyStorage) get() storage.Storage {
+	l.once.Do(func() {
+		if l.initFn != nil {
+			l.s = l.initFn()
+		}
+	})
+	return l.s
+}
+
+func (l *lazyStorage) Has(ctx context.Context, address string) bool {
+	s := l.get()
+	if s == nil {
+		return false
+	}
+	return s.Has(ctx, address)
+}
+
+func (l *lazyStorage) Get(ctx context.Context, address string) (io.ReadCloser, bool) {
+	s := l.get()
+	if s == nil {
+		return nil, false
+	}
+	return s.Get(ctx, address)
+}
+
+func (l *lazyStorage) Store(ctx context.Context, r io.Reader) (string, error) {
+	s := l.get()
+	if s == nil {
+		return "", fmt.Errorf("remote storage is not available")
+	}
+	return s.Store(ctx, r)
+}
+
+func (l *lazyStorage) StoreAt(ctx context.Context, address string, r io.Reader) (bool, error) {
+	s := l.get()
+	if s == nil {
+		return false, fmt.Errorf("remote storage is not available")
+	}
+	return s.StoreAt(ctx, address, r)
+}
+
+func (l *lazyStorage) Size(ctx context.Context, address string) (int64, bool) {
+	s := l.get()
+	if s == nil {
+		return 0, false
+	}
+	return s.Size(ctx, address)
+}
+
+func (l *lazyStorage) WithWriteTag(tag string) storage.Storage {
+	s := l.get()
+	if s == nil {
+		return l
+	}
+	if ts, ok := s.(storage.TaggedStorage); ok {
+		return ts.WithWriteTag(tag)
+	}
+	return s
+}
+
+type lazySlots struct {
+	initFn func() slots.Slots
+	once   sync.Once
+	s      slots.Slots
+}
+
+func (l *lazySlots) get() slots.Slots {
+	l.once.Do(func() {
+		if l.initFn != nil {
+			l.s = l.initFn()
+		}
+	})
+	return l.s
+}
+
+func (l *lazySlots) ID() string {
+	s := l.get()
+	if s == nil {
+		return ""
+	}
+	return s.ID()
+}
+
+func (l *lazySlots) Get(ctx context.Context, id string) (string, error) {
+	s := l.get()
+	if s == nil {
+		return "", fmt.Errorf("slots service is not available")
+	}
+	return s.Get(ctx, id)
+}
+
+func (l *lazySlots) Update(ctx context.Context, id string, address string, previousAddress string, auth []byte) error {
+	s := l.get()
+	if s == nil {
+		return fmt.Errorf("slots service is not available")
+	}
+	return s.Update(ctx, id, address, previousAddress, auth)
+}
+
+func (l *lazySlots) Create(ctx context.Context, id string, address string, policy string) error {
+	s := l.get()
+	if s == nil {
+		return fmt.Errorf("slots service is not available")
+	}
+	return s.Create(ctx, id, address, policy)
+}
+
+func (l *lazySlots) List(ctx context.Context, chunkSize int) <-chan []string {
+	s := l.get()
+	if s == nil {
+		ch := make(chan []string)
+		close(ch)
+		return ch
+	}
+	return s.List(ctx, chunkSize)
+}
+
+func (l *lazySlots) Subscribe(ctx context.Context) <-chan string {
+	s := l.get()
+	if s == nil {
+		ch := make(chan string)
+		close(ch)
+		return ch
+	}
+	return s.Subscribe(ctx)
+}
+
+type lazyNames struct {
+	initFn func() names.Names
+	once   sync.Once
+	n      names.Names
+}
+
+func (l *lazyNames) get() names.Names {
+	l.once.Do(func() {
+		if l.initFn != nil {
+			l.n = l.initFn()
+		}
+	})
+	return l.n
+}
+
+func (l *lazyNames) Get(ctx context.Context, name string) (names.NameEntry, error) {
+	n := l.get()
+	if n == nil {
+		return names.NameEntry{}, fmt.Errorf("names service is not available")
+	}
+	return n.Get(ctx, name)
+}
+
+func (l *lazyNames) Put(ctx context.Context, name string, value string, tokens []string) error {
+	n := l.get()
+	if n == nil {
+		return fmt.Errorf("names service is not available")
+	}
+	return n.Put(ctx, name, value, tokens)
+}
+
+func (l *lazyNames) Delete(ctx context.Context, name string, expectedValue string) error {
+	n := l.get()
+	if n == nil {
+		return fmt.Errorf("names service is not available")
+	}
+	return n.Delete(ctx, name, expectedValue)
+}
+
+func (l *lazyNames) Lookup(ctx context.Context, id string) ([]string, error) {
+	n := l.get()
+	if n == nil {
+		return nil, fmt.Errorf("names service is not available")
+	}
+	return n.Lookup(ctx, id)
+}
+
 func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (storage.Storage, slots.Slots, names.Names, commit.Service) {
-	if globalCfg == nil || globalCfg.Discovery == "" {
-		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: discovery service URL is not configured (check ~/.invariant/config.yaml)\n")
-		os.Exit(1)
+	var discClient discovery.Discovery
+	if globalCfg != nil && globalCfg.Discovery != "" {
+		discClient = discovery.NewClient(globalCfg.Discovery, nil)
 	}
 
-	discClient := discovery.NewClient(globalCfg.Discovery, nil)
-
 	findService := func(kind string, tag string) string {
+		if discClient == nil {
+			return ""
+		}
 		id, err := discClient.Find(context.Background(), kind, tag, 1)
 		if err != nil || len(id) == 0 {
 			return ""
@@ -180,9 +363,9 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 	// Determine write tag (default: "originals")
 	writeTag := explicitTag
 	if writeTag == "" {
-		if globalCfg.Repository != nil && globalCfg.Repository.WriteTag != "" {
+		if globalCfg != nil && globalCfg.Repository != nil && globalCfg.Repository.WriteTag != "" {
 			writeTag = globalCfg.Repository.WriteTag
-		} else if globalCfg.WriteTag != "" {
+		} else if globalCfg != nil && globalCfg.WriteTag != "" {
 			writeTag = globalCfg.WriteTag
 		} else {
 			writeTag = "originals"
@@ -192,69 +375,87 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 		writeTag = ""
 	}
 
-	// 1. Initialize Storage with write tag restriction
-	finderAddr := findService("finder-v1", "")
-	var storageClient storage.Storage
-	var aggregateOpts []storage.AggregateClientOption
-	if writeTag != "" {
-		aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
+	lazyStore := &lazyStorage{
+		initFn: func() storage.Storage {
+			if discClient == nil {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: discovery service URL is not configured (check ~/.invariant/config.yaml)\n")
+				os.Exit(1)
+			}
+			finderAddr := findService("finder-v1", "")
+			var aggregateOpts []storage.AggregateClientOption
+			if writeTag != "" {
+				aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
+			}
+
+			if finderAddr != "" {
+				finderClient := finder.NewClient(finderAddr, nil)
+				return storage.NewAggregateClient(finderClient, discClient, 3, 1000, aggregateOpts...)
+			}
+
+			sAddr := findService("storage-v1", writeTag)
+			if sAddr == "" && writeTag != "" {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) with tag %q could not be discovered\n", writeTag)
+				os.Exit(1)
+			}
+			if sAddr == "" {
+				sAddr = findService("storage-v1", "")
+			}
+			if sAddr == "" {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) could not be discovered\n")
+				os.Exit(1)
+			}
+			return storage.NewClient(sAddr, nil)
+		},
 	}
 
-	if finderAddr != "" {
-		finderClient := finder.NewClient(finderAddr, nil)
-		storageClient = storage.NewAggregateClient(finderClient, discClient, 3, 1000, aggregateOpts...)
-	} else {
-		sAddr := findService("storage-v1", writeTag)
-		if sAddr == "" && writeTag != "" {
-			fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) with tag %q could not be discovered\n", writeTag)
-			os.Exit(1)
-		}
-		if sAddr == "" {
-			sAddr, _ = discovery.ResolveName(context.Background(), discClient, "storage-v1")
-		}
-		if sAddr == "" {
-			sAddr = findService("storage-v1", "")
-		}
-		if sAddr == "" {
-			fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) could not be discovered\n")
-			os.Exit(1)
-		}
-		storageClient = storage.NewClient(sAddr, nil)
+	lazySlotsClient := &lazySlots{
+		initFn: func() slots.Slots {
+			if discClient == nil {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: discovery service URL is not configured (check ~/.invariant/config.yaml)\n")
+				os.Exit(1)
+			}
+			slotsAddr := findService("slots-v1", "")
+			if slotsAddr == "" {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: slots service (slots-v1) could not be discovered\n")
+				os.Exit(1)
+			}
+			return slots.NewClient(slotsAddr, nil)
+		},
 	}
 
-	// 2. Initialize Slots
-	slotsAddr, err := discovery.ResolveName(context.Background(), discClient, "slots-v1")
-	if err != nil || slotsAddr == "" {
-		slotsAddr = findService("slots-v1", "")
+	lazyNamesClient := &lazyNames{
+		initFn: func() names.Names {
+			if discClient == nil {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: discovery service URL is not configured (check ~/.invariant/config.yaml)\n")
+				os.Exit(1)
+			}
+			namesAddr := findService("names-v1", "")
+			if namesAddr == "" {
+				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: names service (names-v1) could not be discovered\n")
+				os.Exit(1)
+			}
+			return names.NewClient(namesAddr, nil)
+		},
 	}
-	if slotsAddr == "" {
-		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: slots service (slots-v1) could not be discovered\n")
-		os.Exit(1)
-	}
-	slotsClient := slots.NewClient(slotsAddr, nil)
 
-	// 3. Initialize Names
-	namesAddr, err := discovery.ResolveName(context.Background(), discClient, "names-v1")
-	if err != nil || namesAddr == "" {
-		namesAddr = findService("names-v1", "")
+	var storageClient storage.Storage = lazyStore
+	cacheDir, _ := config.CacheDir()
+	if cacheDir != "" {
+		l2Store := storage.NewFileSystemStorage(cacheDir)
+		maxBytes := int64(10 * 1024 * 1024 * 1024) // 10 GB
+		desiredBytes := maxBytes * 8 / 10
+		cs := storage.NewCachingStorageNoScan(l2Store, lazyStore, maxBytes, desiredBytes, true)
+		cs.SetWriteThrough(true)
+		storageClient = cs
 	}
-	if namesAddr == "" {
-		fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: names service (names-v1) could not be discovered\n")
-		os.Exit(1)
-	}
-	namesClient := names.NewClient(namesAddr, nil)
 
-	commitSvc := commit.NewLocalService(storageClient, slotsClient, namesClient, nil)
-	return storageClient, slotsClient, namesClient, commitSvc
+	commitSvc := commit.NewLocalService(storageClient, lazySlotsClient, lazyNamesClient, nil)
+	return storageClient, lazySlotsClient, lazyNamesClient, commitSvc
 }
 
 func initReviewClient(globalCfg *config.InvariantConfig, storageClient storage.Storage, slotsClient slots.Slots, namesClient names.Names) review.Service {
 	if globalCfg != nil && globalCfg.Discovery != "" {
 		discClient := discovery.NewClient(globalCfg.Discovery, nil)
-		rAddr, err := discovery.ResolveName(context.Background(), discClient, "review-v1")
-		if err == nil && rAddr != "" {
-			return review.NewClient(rAddr, nil)
-		}
 		ids, err := discClient.Find(context.Background(), "review-v1", "", 1)
 		if err == nil && len(ids) > 0 {
 			return review.NewClient(ids[0].Address, nil)
