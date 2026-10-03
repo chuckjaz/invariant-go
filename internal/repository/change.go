@@ -20,6 +20,7 @@ type ChangeOptions struct {
 	Private        bool
 	UpstreamBranch string // default "main"
 	AuthorName     string
+	Subdirectory   bool // if true, creates workspace as a sub-directory of the current branch instead of a peer directory
 }
 
 // FindWorkspaceRoot walks up directory parents searching for a mounted or unmounted repository workspace.
@@ -63,18 +64,51 @@ func CreateChangeBranch(
 		upstream = "main"
 	}
 
-	repoName := filepath.Base(opts.RepoRoot)
-	// Check if current directory has workspace metadata
-	if _, meta, err := FindWorkspaceRoot(opts.RepoRoot); err == nil {
-		repoName = meta.RepoName
+	root := opts.RepoRoot
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	if absRoot, err := filepath.Abs(root); err == nil {
+		root = absRoot
+	}
+
+	repoName := filepath.Base(root)
+	wsRoot, wsMeta, err := FindWorkspaceRoot(root)
+	if err == nil && wsMeta != nil {
+		repoName = wsMeta.RepoName
+	} else {
+		// If root is not a workspace itself, check if upstream branch workspace exists in root
+		if meta, err := ReadWorkspaceMetadata(filepath.Join(root, upstream)); err == nil && meta != nil {
+			repoName = meta.RepoName
+		}
 	}
 
 	// Lookup upstream slot
-	upstreamEntry, err := namesClient.Get(ctx, repoName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup repository %s in names service: %w", repoName, err)
+	var upstreamSlotID string
+	if upstream == "main" {
+		upstreamEntry, err := namesClient.Get(ctx, repoName)
+		if err == nil && upstreamEntry.Value != "" {
+			upstreamSlotID = upstreamEntry.Value
+		} else {
+			entryMain, errMain := namesClient.Get(ctx, repoName+":main")
+			if errMain == nil && entryMain.Value != "" {
+				upstreamSlotID = entryMain.Value
+			}
+		}
+	} else {
+		entry, err := namesClient.Get(ctx, repoName+":"+upstream)
+		if err == nil && entry.Value != "" {
+			upstreamSlotID = entry.Value
+		}
 	}
-	upstreamSlotID := upstreamEntry.Value
+	if upstreamSlotID == "" {
+		upstreamEntry, err := namesClient.Get(ctx, repoName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup repository %s in names service: %w", repoName, err)
+		}
+		upstreamSlotID = upstreamEntry.Value
+	}
+
 	upstreamCommitHash, err := slotsClient.Get(ctx, upstreamSlotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read upstream slot %s: %w", upstreamSlotID, err)
@@ -111,7 +145,26 @@ func CreateChangeBranch(
 	}
 
 	// 4. Create change branch directory and materialize workspace
-	changeDir := filepath.Join(opts.RepoRoot, opts.ChangeName)
+	var changeDir string
+	if wsRoot != "" {
+		if opts.Subdirectory {
+			changeDir = filepath.Join(wsRoot, opts.ChangeName)
+		} else {
+			changeDir = filepath.Join(filepath.Dir(wsRoot), opts.ChangeName)
+		}
+	} else {
+		if opts.Subdirectory {
+			upstreamDir := filepath.Join(root, upstream)
+			if _, err := ReadWorkspaceMetadata(upstreamDir); err == nil {
+				changeDir = filepath.Join(upstreamDir, opts.ChangeName)
+			} else {
+				changeDir = filepath.Join(root, opts.ChangeName)
+			}
+		} else {
+			changeDir = filepath.Join(root, opts.ChangeName)
+		}
+	}
+
 	if err := os.MkdirAll(changeDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create change directory %s: %w", changeDir, err)
 	}

@@ -141,19 +141,22 @@ The workspace is opened as `-writable` instead of read-only.
 ### `ir change <name>`
 **Status:** Implemented
 
-Create a change workspace and change the current working directory to the newly created workspace.
+Create a change workspace and change the current working directory to the newly created workspace. By default, the change workspace is created as a peer directory of the current branch workspace.
 
 The name is registered with the Names Service as `:<user>:<repository name>:<name>` unless `-private` is used.
 
 #### Arguments
 
 ##### `<name>`
-The name of the workspace that is created as a subdirectory of the current repository directory. The upstream branch is the branch of the current directory (for example, in a repository's `main` branch directory, the upstream branch is `main`).
+The name of the workspace that is created as a peer directory of the current branch workspace (or a subdirectory of the repository directory). The upstream branch is the branch of the current directory (for example, in a repository's `main` branch directory, the upstream branch is `main`).
 
 #### Options
 
 ##### `-private`
 Do not publish the branch name with the Names Service.
+
+##### `-sub-directory`, `-subdir`
+Create the change workspace as a sub-directory of the current branch workspace instead of a peer directory.
 
 ---
 
