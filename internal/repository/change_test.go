@@ -118,33 +118,3 @@ func TestCreateChangeBranch_PeerDirectoryDefault(t *testing.T) {
 		t.Errorf("Expected root workspace dir to be %s, got %s", expectedRootPeerDir, metaFromRoot.WorkspaceDir)
 	}
 }
-
-func TestCreateChangeBranch_SubdirectoryOption(t *testing.T) {
-	ctx, store, slotsClient, namesClient, commitSvc, repoDir, _ := setupChangeTestRepo(t)
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-
-	mainWs := filepath.Join(repoDir, "main")
-
-	// When Subdirectory: true is explicitly specified, it should create a sub-directory of the branch
-	metaSub, err := CreateChangeBranch(ctx, store, slotsClient, namesClient, commitSvc, ChangeOptions{
-		RepoRoot:     mainWs,
-		ChangeName:   "feat-sub",
-		AuthorName:   "Alice",
-		Subdirectory: true,
-	})
-	if err != nil {
-		t.Fatalf("CreateChangeBranch feat-sub failed: %v", err)
-	}
-
-	expectedSubDir := filepath.Join(mainWs, "feat-sub")
-	if metaSub.WorkspaceDir != expectedSubDir {
-		t.Errorf("Expected sub-directory workspace dir to be %s, got %s", expectedSubDir, metaSub.WorkspaceDir)
-	}
-	if filepath.Dir(metaSub.WorkspaceDir) != mainWs {
-		t.Errorf("Expected sub-directory parent to be %s, got %s", mainWs, filepath.Dir(metaSub.WorkspaceDir))
-	}
-	if _, err := os.Stat(filepath.Join(expectedSubDir, ".invariant-workspace")); err != nil {
-		t.Errorf("Workspace metadata not found at %s: %v", expectedSubDir, err)
-	}
-}

@@ -378,27 +378,10 @@ func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
 	privateFlag := fs.Bool("private", false, "Create private change branch not published to Names service")
 	upstreamFlag := fs.String("upstream", "main", "Upstream branch to branch from")
 	tagFlag := fs.String("tag", "", "Storage write tag (default: 'originals')")
-	subDirFlag := fs.Bool("sub-directory", false, "Create change workspace as a sub-directory of the current branch instead of a peer directory")
-	fs.BoolVar(subDirFlag, "subdir", false, "Create change workspace as a sub-directory of the current branch instead of a peer directory")
 
-	var flagArgs []string
-	var posArgs []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flagArgs = append(flagArgs, arg)
-			if (arg == "-upstream" || arg == "--upstream" || arg == "-tag" || arg == "--tag") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-				flagArgs = append(flagArgs, args[i])
-			}
-		} else {
-			posArgs = append(posArgs, arg)
-		}
-	}
-	fs.Parse(append(flagArgs, posArgs...))
-
+	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant repository change <name> [-private] [-upstream=main] [-tag=<tag>] [-sub-directory]\n")
+		fmt.Fprintf(os.Stderr, "Usage: invariant repository change <name> [-private] [-upstream=main] [-tag=<tag>]\n")
 		os.Exit(1)
 	}
 
@@ -413,7 +396,6 @@ func runRepoChange(globalCfg *config.InvariantConfig, args []string) {
 		ChangeName:     changeName,
 		Private:        *privateFlag,
 		UpstreamBranch: *upstreamFlag,
-		Subdirectory:   *subDirFlag,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating change branch: %v\n", err)

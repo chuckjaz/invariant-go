@@ -155,9 +155,6 @@ The name of the workspace that is created as a peer directory of the current bra
 ##### `-private`
 Do not publish the branch name with the Names Service.
 
-##### `-sub-directory`, `-subdir`
-Create the change workspace as a sub-directory of the current branch workspace instead of a peer directory.
-
 ---
 
 ### `ir cherry-pick <branch|commit> [<commit>]`

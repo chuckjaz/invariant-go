@@ -20,7 +20,6 @@ type ChangeOptions struct {
 	Private        bool
 	UpstreamBranch string // default "main"
 	AuthorName     string
-	Subdirectory   bool // if true, creates workspace as a sub-directory of the current branch instead of a peer directory
 }
 
 // FindWorkspaceRoot walks up directory parents searching for a mounted or unmounted repository workspace.
@@ -147,22 +146,9 @@ func CreateChangeBranch(
 	// 4. Create change branch directory and materialize workspace
 	var changeDir string
 	if wsRoot != "" {
-		if opts.Subdirectory {
-			changeDir = filepath.Join(wsRoot, opts.ChangeName)
-		} else {
-			changeDir = filepath.Join(filepath.Dir(wsRoot), opts.ChangeName)
-		}
+		changeDir = filepath.Join(filepath.Dir(wsRoot), opts.ChangeName)
 	} else {
-		if opts.Subdirectory {
-			upstreamDir := filepath.Join(root, upstream)
-			if _, err := ReadWorkspaceMetadata(upstreamDir); err == nil {
-				changeDir = filepath.Join(upstreamDir, opts.ChangeName)
-			} else {
-				changeDir = filepath.Join(root, opts.ChangeName)
-			}
-		} else {
-			changeDir = filepath.Join(root, opts.ChangeName)
-		}
+		changeDir = filepath.Join(root, opts.ChangeName)
 	}
 
 	if err := os.MkdirAll(changeDir, 0755); err != nil {
