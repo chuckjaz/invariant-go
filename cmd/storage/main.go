@@ -3,16 +3,16 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
 	"invariant/internal/identity"
+	"invariant/internal/itp"
 	"invariant/internal/kv"
 	"invariant/internal/notify"
 	"invariant/internal/storage"
@@ -64,19 +64,34 @@ func main() {
 	flag.IntVar(&notifyBatchSize, "notify-batch-size", 10000, "Number of block addresses to send per request")
 	var notifyBatchDuration time.Duration
 	flag.DurationVar(&notifyBatchDuration, "notify-duration", 1*time.Second, "Maximum duration to wait before sending a batch of new block notifications")
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
+
 	var s storage.Storage
 	if gitDir != "" {
 		var kvClient kv.BatchKeyValueStore
 		if discoveryURL != "" {
 			dClient := discovery.NewClient(discoveryURL, nil)
+			if authToken != "" {
+				dClient = dClient.WithAuthToken(authToken)
+			}
 			kvAddr, err := discovery.ResolveName(context.Background(), dClient, "kv-v1")
 			if err != nil || kvAddr == "" {
 				ids, _ := dClient.Find(context.Background(), "kv-v1", "", 1)
@@ -114,24 +129,65 @@ func main() {
 	}
 
 	server := storage.NewStorageServer(s)
+	id := s.(identity.Identity).ID()
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath(id)
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
 	}
 
-	actualPort := listener.Addr().(*net.TCPAddr).Port
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
 
 	var dClient *discovery.Client
+	var cp discovery.ControlPlane
 	if discoveryURL != "" {
-		id := s.(identity.Identity).ID()
-		dClient = discovery.NewClient(discoveryURL, nil)
+		dClient = discovery.NewClient(discoveryURL, httpClient)
+		if authToken != "" {
+			dClient = dClient.WithAuthToken(authToken)
+		}
+		cp = dClient
+	}
+
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: cp,
+		DERPMapURL:   derpMapURL,
+	})
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	if dClient != nil {
+		nodeIdent := discovery.NodeIdentity{
+			Name: name,
+		}
+		_ = dClient.RegisterClient(context.Background(), privKey.Private.Public().String(), nodeIdent)
 
 		// Configure the storage server to use discovery for fetching
 		server.WithDiscovery(dClient)
 
-		err := discovery.AdvertiseAndRegister(context.Background(), dClient, id, advertiseAddr, actualPort, []string{"storage-v1", "batch-storage-v1"}, tagFlags.Tags())
+		advertise := advertiseAddr
+		if advertise == "" && !listenIP {
+			advertise = listener.ITPAddr
+		}
+
+		err := discovery.AdvertiseAndRegister(
+			context.Background(),
+			dClient,
+			id,
+			advertise,
+			listener.Port(),
+			[]string{"storage-v1", "batch-storage-v1"},
+			tagFlags.Tags(),
+			discovery.WithPublicKey(privKey.Private.Public().String()),
+			discovery.WithIdentity(nodeIdent),
+		)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -171,7 +227,7 @@ func main() {
 				continue
 			}
 
-			notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
+			notifyClients = append(notifyClients, notify.NewClient(desc.Address, httpClient))
 		}
 	}
 
@@ -180,11 +236,8 @@ func main() {
 			log.Fatalf("Discovery service is required to use the -distribute flag")
 		}
 
-		dClient := discovery.NewClient(discoveryURL, nil)
-		var distID string
-
 		// If it's a 64-character hex string, it's an ID. Otherwise, resolve it via names service.
-		distID, err = resolveWithRetry(dClient, distributeArg, 5, 2*time.Second)
+		distID, err := resolveWithRetry(dClient, distributeArg, 5, 2*time.Second)
 		if err != nil {
 			log.Fatalf("Warning: Could not resolve distribute name %v", err)
 		}
@@ -194,14 +247,13 @@ func main() {
 			log.Fatalf("Could not find distribute service %s in discovery", distID)
 		}
 
-		distClient := distribute.NewClient(desc.Address, nil)
-		id := s.(identity.Identity).ID()
+		distClient := distribute.NewClient(desc.Address, httpClient)
 		if err := distClient.Register(id); err != nil {
 			log.Fatalf("Failed to register with distribute service %s: %v", distID, err)
 		}
 		log.Printf("Registered with distribute service %s at %s", distID, desc.Address)
 
-		notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
+		notifyClients = append(notifyClients, notify.NewClient(desc.Address, httpClient))
 	}
 
 	if len(notifyClients) > 0 {
@@ -212,7 +264,11 @@ func main() {
 		server.WithTracer(trace.NewTracer(10000))
 	}
 
-	log.Printf("Listening on :%d...", actualPort)
+	if listenIP {
+		log.Printf("Listening on :%d (HTTP)...", listener.Port())
+	} else {
+		log.Printf("Listening on %s (ITP Address: %s, Public Key: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
 	if s3Bucket != "" {
 		log.Printf("Using S3 storage at bucket %s (prefix: %s)", s3Bucket, s3Prefix)
 	} else if dir != "" {

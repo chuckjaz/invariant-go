@@ -345,8 +345,9 @@ func (l *lazyNames) Lookup(ctx context.Context, id string) ([]string, error) {
 
 func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (storage.Storage, slots.Slots, names.Names, commit.Service) {
 	var discClient discovery.Discovery
+	var httpClient = newHTTPClient(globalCfg)
 	if globalCfg != nil && globalCfg.Discovery != "" {
-		discClient = discovery.NewClient(globalCfg.Discovery, nil)
+		discClient = newDiscoveryClient(globalCfg.Discovery, globalCfg)
 	}
 
 	findService := func(kind string, tag string) string {
@@ -388,7 +389,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 			}
 
 			if finderAddr != "" {
-				finderClient := finder.NewClient(finderAddr, nil)
+				finderClient := finder.NewClient(finderAddr, httpClient)
 				return storage.NewAggregateClient(finderClient, discClient, 3, 1000, aggregateOpts...)
 			}
 
@@ -404,7 +405,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: storage service (storage-v1) could not be discovered\n")
 				os.Exit(1)
 			}
-			return storage.NewClient(sAddr, nil)
+			return storage.NewClient(sAddr, httpClient)
 		},
 	}
 
@@ -419,7 +420,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: slots service (slots-v1) could not be discovered\n")
 				os.Exit(1)
 			}
-			return slots.NewClient(slotsAddr, nil)
+			return slots.NewClient(slotsAddr, httpClient)
 		},
 	}
 
@@ -434,7 +435,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 				fmt.Fprintf(os.Stderr, "Invariant is not configured correctly: names service (names-v1) could not be discovered\n")
 				os.Exit(1)
 			}
-			return names.NewClient(namesAddr, nil)
+			return names.NewClient(namesAddr, httpClient)
 		},
 	}
 
@@ -455,10 +456,11 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 
 func initReviewClient(globalCfg *config.InvariantConfig, storageClient storage.Storage, slotsClient slots.Slots, namesClient names.Names) review.Service {
 	if globalCfg != nil && globalCfg.Discovery != "" {
-		discClient := discovery.NewClient(globalCfg.Discovery, nil)
+		discClient := newDiscoveryClient(globalCfg.Discovery, globalCfg)
 		ids, err := discClient.Find(context.Background(), "review-v1", "", 1)
 		if err == nil && len(ids) > 0 {
-			return review.NewClient(ids[0].Address, nil)
+			httpClient := newHTTPClient(globalCfg)
+			return review.NewClient(ids[0].Address, httpClient)
 		}
 	}
 	return review.NewLocalService(storageClient, slotsClient, namesClient)
@@ -1513,7 +1515,7 @@ func initKVClient(globalCfg *config.InvariantConfig) kv.BatchKeyValueStore {
 	if globalCfg == nil || globalCfg.Discovery == "" {
 		return kv.NewMemoryKeyValueStore()
 	}
-	discClient := discovery.NewClient(globalCfg.Discovery, nil)
+	discClient := newDiscoveryClient(globalCfg.Discovery, globalCfg)
 	kvAddr, err := discovery.ResolveName(context.Background(), discClient, "kv-v1")
 	if err != nil || kvAddr == "" {
 		ids, _ := discClient.Find(context.Background(), "kv-v1", "", 1)
@@ -1522,7 +1524,8 @@ func initKVClient(globalCfg *config.InvariantConfig) kv.BatchKeyValueStore {
 		}
 	}
 	if kvAddr != "" {
-		return kv.NewClient(kvAddr, nil)
+		httpClient := newHTTPClient(globalCfg)
+		return kv.NewClient(kvAddr, httpClient)
 	}
 	return kv.NewMemoryKeyValueStore()
 }

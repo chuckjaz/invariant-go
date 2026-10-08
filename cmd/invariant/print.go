@@ -11,7 +11,6 @@ import (
 
 	"invariant/internal/config"
 	"invariant/internal/content"
-	"invariant/internal/discovery"
 	"invariant/internal/filetree"
 	"invariant/internal/finder"
 	"invariant/internal/names"
@@ -62,8 +61,8 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	var dClient discovery.Discovery
-	dClient = discovery.NewClient(discoveryURL, nil)
+	dClient := newDiscoveryClient(discoveryURL, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	descs, err := dClient.Find(context.Background(), "", "", 1000)
 	if err != nil {
@@ -85,7 +84,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		fmt.Fprintf(os.Stderr, "Could not find finder-v1 service\n")
 		os.Exit(1)
 	}
-	finderClient := finder.NewClient(finderAddr, nil)
+	finderClient := finder.NewClient(finderAddr, httpClient)
 	baseStorageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 	storageClient, _ := SetupCacheStorage(&cmFlags, baseStorageClient)
 

@@ -46,10 +46,8 @@ func createTestTree(ctx context.Context, store storage.Storage, files map[string
 			panic(err)
 		}
 		dir = append(dir, &filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{
-				Name: name,
-				Kind: filetree.FileKind,
-			},
+			Name:    name,
+			Kind:    filetree.FileKind,
 			Content: cLink,
 			Size:    uint64(len(contentStr)),
 		})

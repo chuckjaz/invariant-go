@@ -39,7 +39,7 @@ func runLookup(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	dClient := discovery.NewClient(discoveryURL, nil)
+	dClient := newDiscoveryClient(discoveryURL, globalCfg)
 
 	resolved, err := discovery.ResolveName(context.Background(), dClient, name)
 	if err != nil {

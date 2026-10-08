@@ -7,18 +7,23 @@ import (
 	"time"
 )
 
-// Assert that InMemoryDiscovery implements the Discovery interface
-var _ Discovery = (*InMemoryDiscovery)(nil)
+// Assert that InMemoryDiscovery implements Discovery and ControlPlane interfaces
+var (
+	_ Discovery    = (*InMemoryDiscovery)(nil)
+	_ ControlPlane = (*InMemoryDiscovery)(nil)
+)
 
 type InMemoryDiscovery struct {
 	mu       sync.RWMutex
 	services map[string]ServiceRegistration
+	clients  map[string]NodeIdentity
 	tracker  *HealthTracker
 }
 
 func NewInMemoryDiscovery() *InMemoryDiscovery {
 	d := &InMemoryDiscovery{
 		services: make(map[string]ServiceRegistration),
+		clients:  make(map[string]NodeIdentity),
 	}
 	return d
 }
@@ -68,11 +73,17 @@ func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescript
 		tagsCopy = make([]string, len(reg.Tags))
 		copy(tagsCopy, reg.Tags)
 	}
+	var idCopy *NodeIdentity
+	if reg.Identity != nil {
+		idCopy = &NodeIdentity{Name: reg.Identity.Name, Email: reg.Identity.Email}
+	}
 	return ServiceDescription{
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: protocolsCopy,
 		Tags:      tagsCopy,
+		PublicKey: reg.PublicKey,
+		Identity:  idCopy,
 	}, true
 }
 
@@ -91,11 +102,17 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol, tag string, coun
 				tagsCopy = make([]string, len(reg.Tags))
 				copy(tagsCopy, reg.Tags)
 			}
+			var idCopy *NodeIdentity
+			if reg.Identity != nil {
+				idCopy = &NodeIdentity{Name: reg.Identity.Name, Email: reg.Identity.Email}
+			}
 			results = append(results, ServiceDescription{
 				ID:        reg.ID,
 				Address:   reg.Address,
 				Protocols: protocolsCopy,
 				Tags:      tagsCopy,
+				PublicKey: reg.PublicKey,
+				Identity:  idCopy,
 			})
 		}
 	}
@@ -123,14 +140,71 @@ func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistratio
 		tagsCopy = make([]string, len(reg.Tags))
 		copy(tagsCopy, reg.Tags)
 	}
+	var idCopy *NodeIdentity
+	if reg.Identity != nil {
+		idCopy = &NodeIdentity{Name: reg.Identity.Name, Email: reg.Identity.Email}
+	}
 	d.services[reg.ID] = ServiceRegistration{
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: protocolsCopy,
 		Tags:      tagsCopy,
+		PublicKey: reg.PublicKey,
+		Identity:  idCopy,
 	}
 	if d.tracker != nil {
 		d.tracker.MarkHealthy(reg.ID)
 	}
 	return nil
+}
+
+func (d *InMemoryDiscovery) RegisterClient(ctx context.Context, publicKey string, id NodeIdentity) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.clients[publicKey] = id
+	return nil
+}
+
+func (d *InMemoryDiscovery) VerifyKey(ctx context.Context, publicKey string) (bool, *NodeIdentity, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if id, ok := d.clients[publicKey]; ok {
+		idCopy := id
+		return true, &idCopy, nil
+	}
+
+	for _, reg := range d.services {
+		if reg.PublicKey != "" && reg.PublicKey == publicKey {
+			if reg.Identity != nil {
+				idCopy := *reg.Identity
+				return true, &idCopy, nil
+			}
+			return true, &NodeIdentity{Name: reg.ID}, nil
+		}
+	}
+
+	return false, nil, nil
+}
+
+func (d *InMemoryDiscovery) AuthorizedKeys(ctx context.Context) ([]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	keySet := make(map[string]struct{})
+	for k := range d.clients {
+		keySet[k] = struct{}{}
+	}
+	for _, reg := range d.services {
+		if reg.PublicKey != "" {
+			keySet[reg.PublicKey] = struct{}{}
+		}
+	}
+
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys, nil
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/itp"
 	"invariant/internal/tags"
 	"invariant/internal/trace"
 )
@@ -33,13 +33,25 @@ func main() {
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	tagFlags := tags.RegisterFlags()
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 3004, "Port to listen on (using 3004 to not conflict with storage/discovery)")
+	flag.IntVar(&port, "port", 3004, "Port to listen on when -listen-ip is enabled (using 3004 by default)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
+
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
 
 	if id == "" {
 		if dir != "" {
@@ -63,13 +75,60 @@ func main() {
 		log.Fatalf("Failed to create finder: %v", err)
 	}
 
-	addr := fmt.Sprintf(":%d", port)
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath(id)
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
+	if err != nil {
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
+	}
 
-	var disc discovery.Discovery
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+
+	var disc *discovery.Client
+	var cp discovery.ControlPlane
 	if discoveryURL != "" {
-		disc = discovery.NewClient(discoveryURL, nil)
+		disc = discovery.NewClient(discoveryURL, httpClient)
+		if authToken != "" {
+			disc = disc.WithAuthToken(authToken)
+		}
+		cp = disc
+	}
 
-		err := discovery.AdvertiseAndRegister(context.Background(), disc, id, advertiseAddr, port, []string{"finder-v1", "notify-v1"}, tagFlags.Tags())
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: cp,
+		DERPMapURL:   derpMapURL,
+	})
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	if disc != nil {
+		nodeIdent := discovery.NodeIdentity{
+			Name: name,
+		}
+		_ = disc.RegisterClient(context.Background(), privKey.Private.Public().String(), nodeIdent)
+
+		advertise := advertiseAddr
+		if advertise == "" && !listenIP {
+			advertise = listener.ITPAddr
+		}
+
+		err := discovery.AdvertiseAndRegister(
+			context.Background(),
+			disc,
+			id,
+			advertise,
+			listener.Port(),
+			[]string{"finder-v1", "notify-v1"},
+			tagFlags.Tags(),
+			discovery.WithPublicKey(privKey.Private.Public().String()),
+			discovery.WithIdentity(nodeIdent),
+		)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -92,8 +151,12 @@ func main() {
 		server.WithTracer(trace.NewTracer(10000))
 	}
 
-	log.Printf("Finder service (ID %s) listening on %s...", id, addr)
+	if listenIP {
+		log.Printf("Finder service (ID %s) listening on :%d (HTTP)...", id, listener.Port())
+	} else {
+		log.Printf("Finder service (ID %s) listening on %s (ITP Address: %s, Public Key: %s)...", id, listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
 	log.Printf("Using In-Memory routing and storage mapping")
 
-	log.Fatal(http.ListenAndServe(addr, server))
+	log.Fatal(http.Serve(listener, server))
 }

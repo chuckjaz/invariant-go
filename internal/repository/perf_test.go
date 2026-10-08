@@ -106,10 +106,8 @@ func TestBenchmark_IRVsGit_Comparison(t *testing.T) {
 		payload := bytes.Repeat([]byte("a"), fileSize)
 		cLink, _ := content.Write(bytes.NewReader(payload), store, content.WriterOptions{})
 		dirEntries = append(dirEntries, &filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{
-				Name: fmt.Sprintf("file_%04d.txt", i),
-				Kind: filetree.FileKind,
-			},
+			Name:    fmt.Sprintf("file_%04d.txt", i),
+			Kind:    filetree.FileKind,
 			Content: cLink,
 			Size:    uint64(len(payload)),
 		})
@@ -154,9 +152,9 @@ func TestBenchmark_IRVsGit_Comparison(t *testing.T) {
 		cLink, _ := content.Write(bytes.NewReader([]byte(msg)), store, content.WriterOptions{})
 		var subDir filetree.Directory
 		subDir = append(subDir, &filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{Name: "history.txt", Kind: filetree.FileKind},
-			Content:   cLink,
-			Size:      uint64(len(msg)),
+			Name: "history.txt", Kind: filetree.FileKind,
+			Content: cLink,
+			Size:    uint64(len(msg)),
 		})
 		subJSON, _ := json.Marshal(subDir)
 		tLink, _ := content.Write(bytes.NewReader(subJSON), store, content.WriterOptions{})
@@ -220,9 +218,9 @@ func TestTreeManifestCaching(t *testing.T) {
 		data := fmt.Appendf(nil, "file content %d", i)
 		cLink, _ := content.Write(bytes.NewReader(data), store, content.WriterOptions{})
 		dir = append(dir, &filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{Name: fmt.Sprintf("file_%04d.txt", i), Kind: filetree.FileKind},
-			Content:   cLink,
-			Size:      uint64(len(data)),
+			Name: fmt.Sprintf("file_%04d.txt", i), Kind: filetree.FileKind,
+			Content: cLink,
+			Size:    uint64(len(data)),
 		})
 	}
 	dirJSON, _ := json.Marshal(dir)

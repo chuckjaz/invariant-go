@@ -100,7 +100,7 @@ func ExecuteRevert(ctx context.Context, store storage.Storage, slotsClient slots
 		return nil, fmt.Errorf("failed to update workspace disk: %w", err)
 	}
 
-	firstLine := strings.Split(strings.TrimSpace(targetCommit.Message), "\n")[0]
+	firstLine, _, _ := strings.Cut(strings.TrimSpace(targetCommit.Message), "\n")
 	revertMsg := fmt.Sprintf("Revert %q\n\nThis reverts commit %s.", firstLine, targetHash)
 
 	newCommit, newHash, err := commitSvc.CreateCommit(ctx, commit.CreateRequest{

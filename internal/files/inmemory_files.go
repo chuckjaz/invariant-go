@@ -798,39 +798,33 @@ func (s *InMemoryFiles) readDirectoryEntriesLocked(node *Node) filetree.Director
 		switch child.Kind {
 		case filetree.FileKind:
 			entries = append(entries, &filetree.FileEntry{
-				BaseEntry: filetree.BaseEntry{
-					Kind:       filetree.FileKind,
-					Name:       name,
-					CreateTime: child.CreateTime,
-					ModifyTime: child.ModifyTime,
-					Mode:       child.Mode,
-				},
-				Content: child.Content,
-				Size:    child.Size,
-				Type:    child.Type,
+				Kind:       filetree.FileKind,
+				Name:       name,
+				CreateTime: child.CreateTime,
+				ModifyTime: child.ModifyTime,
+				Mode:       child.Mode,
+				Content:    child.Content,
+				Size:       child.Size,
+				Type:       child.Type,
 			})
 		case filetree.DirectoryKind:
 			entries = append(entries, &filetree.DirectoryEntry{
-				BaseEntry: filetree.BaseEntry{
-					Kind:       filetree.DirectoryKind,
-					Name:       name,
-					CreateTime: child.CreateTime,
-					ModifyTime: child.ModifyTime,
-					Mode:       child.Mode,
-				},
-				Content: child.Content,
-				Size:    child.Size,
+				Kind:       filetree.DirectoryKind,
+				Name:       name,
+				CreateTime: child.CreateTime,
+				ModifyTime: child.ModifyTime,
+				Mode:       child.Mode,
+				Content:    child.Content,
+				Size:       child.Size,
 			})
 		case filetree.SymbolicLinkKind:
 			entries = append(entries, &filetree.SymbolicLinkEntry{
-				BaseEntry: filetree.BaseEntry{
-					Kind:       filetree.SymbolicLinkKind,
-					Name:       name,
-					CreateTime: child.CreateTime,
-					ModifyTime: child.ModifyTime,
-					Mode:       child.Mode,
-				},
-				Target: child.Target,
+				Kind:       filetree.SymbolicLinkKind,
+				Name:       name,
+				CreateTime: child.CreateTime,
+				ModifyTime: child.ModifyTime,
+				Mode:       child.Mode,
+				Target:     child.Target,
 			})
 		}
 	}
@@ -1487,16 +1481,14 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 				switch child.Kind {
 				case filetree.FileKind:
 					entries = append(entries, &filetree.FileEntry{
-						BaseEntry: filetree.BaseEntry{
-							Kind:       filetree.FileKind,
-							Name:       name,
-							CreateTime: child.CreateTime,
-							ModifyTime: child.ModifyTime,
-							Mode:       child.Mode,
-						},
-						Content: child.LayerContents[layerIdx], // Use layer specific content if exists
-						Size:    child.Size,
-						Type:    child.Type,
+						Kind:       filetree.FileKind,
+						Name:       name,
+						CreateTime: child.CreateTime,
+						ModifyTime: child.ModifyTime,
+						Mode:       child.Mode,
+						Content:    child.LayerContents[layerIdx], // Use layer specific content if exists
+						Size:       child.Size,
+						Type:       child.Type,
 					})
 					// Fallback for flat files without divergence
 					if child.LayerContents[layerIdx].Address == "" && child.Content.Address != "" {
@@ -1505,26 +1497,22 @@ func (s *InMemoryFiles) writeNodeLocked(id uint64) error {
 					}
 				case filetree.DirectoryKind:
 					entries = append(entries, &filetree.DirectoryEntry{
-						BaseEntry: filetree.BaseEntry{
-							Kind:       filetree.DirectoryKind,
-							Name:       name,
-							CreateTime: child.CreateTime,
-							ModifyTime: child.ModifyTime,
-							Mode:       child.Mode,
-						},
-						Content: child.LayerContents[layerIdx],
-						Size:    child.Size, // Size is basically approximate for directories
+						Kind:       filetree.DirectoryKind,
+						Name:       name,
+						CreateTime: child.CreateTime,
+						ModifyTime: child.ModifyTime,
+						Mode:       child.Mode,
+						Content:    child.LayerContents[layerIdx],
+						Size:       child.Size, // Size is basically approximate for directories
 					})
 				case filetree.SymbolicLinkKind:
 					entries = append(entries, &filetree.SymbolicLinkEntry{
-						BaseEntry: filetree.BaseEntry{
-							Kind:       filetree.SymbolicLinkKind,
-							Name:       name,
-							CreateTime: child.CreateTime,
-							ModifyTime: child.ModifyTime,
-							Mode:       child.Mode,
-						},
-						Target: child.Target,
+						Kind:       filetree.SymbolicLinkKind,
+						Name:       name,
+						CreateTime: child.CreateTime,
+						ModifyTime: child.ModifyTime,
+						Mode:       child.Mode,
+						Target:     child.Target,
 					})
 				}
 			}

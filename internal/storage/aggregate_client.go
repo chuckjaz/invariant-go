@@ -78,7 +78,7 @@ type AggregateClient struct {
 	discoveredAll   bool
 	discoveredWrite bool
 	liveCounter     uint64
-	writeCounter    uint64
+	writeCounter    atomic.Uint64
 
 	// LRU Cache for block locations
 	maxBlocks int
@@ -537,7 +537,7 @@ func (c *AggregateClient) writeOperation(ctx context.Context, doOp func(client S
 	}
 
 	// Round robin through them until one succeeds
-	startIdx := atomic.AddUint64(&c.writeCounter, 1)
+	startIdx := c.writeCounter.Add(1)
 
 	for i := range ids {
 		idx := (startIdx + uint64(i)) % uint64(len(ids))

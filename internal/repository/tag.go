@@ -264,7 +264,7 @@ func FormatTagList(tags []TagInfo) string {
 		details := ""
 		if t.TargetCommit != nil {
 			dateStr := time.Unix(t.CreatedAt, 0).Format("2006-01-02")
-			firstLine := strings.Split(t.TargetCommit.Message, "\n")[0]
+			firstLine, _, _ := strings.Cut(t.TargetCommit.Message, "\n")
 			if len(firstLine) > 40 {
 				firstLine = firstLine[:37] + "..."
 			}

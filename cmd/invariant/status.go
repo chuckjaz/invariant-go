@@ -22,7 +22,8 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 		log.Fatalf("Discovery service address is not configured in ~/.invariant/config.yaml")
 	}
 
-	client := discovery.NewClient(globalCfg.Discovery, nil)
+	client := newDiscoveryClient(globalCfg.Discovery, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -50,7 +51,7 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	var nameClients []names.Names
 	for _, d := range descs {
 		if slices.Contains(d.Protocols, "names-v1") {
-			nameClients = append(nameClients, names.NewClient(d.Address, nil))
+			nameClients = append(nameClients, names.NewClient(d.Address, httpClient))
 		}
 	}
 
@@ -59,7 +60,7 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 		go func(i int, d discovery.ServiceDescription) {
 			defer wg.Done()
 
-			idClient := identity.NewClient(d.Address, nil)
+			idClient := identity.NewClient(d.Address, httpClient)
 			actualID := idClient.ID()
 
 			status := "OFFLINE / ERROR"

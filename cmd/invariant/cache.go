@@ -70,7 +70,8 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 
 	ranDirectTraversal := false
 	if discURL != "" && (mountCfg.RootAddr != "" || mountCfg.Slot != "") {
-		dClient := discovery.NewClient(discURL, nil)
+		dClient := newDiscoveryClient(discURL, globalCfg)
+		httpClient := newHTTPClient(globalCfg)
 
 		findService := func(kind string) string {
 			id, err := dClient.Find(context.Background(), kind, "", 1)
@@ -84,12 +85,12 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 		slotsAddr := findService("slots-v1")
 
 		if finderAddr != "" {
-			finderClient := finder.NewClient(finderAddr, nil)
+			finderClient := finder.NewClient(finderAddr, httpClient)
 			storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 
 			var slotsClient slots.Slots
 			if slotsAddr != "" {
-				slotsClient = slots.NewClient(slotsAddr, nil)
+				slotsClient = slots.NewClient(slotsAddr, httpClient)
 			}
 
 			l2Store := storage.NewFileSystemStorage(cacheDir)

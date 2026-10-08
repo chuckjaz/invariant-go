@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"invariant/internal/content"
@@ -252,8 +253,8 @@ func (s *FileKeyValueStore) isVisibleLocked(txID uint64, recordTxID uint64) bool
 
 func (s *FileKeyValueStore) getLatestCommittedTxIDLocked(ctx context.Context, key string) (uint64, bool) {
 	if indices, ok := s.pendingIndex[key]; ok {
-		for i := len(indices) - 1; i >= 0; i-- {
-			rec := s.pendingRecords[indices[i]]
+		for _, indice := range slices.Backward(indices) {
+			rec := s.pendingRecords[indice]
 			if tx, ok := s.transactions[rec.TransactionID]; ok && tx.State == TxCommitted {
 				return rec.TransactionID, true
 			}
@@ -261,8 +262,8 @@ func (s *FileKeyValueStore) getLatestCommittedTxIDLocked(ctx context.Context, ke
 	}
 	if s.isMerging {
 		if indices, ok := s.mergingIndex[key]; ok {
-			for i := len(indices) - 1; i >= 0; i-- {
-				rec := s.mergingRecords[indices[i]]
+			for _, indice := range slices.Backward(indices) {
+				rec := s.mergingRecords[indice]
 				if tx, ok := s.transactions[rec.TransactionID]; ok && tx.State == TxCommitted {
 					return rec.TransactionID, true
 				}
@@ -659,8 +660,8 @@ func (s *FileKeyValueStore) Get(ctx context.Context, txID *uint64, key string) (
 	var found bool
 
 	if indices, ok := s.pendingIndex[key]; ok {
-		for i := len(indices) - 1; i >= 0; i-- {
-			rec := s.pendingRecords[indices[i]]
+		for _, indice := range slices.Backward(indices) {
+			rec := s.pendingRecords[indice]
 			if s.isVisibleLocked(id, rec.TransactionID) {
 				valBytes = rec.Value
 				foundTxID = rec.TransactionID
@@ -671,8 +672,8 @@ func (s *FileKeyValueStore) Get(ctx context.Context, txID *uint64, key string) (
 	}
 	if !found && s.isMerging {
 		if indices, ok := s.mergingIndex[key]; ok {
-			for i := len(indices) - 1; i >= 0; i-- {
-				rec := s.mergingRecords[indices[i]]
+			for _, indice := range slices.Backward(indices) {
+				rec := s.mergingRecords[indice]
 				if s.isVisibleLocked(id, rec.TransactionID) {
 					valBytes = rec.Value
 					foundTxID = rec.TransactionID
@@ -787,8 +788,8 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 	}
 
 	if indices, ok := s.pendingIndex[key]; ok {
-		for i := len(indices) - 1; i >= 0; i-- {
-			rec := s.pendingRecords[indices[i]]
+		for _, indice := range slices.Backward(indices) {
+			rec := s.pendingRecords[indice]
 			visible := s.isVisibleLocked(id, rec.TransactionID)
 			inRange := rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID
 			if inRange && visible {
@@ -806,8 +807,8 @@ func (s *FileKeyValueStore) GetHistory(ctx context.Context, txID *uint64, key st
 	}
 	if s.isMerging {
 		if indices, ok := s.mergingIndex[key]; ok {
-			for i := len(indices) - 1; i >= 0; i-- {
-				rec := s.mergingRecords[indices[i]]
+			for _, indice := range slices.Backward(indices) {
+				rec := s.mergingRecords[indice]
 				if rec.TransactionID <= maxTxID && rec.TransactionID >= minTxID && s.isVisibleLocked(id, rec.TransactionID) {
 					page.Values = append(page.Values, ValueWithTransaction{
 						Value:         rec.Value,

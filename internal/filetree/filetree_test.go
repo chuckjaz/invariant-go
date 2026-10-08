@@ -21,97 +21,95 @@ func TestEntryValidation(t *testing.T) {
 		{
 			name: "valid file entry",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{
-					Kind:       FileKind,
-					Name:       "test.txt",
-					CreateTime: new(uint64(1000)),
-					ModifyTime: new(uint64(1000)),
-					Mode:       new("0644"),
-				},
-				Content: content.ContentLink{Address: "hash123"},
-				Size:    1024,
-				Type:    "text/plain",
+				Kind:       FileKind,
+				Name:       "test.txt",
+				CreateTime: new(uint64(1000)),
+				ModifyTime: new(uint64(1000)),
+				Mode:       new("0644"),
+				Content:    content.ContentLink{Address: "hash123"},
+				Size:       1024,
+				Type:       "text/plain",
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid name (empty)",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: ""},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: "",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid name (.)",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "."},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: ".",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid name (..)",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: ".."},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: "..",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid name (slash)",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "a/b"},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: "a/b",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid name (DOS special)",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "con.txt"},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: "con.txt",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid mode",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "test", Mode: new("888")},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: FileKind, Name: "test", Mode: new("888"),
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid mime type",
 			entry: &FileEntry{
-				BaseEntry: BaseEntry{Kind: FileKind, Name: "test"},
-				Content:   content.ContentLink{Address: "hash123"},
-				Type:      "invalid-mime",
+				Kind: FileKind, Name: "test",
+				Content: content.ContentLink{Address: "hash123"},
+				Type:    "invalid-mime",
 			},
 			wantErr: true,
 		},
 		{
 			name: "valid directory entry",
 			entry: &DirectoryEntry{
-				BaseEntry: BaseEntry{Kind: DirectoryKind, Name: "dir"},
-				Content:   content.ContentLink{Address: "hash123"},
+				Kind: DirectoryKind, Name: "dir",
+				Content: content.ContentLink{Address: "hash123"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid symlink entry",
 			entry: &SymbolicLinkEntry{
-				BaseEntry: BaseEntry{Kind: SymbolicLinkKind, Name: "link"},
-				Target:    "target/path",
+				Kind: SymbolicLinkKind, Name: "link",
+				Target: "target/path",
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid symlink target",
 			entry: &SymbolicLinkEntry{
-				BaseEntry: BaseEntry{Kind: SymbolicLinkKind, Name: "link"},
-				Target:    "",
+				Kind: SymbolicLinkKind, Name: "link",
+				Target: "",
 			},
 			wantErr: true,
 		},
@@ -129,29 +127,23 @@ func TestEntryValidation(t *testing.T) {
 func TestDirectoryMarshalUnmarshal(t *testing.T) {
 	original := Directory{
 		&FileEntry{
-			BaseEntry: BaseEntry{
-				Kind:       FileKind,
-				Name:       "file.txt",
-				CreateTime: new(uint64(12345)),
-				Mode:       new("0644"),
-			},
-			Content: content.ContentLink{Address: "addr1"},
-			Size:    100,
-			Type:    "text/plain",
+			Kind:       FileKind,
+			Name:       "file.txt",
+			CreateTime: new(uint64(12345)),
+			Mode:       new("0644"),
+			Content:    content.ContentLink{Address: "addr1"},
+			Size:       100,
+			Type:       "text/plain",
 		},
 		&DirectoryEntry{
-			BaseEntry: BaseEntry{
-				Kind: DirectoryKind,
-				Name: "subdir",
-			},
+			Kind:    DirectoryKind,
+			Name:    "subdir",
 			Content: content.ContentLink{Address: "addr2"},
 			Size:    200,
 		},
 		&SymbolicLinkEntry{
-			BaseEntry: BaseEntry{
-				Kind: SymbolicLinkKind,
-				Name: "symlink",
-			},
+			Kind:   SymbolicLinkKind,
+			Name:   "symlink",
 			Target: "../target",
 		},
 	}
@@ -191,18 +183,14 @@ func TestDirectoryMarshalUnmarshal(t *testing.T) {
 func TestDirectoryValidation_DuplicateNames(t *testing.T) {
 	dir := Directory{
 		&FileEntry{
-			BaseEntry: BaseEntry{
-				Kind: FileKind,
-				Name: "duplicate.txt",
-			},
+			Kind:    FileKind,
+			Name:    "duplicate.txt",
 			Content: content.ContentLink{Address: "addr1"},
 			Size:    10,
 		},
 		&FileEntry{
-			BaseEntry: BaseEntry{
-				Kind: FileKind,
-				Name: "duplicate.txt",
-			},
+			Kind:    FileKind,
+			Name:    "duplicate.txt",
 			Content: content.ContentLink{Address: "addr2"},
 			Size:    20,
 		},

@@ -5,14 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"os"
 
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/finder"
+	"invariant/internal/itp"
 	"invariant/internal/kv"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
@@ -34,8 +34,16 @@ func main() {
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	tagFlags := tags.RegisterFlags()
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 
@@ -69,6 +77,10 @@ func main() {
 
 	flag.Parse()
 
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
+
 	if btreeSlotID == "" {
 		btreeSlotID = generateID()
 	}
@@ -98,7 +110,20 @@ func main() {
 		log.Fatalf("A discovery service URL is required to find storage and slots services")
 	}
 
-	disc := discovery.NewClient(discoveryURL, nil)
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath("kv-" + btreeSlotID[:8])
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
+	if err != nil {
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
+	}
+
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+
+	disc := discovery.NewClient(discoveryURL, httpClient)
+	if authToken != "" {
+		disc = disc.WithAuthToken(authToken)
+	}
 
 	findService := func(kind string) string {
 		id, err := disc.Find(context.Background(), kind, "", 1)
@@ -112,7 +137,7 @@ func main() {
 	}
 
 	finderAddr := findService("finder-v1")
-	finderClient := finder.NewClient(finderAddr, nil)
+	finderClient := finder.NewClient(finderAddr, httpClient)
 
 	// Create storage client
 	storageClient := storage.NewAggregateClient(finderClient, disc, 3, 1000)
@@ -120,7 +145,7 @@ func main() {
 	slotsAddr := findService("slots-v1")
 
 	// Create slots client
-	slotsClient := slots.NewClient(slotsAddr, nil)
+	slotsClient := slots.NewClient(slotsAddr, httpClient)
 
 	var writerOpts content.WriterOptions
 	if compress {
@@ -179,15 +204,40 @@ func main() {
 		server.WithTracer(trace.NewTracer(10000))
 	}
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: disc,
+		DERPMapURL:   derpMapURL,
+	})
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
-	actualPort := listener.Addr().(*net.TCPAddr).Port
+	defer listener.Close()
 
 	myID := server.ID()
-	err = discovery.AdvertiseAndRegister(context.Background(), disc, myID, advertiseAddr, actualPort, []string{"kv-v1", "kv-batch-v1"}, tagFlags.Tags())
+	nodeIdent := discovery.NodeIdentity{
+		Name: name,
+	}
+	_ = disc.RegisterClient(context.Background(), privKey.Private.Public().String(), nodeIdent)
+
+	advertise := advertiseAddr
+	if advertise == "" && !listenIP {
+		advertise = listener.ITPAddr
+	}
+
+	err = discovery.AdvertiseAndRegister(
+		context.Background(),
+		disc,
+		myID,
+		advertise,
+		listener.Port(),
+		[]string{"kv-v1", "kv-batch-v1"},
+		tagFlags.Tags(),
+		discovery.WithPublicKey(privKey.Private.Public().String()),
+		discovery.WithIdentity(nodeIdent),
+	)
 	if err != nil {
 		log.Fatalf("Failed to register with discovery service: %v", err)
 	}
@@ -204,6 +254,10 @@ func main() {
 		}()
 	}
 
-	log.Printf("KV service listening on :%d (BTree Slot ID: %s, Journal Slot ID: %s)...", actualPort, btreeSlotID, journalSlotID)
+	if listenIP {
+		log.Printf("KV service listening on :%d (HTTP, BTree Slot ID: %s, Journal Slot ID: %s)...", listener.Port(), btreeSlotID, journalSlotID)
+	} else {
+		log.Printf("KV service listening on %s (ITP Address: %s, Public Key: %s, BTree Slot ID: %s, Journal Slot ID: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public(), btreeSlotID, journalSlotID)
+	}
 	log.Fatal(http.Serve(listener, server))
 }

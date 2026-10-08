@@ -69,14 +69,12 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 					dirModeStr = &ms
 				}
 				dir = append(dir, &filetree.DirectoryEntry{
-					BaseEntry: filetree.BaseEntry{
-						Name:       name,
-						Kind:       filetree.DirectoryKind,
-						Mode:       dirModeStr,
-						CreateTime: dirCtime,
-						ModifyTime: dirMtime,
-					},
-					Content: childLink,
+					Name:       name,
+					Kind:       filetree.DirectoryKind,
+					Mode:       dirModeStr,
+					CreateTime: dirCtime,
+					ModifyTime: dirMtime,
+					Content:    childLink,
 				})
 			} else {
 				f, err := os.Open(fullPath)
@@ -103,15 +101,13 @@ func SnapshotDirectory(ctx context.Context, dirPath string, store storage.Storag
 				}
 
 				dir = append(dir, &filetree.FileEntry{
-					BaseEntry: filetree.BaseEntry{
-						Name:       name,
-						Kind:       filetree.FileKind,
-						Mode:       fileModeStr,
-						CreateTime: fileCtime,
-						ModifyTime: fileMtime,
-					},
-					Content: fileLink,
-					Size:    sz,
+					Name:       name,
+					Kind:       filetree.FileKind,
+					Mode:       fileModeStr,
+					CreateTime: fileCtime,
+					ModifyTime: fileMtime,
+					Content:    fileLink,
+					Size:       sz,
 				})
 			}
 		}

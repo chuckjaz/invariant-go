@@ -242,20 +242,16 @@ func TestFuseTimestamps_NonZero(t *testing.T) {
 	modTime := uint64(1700000000)
 	testDir := filetree.Directory{
 		&filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{
-				Name:       "explicit.txt",
-				Kind:       filetree.FileKind,
-				ModifyTime: &modTime,
-				CreateTime: &modTime,
-			},
-			Content: content.ContentLink{Address: "mock-content-1"},
-			Size:    10,
+			Name:       "explicit.txt",
+			Kind:       filetree.FileKind,
+			ModifyTime: &modTime,
+			CreateTime: &modTime,
+			Content:    content.ContentLink{Address: "mock-content-1"},
+			Size:       10,
 		},
 		&filetree.FileEntry{
-			BaseEntry: filetree.BaseEntry{
-				Name: "legacy.txt",
-				Kind: filetree.FileKind,
-			},
+			Name:    "legacy.txt",
+			Kind:    filetree.FileKind,
 			Content: content.ContentLink{Address: "mock-content-2"},
 			Size:    20,
 		},

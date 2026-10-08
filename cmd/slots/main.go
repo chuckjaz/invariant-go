@@ -6,14 +6,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"invariant/internal/discovery"
+	"invariant/internal/itp"
 	"invariant/internal/notify"
 	"invariant/internal/slots"
 	"invariant/internal/tags"
@@ -36,8 +36,16 @@ func main() {
 	var advertiseAddr string
 	flag.StringVar(&advertiseAddr, "advertise", "", "Address to advertise to the discovery service")
 	tagFlags := tags.RegisterFlags()
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var snapshotInterval time.Duration
 	flag.DurationVar(&snapshotInterval, "snapshot-interval", 1*time.Hour, "Interval between snapshots for file system storage")
 	var notifyIDs string
@@ -51,6 +59,10 @@ func main() {
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
+
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
 
 	if id == "" {
 		id = generateID()
@@ -68,37 +80,77 @@ func main() {
 		s = slots.NewMemorySlots(id)
 	}
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath(s.ID())
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
 	}
 
-	actualPort := listener.Addr().(*net.TCPAddr).Port
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
 
-	var disc discovery.Discovery
+	var dClient *discovery.Client
+	var cp discovery.ControlPlane
 	if discoveryURL != "" {
-		disc = discovery.NewClient(discoveryURL, nil)
+		dClient = discovery.NewClient(discoveryURL, httpClient)
+		if authToken != "" {
+			dClient = dClient.WithAuthToken(authToken)
+		}
+		cp = dClient
+	}
 
-		err := discovery.AdvertiseAndRegister(context.Background(), disc, s.ID(), advertiseAddr, actualPort, []string{"slots-v1"}, tagFlags.Tags())
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: cp,
+		DERPMapURL:   derpMapURL,
+	})
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	if dClient != nil {
+		nodeIdent := discovery.NodeIdentity{
+			Name: name,
+		}
+		_ = dClient.RegisterClient(context.Background(), privKey.Private.Public().String(), nodeIdent)
+
+		advertise := advertiseAddr
+		if advertise == "" && !listenIP {
+			advertise = listener.ITPAddr
+		}
+
+		err := discovery.AdvertiseAndRegister(
+			context.Background(),
+			dClient,
+			s.ID(),
+			advertise,
+			listener.Port(),
+			[]string{"slots-v1"},
+			tagFlags.Tags(),
+			discovery.WithPublicKey(privKey.Private.Public().String()),
+			discovery.WithIdentity(nodeIdent),
+		)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, s.ID())
-	}
 
-	if name != "" {
-		if disc == nil {
-			log.Fatalf("Cannot register name without a valid discovery service")
+		if name != "" {
+			go func() {
+				err := discovery.RegisterName(context.Background(), dClient, name, s.ID(), []string{"slots-v1"})
+				if err != nil {
+					log.Printf("Failed to register name %q: %v", name, err)
+				} else {
+					log.Printf("Registered name %q for ID %s", name, s.ID())
+				}
+			}()
 		}
-		go func() {
-			err := discovery.RegisterName(context.Background(), disc, name, s.ID(), []string{"slots-v1"})
-			if err != nil {
-				log.Printf("Failed to register name %q: %v", name, err)
-			} else {
-				log.Printf("Registered name %q for ID %s", name, s.ID())
-			}
-		}()
+	} else if name != "" {
+		log.Fatalf("Cannot register name without a valid discovery service")
 	}
 
 	server := slots.NewServer(s)
@@ -107,27 +159,26 @@ func main() {
 	}
 
 	var notifyClients []slots.NotifyClient
-	if disc != nil {
+	if dClient != nil {
 		for nid := range strings.SplitSeq(notifyIDs, ",") {
 			nid = strings.TrimSpace(nid)
 			if nid == "" {
 				continue
 			}
 
-			// Resolve name to ID if it's not a hex ID
-			resolvedID, err := discovery.ResolveName(context.Background(), disc, nid)
+			resolvedID, err := discovery.ResolveName(context.Background(), dClient, nid)
 			if err != nil {
 				log.Fatalf("Could not resolve notify name/id %s: %v", nid, err)
 				continue
 			}
 
-			desc, ok := disc.Get(context.Background(), resolvedID)
+			desc, ok := dClient.Get(context.Background(), resolvedID)
 			if !ok {
 				log.Fatalf("Could not find address for Notify service %s", resolvedID)
 				continue
 			}
 
-			notifyClients = append(notifyClients, notify.NewClient(desc.Address, nil))
+			notifyClients = append(notifyClients, notify.NewClient(desc.Address, httpClient))
 		}
 	} else if notifyIDs != "" {
 		log.Fatalf("a discovery service is required to use the -notify flag")
@@ -137,7 +188,11 @@ func main() {
 		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
-	log.Printf("Slots service (ID %s) listening on :%d...", s.ID(), actualPort)
+	if listenIP {
+		log.Printf("Slots service (ID %s) listening on :%d (HTTP)...", s.ID(), listener.Port())
+	} else {
+		log.Printf("Slots service (ID %s) listening on %s (ITP Address: %s, Public Key: %s)...", s.ID(), listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
 	if dir != "" {
 		log.Printf("Using File System Slots storage at %s", dir)
 	} else {

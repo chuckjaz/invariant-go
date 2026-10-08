@@ -95,10 +95,8 @@ func TestScale_100xRepository_StatsAndTreeFlattening(t *testing.T) {
 
 			cLink, _ := content.Write(bytes.NewReader(payload), store, content.WriterOptions{})
 			subDir = append(subDir, &filetree.FileEntry{
-				BaseEntry: filetree.BaseEntry{
-					Name: fileName,
-					Kind: filetree.FileKind,
-				},
+				Name:    fileName,
+				Kind:    filetree.FileKind,
 				Content: cLink,
 				Size:    uint64(len(payload)),
 			})
@@ -108,10 +106,8 @@ func TestScale_100xRepository_StatsAndTreeFlattening(t *testing.T) {
 		subDirLink, _ := content.Write(bytes.NewReader(subDirJSON), store, content.WriterOptions{})
 
 		rootDir = append(rootDir, &filetree.DirectoryEntry{
-			BaseEntry: filetree.BaseEntry{
-				Name: dirName,
-				Kind: filetree.DirectoryKind,
-			},
+			Name:    dirName,
+			Kind:    filetree.DirectoryKind,
 			Content: subDirLink,
 		})
 	}

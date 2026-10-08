@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"invariant/internal/content"
@@ -22,14 +23,14 @@ func GenerateRebasePlanText(commits []*commit.Commit, hashes []string, upstreamN
 	sb.WriteString(fmt.Sprintf("# Commands: pick, reword, edit, squash, drop\n# Base: %s\n#\n", upstreamName))
 
 	// List in chronological order (oldest to newest)
-	for i := len(commits) - 1; i >= 0; i-- {
-		c := commits[i]
+	for i, c := range slices.Backward(commits) {
+
 		hash := hashes[i]
 		shortHash := hash
 		if len(shortHash) > 8 {
 			shortHash = shortHash[:8]
 		}
-		firstLine := strings.Split(strings.TrimSpace(c.Message), "\n")[0]
+		firstLine, _, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
 		sb.WriteString(fmt.Sprintf("pick %s %s\n", shortHash, firstLine))
 	}
 

@@ -2,18 +2,26 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"invariant/internal/discovery"
 	"invariant/internal/distribute"
+	"invariant/internal/itp"
 	"invariant/internal/tags"
 	"invariant/internal/trace"
 )
+
+func generateID() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 func main() {
 	var id string
@@ -29,17 +37,48 @@ func main() {
 	flag.StringVar(&destination, "destination", "", "Destination storage service ID to backup blocks to")
 	var backupRate float64
 	flag.Float64Var(&backupRate, "backup-rate", 0, "Rate limit in MB/hour for destination backups (0 for unlimited)")
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
-	var disc discovery.Discovery
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
+
+	if id == "" {
+		id = generateID()
+	}
+
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath(id)
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
+	if err != nil {
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
+	}
+
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+
+	var disc *discovery.Client
+	var cp discovery.ControlPlane
 	if discoveryURL != "" {
-		disc = discovery.NewClient(discoveryURL, nil)
+		disc = discovery.NewClient(discoveryURL, httpClient)
+		if authToken != "" {
+			disc = disc.WithAuthToken(authToken)
+		}
+		cp = disc
 	}
 
 	if destination != "" {
@@ -63,16 +102,40 @@ func main() {
 		server.WithTracer(trace.NewTracer(10000))
 	}
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: cp,
+		DERPMapURL:   derpMapURL,
+	})
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
+	defer listener.Close()
 
-	actualPort := listener.Addr().(*net.TCPAddr).Port
+	if disc != nil {
+		nodeIdent := discovery.NodeIdentity{
+			Name: name,
+		}
+		_ = disc.RegisterClient(context.Background(), privKey.Private.Public().String(), nodeIdent)
 
-	if discoveryURL != "" {
-		err := discovery.AdvertiseAndRegister(context.Background(), disc, server.ID(), advertiseAddr, actualPort, []string{"distribute-v1", "notify-v1"}, tagFlags.Tags())
+		advertise := advertiseAddr
+		if advertise == "" && !listenIP {
+			advertise = listener.ITPAddr
+		}
+
+		err := discovery.AdvertiseAndRegister(
+			context.Background(),
+			disc,
+			server.ID(),
+			advertise,
+			listener.Port(),
+			[]string{"distribute-v1", "notify-v1"},
+			tagFlags.Tags(),
+			discovery.WithPublicKey(privKey.Private.Public().String()),
+			discovery.WithIdentity(nodeIdent),
+		)
 		if err != nil {
 			log.Fatalf("Failed to register with discovery service: %v", err)
 		}
@@ -90,7 +153,11 @@ func main() {
 		}()
 	}
 
-	log.Printf("Distribute service (ID %s) listening on :%d...", server.ID(), actualPort)
+	if listenIP {
+		log.Printf("Distribute service (ID %s) listening on :%d (HTTP)...", server.ID(), listener.Port())
+	} else {
+		log.Printf("Distribute service (ID %s) listening on %s (ITP Address: %s, Public Key: %s)...", server.ID(), listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
 	log.Printf("Using In-Memory distribute storage")
 
 	log.Fatal(http.Serve(listener, server))

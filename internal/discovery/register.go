@@ -4,16 +4,36 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"invariant/internal/names"
 )
 
+// RegistrationOption configures optional fields in AdvertiseAndRegister.
+type RegistrationOption func(*ServiceRegistration)
+
+// WithPublicKey sets the WireGuard public key for the service registration.
+func WithPublicKey(key string) RegistrationOption {
+	return func(r *ServiceRegistration) {
+		r.PublicKey = key
+	}
+}
+
+// WithIdentity sets the node identity for the service registration.
+func WithIdentity(id NodeIdentity) RegistrationOption {
+	return func(r *ServiceRegistration) {
+		r.Identity = &id
+	}
+}
+
 // AdvertiseAndRegister forms the complete advertise URL and registers the service
 // with the discovery service. If the advertise address is empty, it uses localhost.
 // If it lacks a port, the port is appended.
-func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols, tags []string) error {
-	if advertiseAddr == "" {
+func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols, tags []string, opts ...RegistrationOption) error {
+	if strings.HasPrefix(advertiseAddr, "itp://") || strings.HasPrefix(advertiseAddr, "tailcat://") {
+		// ITP address, preserve as is
+	} else if advertiseAddr == "" {
 		advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
 	} else {
 		u, err := url.Parse(advertiseAddr)
@@ -26,12 +46,17 @@ func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr
 		}
 	}
 
-	return disc.Register(ctx, ServiceRegistration{
+	reg := ServiceRegistration{
 		ID:        id,
 		Address:   advertiseAddr,
 		Protocols: protocols,
 		Tags:      tags,
-	})
+	}
+	for _, opt := range opts {
+		opt(&reg)
+	}
+
+	return disc.Register(ctx, reg)
 }
 
 // RegisterName uses the discovery service to find a "names-v1" service

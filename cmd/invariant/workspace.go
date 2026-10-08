@@ -495,7 +495,8 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 	}
 
 	discoveryURL := globalCfg.Discovery
-	dClient := discovery.NewClient(discoveryURL, nil)
+	dClient := newDiscoveryClient(discoveryURL, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	findService := func(kind string) string {
 		id, err := dClient.Find(context.Background(), kind, "", 1)
@@ -509,7 +510,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 	var finderClient finder.Finder
 	var storageClient storage.Storage
 	if finderAddr != "" {
-		finderClient = finder.NewClient(finderAddr, nil)
+		finderClient = finder.NewClient(finderAddr, httpClient)
 		storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 	} else {
 		sAddr := findService("storage-v1")
@@ -519,7 +520,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 		if sAddr == "" {
 			log.Fatalf("Could not find storage-v1 service")
 		}
-		storageClient = storage.NewClient(sAddr, nil)
+		storageClient = storage.NewClient(sAddr, httpClient)
 	}
 
 	slotsAddr := findService("slots-v1")
@@ -529,7 +530,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 	if slotsAddr == "" {
 		log.Fatalf("Could not find slots-v1 service")
 	}
-	slotsClient := slots.NewClient(slotsAddr, nil)
+	slotsClient := slots.NewClient(slotsAddr, httpClient)
 
 	sharedDClient = dClient
 	sharedFinderClient = finderClient

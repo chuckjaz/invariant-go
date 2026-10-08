@@ -15,6 +15,9 @@ type RepositoryGlobalConfig struct {
 // InvariantConfig holds global configuration for invariant CLI tools.
 type InvariantConfig struct {
 	Discovery  string                  `yaml:"discovery"`
+	AuthToken  string                  `yaml:"auth_token,omitempty"`
+	ListenIP   bool                    `yaml:"listen_ip,omitempty"`
+	DERPMapURL string                  `yaml:"derp_map_url,omitempty"`
 	Repository *RepositoryGlobalConfig `yaml:"repository,omitempty"`
 	WriteTag   string                  `yaml:"write_tag,omitempty"`
 }
@@ -86,6 +89,10 @@ func Load() (*InvariantConfig, error) {
 	var cfg InvariantConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+
+	if cfg.AuthToken == "" {
+		cfg.AuthToken = os.Getenv("INVARIANT_AUTH_TOKEN")
 	}
 
 	return &cfg, nil

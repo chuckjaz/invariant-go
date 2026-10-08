@@ -758,14 +758,12 @@ func importGitTree(
 			}
 			dirModeStr := "0755"
 			dir = append(dir, &filetree.DirectoryEntry{
-				BaseEntry: filetree.BaseEntry{
-					Name:       name,
-					Kind:       filetree.DirectoryKind,
-					Mode:       &dirModeStr,
-					CreateTime: &subMinC,
-					ModifyTime: &subMaxM,
-				},
-				Content: childLink,
+				Name:       name,
+				Kind:       filetree.DirectoryKind,
+				Mode:       &dirModeStr,
+				CreateTime: &subMinC,
+				ModifyTime: &subMaxM,
+				Content:    childLink,
 			})
 			if subMaxM > maxMtime {
 				maxMtime = subMaxM
@@ -796,14 +794,12 @@ func importGitTree(
 			target := string(targetBytes)
 			modeStr := "0777"
 			dir = append(dir, &filetree.SymbolicLinkEntry{
-				BaseEntry: filetree.BaseEntry{
-					Name:       name,
-					Kind:       filetree.SymbolicLinkKind,
-					Mode:       &modeStr,
-					CreateTime: &ctimeVal,
-					ModifyTime: &mtimeVal,
-				},
-				Target: target,
+				Name:       name,
+				Kind:       filetree.SymbolicLinkKind,
+				Mode:       &modeStr,
+				CreateTime: &ctimeVal,
+				ModifyTime: &mtimeVal,
+				Target:     target,
 			})
 			if mtimeVal > maxMtime {
 				maxMtime = mtimeVal
@@ -880,15 +876,13 @@ func importGitTree(
 
 			modeStr := fmt.Sprintf("%04o", uint32(e.Mode&07777))
 			dir = append(dir, &filetree.FileEntry{
-				BaseEntry: filetree.BaseEntry{
-					Name:       name,
-					Kind:       filetree.FileKind,
-					Mode:       &modeStr,
-					CreateTime: &ctimeVal,
-					ModifyTime: &mtimeVal,
-				},
-				Content: fileLink,
-				Size:    fileSize,
+				Name:       name,
+				Kind:       filetree.FileKind,
+				Mode:       &modeStr,
+				CreateTime: &ctimeVal,
+				ModifyTime: &mtimeVal,
+				Content:    fileLink,
+				Size:       fileSize,
 			})
 			if mtimeVal > maxMtime {
 				maxMtime = mtimeVal

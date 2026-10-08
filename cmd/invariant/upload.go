@@ -124,8 +124,8 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	var dClient discovery.Discovery
-	dClient = discovery.NewClient(discoveryURL, nil)
+	dClient := newDiscoveryClient(discoveryURL, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	findService := func(kind string) string {
 		id, err := dClient.Find(context.Background(), kind, "", 1)
@@ -141,7 +141,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	finderAddr := findService("finder-v1")
-	finderClient := finder.NewClient(finderAddr, nil)
+	finderClient := finder.NewClient(finderAddr, httpClient)
 	var storageClient storage.Storage
 	var aggregateOpts []storage.AggregateClientOption
 	writeTag := tagStr
@@ -400,13 +400,11 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 				}
 				symCtime, symMtime := getEntryTimes(info)
 				symlinkEntry := &filetree.SymbolicLinkEntry{
-					BaseEntry: filetree.BaseEntry{
-						Kind:       filetree.SymbolicLinkKind,
-						Name:       d.Name(),
-						CreateTime: symCtime,
-						ModifyTime: symMtime,
-					},
-					Target: target,
+					Kind:       filetree.SymbolicLinkKind,
+					Name:       d.Name(),
+					CreateTime: symCtime,
+					ModifyTime: symMtime,
+					Target:     target,
 				}
 				dirEntries[idx] = symlinkEntry
 			} else if d.Type().IsRegular() {
@@ -459,15 +457,13 @@ func (u *uploader) processDirectory(ctx context.Context, rootPath, currentPath s
 	modeStr := fmt.Sprintf("%04o", info.Mode().Perm())
 
 	return &filetree.DirectoryEntry{
-		BaseEntry: filetree.BaseEntry{
-			Kind:       filetree.DirectoryKind,
-			Name:       filepath.Base(currentPath),
-			Mode:       &modeStr,
-			CreateTime: ctime,
-			ModifyTime: mtime,
-		},
-		Content: memLink,
-		Size:    uint64(len(data)),
+		Kind:       filetree.DirectoryKind,
+		Name:       filepath.Base(currentPath),
+		Mode:       &modeStr,
+		CreateTime: ctime,
+		ModifyTime: mtime,
+		Content:    memLink,
+		Size:       uint64(len(data)),
 	}, nil
 }
 
@@ -494,15 +490,13 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 			atomic.AddUint64(&u.FilesSkipped, 1)
 			modeStr := ce.Mode
 			return &filetree.FileEntry{
-				BaseEntry: filetree.BaseEntry{
-					Kind:       filetree.FileKind,
-					Name:       name,
-					Mode:       &modeStr,
-					CreateTime: ctime,
-					ModifyTime: mtime,
-				},
-				Content: cl,
-				Size:    ce.Size,
+				Kind:       filetree.FileKind,
+				Name:       name,
+				Mode:       &modeStr,
+				CreateTime: ctime,
+				ModifyTime: mtime,
+				Content:    cl,
+				Size:       ce.Size,
 			}, nil
 		}
 	}
@@ -543,14 +537,12 @@ func (u *uploader) processFile(ctx context.Context, filePath, name string, store
 	}
 
 	return &filetree.FileEntry{
-		BaseEntry: filetree.BaseEntry{
-			Kind:       filetree.FileKind,
-			Name:       name,
-			Mode:       &modeStr,
-			CreateTime: ctime,
-			ModifyTime: mtime,
-		},
-		Content: memLink,
-		Size:    uint64(fileInfo.Size()),
+		Kind:       filetree.FileKind,
+		Name:       name,
+		Mode:       &modeStr,
+		CreateTime: ctime,
+		ModifyTime: mtime,
+		Content:    memLink,
+		Size:       uint64(fileInfo.Size()),
 	}, nil
 }

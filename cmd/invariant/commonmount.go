@@ -124,8 +124,8 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		log.Fatalf("Discovery URL is required")
 	}
 
-	var dClient discovery.Discovery
-	dClient = discovery.NewClient(f.DiscoveryURL, nil)
+	dClient := newDiscoveryClient(f.DiscoveryURL, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	if f.RootAddr == "" && f.Slot == "" {
 		log.Fatalf("Either --root or --slot is required")
@@ -159,10 +159,10 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 	}
 
 	finderAddr := findService("finder-v1")
-	finderClient := finder.NewClient(finderAddr, nil)
+	finderClient := finder.NewClient(finderAddr, httpClient)
 	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 	slotsAddr := findService("slots-v1")
-	slotsClient := slots.NewClient(slotsAddr, nil)
+	slotsClient := slots.NewClient(slotsAddr, httpClient)
 
 	finalStorage, localStore := SetupCacheStorage(f, storageClient)
 

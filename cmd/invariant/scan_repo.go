@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"invariant/internal/config"
-	"invariant/internal/discovery"
 	"invariant/internal/gitscan"
 	"invariant/internal/kv"
 )
@@ -60,7 +59,7 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 			os.Exit(1)
 		}
 
-		dClient := discovery.NewClient(discoveryURL, nil)
+		dClient := newDiscoveryClient(discoveryURL, globalCfg)
 		svcs, err := dClient.Find(ctx, "kv-v1", "", 1)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error querying discovery service: %v\n", err)
@@ -73,7 +72,8 @@ func runScanRepo(globalCfg *config.InvariantConfig, args []string) {
 		kvURL = svcs[0].Address
 	}
 
-	kvClient := kv.NewClient(kvURL, nil)
+	httpClient := newHTTPClient(globalCfg)
+	kvClient := kv.NewClient(kvURL, httpClient)
 
 	var err error
 	if localPath != "" {

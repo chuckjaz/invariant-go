@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -404,8 +405,8 @@ func (j *Journal) LoadRemoteJournals(ctx context.Context, stopAt *content.Conten
 
 	// Pages are from newest to oldest. We want chronological order (oldest to newest).
 	var records []Record
-	for i := len(pages) - 1; i >= 0; i-- {
-		records = append(records, pages[i]...)
+	for _, page := range slices.Backward(pages) {
+		records = append(records, page...)
 	}
 	return records, nil
 }

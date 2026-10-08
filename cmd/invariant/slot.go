@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 
 	"invariant/internal/config"
-	"invariant/internal/discovery"
 	"invariant/internal/finder"
 	"invariant/internal/names"
 	"invariant/internal/slots"
@@ -51,11 +50,12 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	dClient := discovery.NewClient(globalCfg.Discovery, nil)
+	dClient := newDiscoveryClient(globalCfg.Discovery, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	finderID, err := dClient.Find(context.Background(), "finder-v1", "", 1)
 	if err == nil && len(finderID) > 0 {
-		fClient := finder.NewClient(finderID[0].Address, nil)
+		fClient := finder.NewClient(finderID[0].Address, httpClient)
 		res, err := fClient.Find(context.Background(), blockAddress)
 		if err != nil || len(res) == 0 {
 			fmt.Fprintf(os.Stderr, "Warning: Block address %s could not be found via finder service.\n", blockAddress)
@@ -72,7 +72,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	slotsClient := slots.NewClient(id[0].Address, nil)
+	slotsClient := slots.NewClient(id[0].Address, httpClient)
 
 	var slotID string
 	var privKey ed25519.PrivateKey

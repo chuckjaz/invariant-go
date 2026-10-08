@@ -12,10 +12,17 @@ import (
 	"strconv"
 )
 
-// Client implements the Discovery interface by forwarding requests to a remote HTTP server.
+// Assert that Client implements Discovery and ControlPlane interfaces
+var (
+	_ Discovery    = (*Client)(nil)
+	_ ControlPlane = (*Client)(nil)
+)
+
+// Client implements the Discovery and ControlPlane interfaces by forwarding requests to a remote HTTP server.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	authToken  string
 }
 
 // NewClient creates a new HTTP discovery client.
@@ -30,11 +37,20 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	}
 }
 
+// WithAuthToken sets the bearer token for authenticating requests.
+func (c *Client) WithAuthToken(token string) *Client {
+	c.authToken = token
+	return c
+}
+
 // Get retrieves the service description for the given ID.
 func (c *Client) Get(ctx context.Context, id string) (ServiceDescription, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)
 	if err != nil {
 		return ServiceDescription{}, false
+	}
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -75,6 +91,9 @@ func (c *Client) Find(ctx context.Context, protocol, tag string, count int) ([]S
 	if err != nil {
 		return nil, err
 	}
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -106,6 +125,9 @@ func (c *Client) Register(ctx context.Context, reg ServiceRegistration) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -121,5 +143,21 @@ func (c *Client) Register(ctx context.Context, reg ServiceRegistration) error {
 	return nil
 }
 
-// Assert that Client implements the Discovery interface
-var _ Discovery = (*Client)(nil)
+func (c *Client) cpClient() *ControlPlaneClient {
+	return NewControlPlaneClient(c.baseURL, c.httpClient, c.authToken)
+}
+
+// RegisterClient registers a client WireGuard public key and identity with the control plane.
+func (c *Client) RegisterClient(ctx context.Context, publicKey string, id NodeIdentity) error {
+	return c.cpClient().RegisterClient(ctx, publicKey, id)
+}
+
+// VerifyKey checks if a WireGuard public key is authorized and retrieves its identity.
+func (c *Client) VerifyKey(ctx context.Context, publicKey string) (bool, *NodeIdentity, error) {
+	return c.cpClient().VerifyKey(ctx, publicKey)
+}
+
+// AuthorizedKeys returns the list of all authorized WireGuard public keys.
+func (c *Client) AuthorizedKeys(ctx context.Context) ([]string, error) {
+	return c.cpClient().AuthorizedKeys(ctx)
+}

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"invariant/internal/config"
-	"invariant/internal/discovery"
 	"invariant/internal/names"
 )
 
@@ -48,7 +47,8 @@ func runName(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	dClient := discovery.NewClient(globalCfg.Discovery, nil)
+	dClient := newDiscoveryClient(globalCfg.Discovery, globalCfg)
+	httpClient := newHTTPClient(globalCfg)
 
 	// find names service
 	id, err := dClient.Find(context.Background(), "names-v1", "", 1)
@@ -61,7 +61,7 @@ func runName(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	namesClient := names.NewClient(id[0].Address, nil)
+	namesClient := names.NewClient(id[0].Address, httpClient)
 
 	var tokens []string
 	if tokensStr != "" {

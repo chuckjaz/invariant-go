@@ -3,16 +3,16 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"invariant/internal/content"
 	"invariant/internal/discovery"
 	"invariant/internal/files"
 	"invariant/internal/finder"
+	"invariant/internal/itp"
 	"invariant/internal/slots"
 	"invariant/internal/storage"
 	"invariant/internal/trace"
@@ -25,17 +25,41 @@ func main() {
 	flag.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
 	flag.StringVar(&slot, "slot", "", "Whether the root address refers to a slot")
+	var listenIP bool
+	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
-	flag.IntVar(&port, "port", 0, "Port to listen on (0 for random available port)")
+	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
+	var authToken string
+	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var keyFile string
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/files.key)")
+	var derpMapURL string
+	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
-	var dClient discovery.Discovery
-	if discoveryURL != "" {
-		dClient = discovery.NewClient(discoveryURL, nil)
-	} else {
+	if authToken == "" {
+		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	}
+
+	if discoveryURL == "" {
 		log.Fatalf("Discovery URL is required")
+	}
+
+	if keyFile == "" {
+		keyFile = itp.DefaultKeyPath("files")
+	}
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
+	if err != nil {
+		log.Fatalf("Failed to load or generate ITP key: %v", err)
+	}
+
+	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+
+	dClient := discovery.NewClient(discoveryURL, httpClient)
+	if authToken != "" {
+		dClient = dClient.WithAuthToken(authToken)
 	}
 
 	rootIsSlot := false
@@ -56,10 +80,10 @@ func main() {
 	}
 
 	finderAddr := findService("finder-v1")
-	finderClient := finder.NewClient(finderAddr, nil)
+	finderClient := finder.NewClient(finderAddr, httpClient)
 	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
 	slotsAddr := findService("slots-v1")
-	slotsClient := slots.NewClient(slotsAddr, nil)
+	slotsClient := slots.NewClient(slotsAddr, httpClient)
 
 	opts := files.Options{
 		Storage: storageClient,
@@ -83,13 +107,22 @@ func main() {
 		server.WithTracer(trace.NewTracer(10000))
 	}
 
-	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
+	listener, err := itp.Listen(context.Background(), itp.ListenOptions{
+		PrivateKey:   privKey,
+		ListenIP:     listenIP,
+		Port:         port,
+		ControlPlane: dClient,
+		DERPMapURL:   derpMapURL,
+	})
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
+	defer listener.Close()
 
-	actualPort := listener.Addr().(*net.TCPAddr).Port
-	log.Printf("Listening on :%d...", actualPort)
+	if listenIP {
+		log.Printf("Files service listening on :%d (HTTP)...", listener.Port())
+	} else {
+		log.Printf("Files service listening on %s (ITP Address: %s, Public Key: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
 	log.Fatal(http.Serve(listener, server.Handler()))
 }
