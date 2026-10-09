@@ -18,7 +18,7 @@ import (
 type Transport struct {
 	Base         http.RoundTripper
 	ClientKey    key.NodePrivate
-	AuthToken    string
+	BearerToken  string
 	DERPMapURL   string
 	itpTransport *http.Transport
 
@@ -37,11 +37,11 @@ func WithDERPMapURL(url string) TransportOption {
 }
 
 // NewTransport creates an ITP-aware HTTP transport.
-func NewTransport(clientKey key.NodePrivate, authToken string, opts ...TransportOption) *Transport {
+func NewTransport(clientKey key.NodePrivate, bearerToken string, opts ...TransportOption) *Transport {
 	t := &Transport{
-		ClientKey: clientKey,
-		AuthToken: authToken,
-		clients:   make(map[tailcat.Addr]*tailcat.Client),
+		ClientKey:   clientKey,
+		BearerToken: bearerToken,
+		clients:     make(map[tailcat.Addr]*tailcat.Client),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -99,8 +99,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			reqClone.URL.Host = net.JoinHostPort(reqClone.URL.Host, "80")
 		}
 
-		if t.AuthToken != "" && reqClone.Header.Get("Authorization") == "" {
-			reqClone.Header.Set("Authorization", "Bearer "+t.AuthToken)
+		if t.BearerToken != "" && reqClone.Header.Get("Authorization") == "" {
+			reqClone.Header.Set("Authorization", "Bearer "+t.BearerToken)
 		}
 
 		return t.itpTransport.RoundTrip(reqClone)
@@ -111,9 +111,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		base = http.DefaultTransport
 	}
 
-	if t.AuthToken != "" && req.Header.Get("Authorization") == "" {
+	if t.BearerToken != "" && req.Header.Get("Authorization") == "" {
 		reqClone := req.Clone(req.Context())
-		reqClone.Header.Set("Authorization", "Bearer "+t.AuthToken)
+		reqClone.Header.Set("Authorization", "Bearer "+t.BearerToken)
 		return base.RoundTrip(reqClone)
 	}
 
@@ -137,8 +137,8 @@ func (t *Transport) Close() error {
 }
 
 // NewHTTPClient returns an *http.Client configured with an ITP Transport.
-func NewHTTPClient(clientKey key.NodePrivate, authToken string, opts ...TransportOption) *http.Client {
+func NewHTTPClient(clientKey key.NodePrivate, bearerToken string, opts ...TransportOption) *http.Client {
 	return &http.Client{
-		Transport: NewTransport(clientKey, authToken, opts...),
+		Transport: NewTransport(clientKey, bearerToken, opts...),
 	}
 }

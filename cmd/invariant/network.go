@@ -33,33 +33,42 @@ func getClientKey() *tailcat.PrivateKey {
 	return cachedClientKey
 }
 
+func resolveUserToken(cfg *config.InvariantConfig) string {
+	if tok, err := LoadOAuthToken(); err == nil && tok != "" {
+		return tok
+	}
+	if tok := os.Getenv("INVARIANT_OAUTH_TOKEN"); tok != "" {
+		return tok
+	}
+	if cfg != nil && cfg.OAuthToken != "" {
+		return cfg.OAuthToken
+	}
+	if tok := os.Getenv("INVARIANT_SERVICE_KEY"); tok != "" {
+		return tok
+	}
+	if cfg != nil && cfg.ServiceKey != "" {
+		return cfg.ServiceKey
+	}
+	return ""
+}
+
 func newHTTPClient(cfg *config.InvariantConfig) *http.Client {
 	pk := getClientKey()
-	authToken := ""
+	token := resolveUserToken(cfg)
 	derpMapURL := ""
 	if cfg != nil {
-		authToken = cfg.AuthToken
 		derpMapURL = cfg.DERPMapURL
 	}
-	if authToken == "" {
-		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
-	}
 
-	return itp.NewHTTPClient(pk.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+	return itp.NewHTTPClient(pk.Private, token, itp.WithDERPMapURL(derpMapURL))
 }
 
 func newDiscoveryClient(discoveryURL string, cfg *config.InvariantConfig) *discovery.Client {
 	httpClient := newHTTPClient(cfg)
 	client := discovery.NewClient(discoveryURL, httpClient)
-	authToken := ""
-	if cfg != nil {
-		authToken = cfg.AuthToken
-	}
-	if authToken == "" {
-		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
-	}
-	if authToken != "" {
-		client = client.WithAuthToken(authToken)
+	token := resolveUserToken(cfg)
+	if token != "" {
+		client = client.WithUserToken(token)
 	}
 
 	// Register client WireGuard key with Discovery control plane so other services admit this client

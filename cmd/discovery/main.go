@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"invariant/internal/discovery"
+	"invariant/internal/discovery/backup"
 	"invariant/internal/itp"
+	"invariant/internal/slots"
+	"invariant/internal/storage"
 	"invariant/internal/trace"
 )
 
@@ -19,8 +24,18 @@ func main() {
 	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
 	flag.IntVar(&port, "port", 3003, "Port to listen on when -listen-ip is enabled")
-	var authToken string
-	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating discovery and control plane requests (defaults to INVARIANT_AUTH_TOKEN)")
+	var serviceKey string
+	flag.StringVar(&serviceKey, "service-key", "", "Static service key for authenticating services (defaults to INVARIANT_SERVICE_KEY)")
+	var serviceKeysFile string
+	flag.StringVar(&serviceKeysFile, "service-keys-file", "", "Path to file containing newline-delimited pre-authorized service keys")
+	var oauthUserInfoURL string
+	flag.StringVar(&oauthUserInfoURL, "oauth-userinfo-url", "", "URL of OAuth2/OIDC UserInfo endpoint to validate user bearer tokens")
+	var storageURL string
+	flag.StringVar(&storageURL, "storage", "", "Storage service address for CAS journal backup (must have 'originals' tag)")
+	var slotsURL string
+	flag.StringVar(&slotsURL, "slots", "", "Slots service address for journal backup slot pointer")
+	var slotID string
+	flag.StringVar(&slotID, "slot-id", "discovery-journal", "Slot ID for journal backup")
 	var keyFile string
 	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/discovery.key)")
 	var derpMapURL string
@@ -39,16 +54,51 @@ func main() {
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
 
-	if authToken == "" {
-		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	if serviceKey == "" {
+		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
+	}
+	if oauthUserInfoURL == "" {
+		oauthUserInfoURL = os.Getenv("INVARIANT_OAUTH_USERINFO_URL")
 	}
 
 	var localD discovery.Discovery
+	var backupSink *backup.ChainedBackup
+
 	if dir != "" {
 		fsd, err := discovery.NewFileSystemDiscovery(dir, snapshotInterval)
 		if err != nil {
 			log.Fatalf("Failed to initialize file system discovery: %v", err)
 		}
+
+		if storageURL != "" && slotsURL != "" {
+			storageClient := storage.NewClient(storageURL, nil)
+			slotsClient := slots.NewClient(slotsURL, nil)
+			backupDir := filepath.Join(dir, "backup")
+
+			var backupErr error
+			backupSink, backupErr = backup.NewChainedBackup(backup.BackupOptions{
+				BaseDir:    backupDir,
+				Storage:    storageClient,
+				Slots:      slotsClient,
+				SlotID:     slotID,
+				MaxEntries: 100,
+			})
+			if backupErr != nil {
+				log.Printf("Warning: failed to initialize journal backup: %v", backupErr)
+			} else {
+				// Replay historical entries from slot / CAS storage
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := backupSink.Replay(ctx, fsd); err != nil {
+					log.Printf("Warning: journal backup replay returned: %v", err)
+				}
+				cancel()
+
+				fsd.WithEventSink(backupSink)
+				defer backupSink.Close()
+				log.Printf("Enabled periodic journal backup to storage %s and slot %s", storageURL, slotID)
+			}
+		}
+
 		if healthInterval > 0 {
 			fsd = fsd.WithHealthTracking(healthInterval, healthTimeout)
 		}
@@ -65,8 +115,8 @@ func main() {
 	var d discovery.Discovery
 	if upstreamURL != "" {
 		parent := discovery.NewClient(upstreamURL, nil)
-		if authToken != "" {
-			parent = parent.WithAuthToken(authToken)
+		if serviceKey != "" {
+			parent = parent.WithServiceKey(serviceKey)
 		}
 		d = discovery.NewUpstreamDiscovery(localD, parent)
 		log.Printf("Using Upstream discovery delegation pointing to %s", upstreamURL)
@@ -80,8 +130,26 @@ func main() {
 	}
 
 	server := discovery.NewDiscoveryServer(d)
-	if authToken != "" {
-		server.WithAuthToken(authToken)
+	if serviceKey != "" {
+		server.WithServiceKeys(serviceKey)
+	}
+	if serviceKeysFile != "" {
+		if file, err := os.Open(serviceKeysFile); err == nil {
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line != "" && !strings.HasPrefix(line, "#") {
+					server.WithServiceKeys(line)
+				}
+			}
+			file.Close()
+		} else {
+			log.Fatalf("Failed to open service keys file %s: %v", serviceKeysFile, err)
+		}
+	}
+	if oauthUserInfoURL != "" {
+		server.WithOAuthAuthenticator(discovery.NewUserInfoAuthenticator(oauthUserInfoURL, nil, 5*time.Minute))
+		log.Printf("Configured OAuth UserInfo authentication against %s", oauthUserInfoURL)
 	}
 	if enableTrace {
 		server.WithTracer(trace.NewTracer(10000))

@@ -7,23 +7,28 @@ import (
 	"time"
 )
 
-// Assert that InMemoryDiscovery implements Discovery and ControlPlane interfaces
+// Assert that InMemoryDiscovery implements Discovery, ControlPlane, ServiceKeyManager, and ServiceKeyRestorer interfaces
 var (
-	_ Discovery    = (*InMemoryDiscovery)(nil)
-	_ ControlPlane = (*InMemoryDiscovery)(nil)
+	_ Discovery          = (*InMemoryDiscovery)(nil)
+	_ ControlPlane       = (*InMemoryDiscovery)(nil)
+	_ ServiceKeyManager  = (*InMemoryDiscovery)(nil)
+	_ ServiceKeyRestorer = (*InMemoryDiscovery)(nil)
 )
 
 type InMemoryDiscovery struct {
-	mu       sync.RWMutex
-	services map[string]ServiceRegistration
-	clients  map[string]NodeIdentity
-	tracker  *HealthTracker
+	mu          sync.RWMutex
+	services    map[string]ServiceRegistration
+	clients     map[string]NodeIdentity
+	serviceKeys map[string]ServiceKeyRecord
+	tracker     *HealthTracker
+	sink        EventSink
 }
 
 func NewInMemoryDiscovery() *InMemoryDiscovery {
 	d := &InMemoryDiscovery{
-		services: make(map[string]ServiceRegistration),
-		clients:  make(map[string]NodeIdentity),
+		services:    make(map[string]ServiceRegistration),
+		clients:     make(map[string]NodeIdentity),
+		serviceKeys: make(map[string]ServiceKeyRecord),
 	}
 	return d
 }
@@ -36,9 +41,17 @@ func (d *InMemoryDiscovery) WithHealthTracking(interval, timeout time.Duration) 
 	return d
 }
 
+func (d *InMemoryDiscovery) WithEventSink(sink EventSink) *InMemoryDiscovery {
+	d.sink = sink
+	return d
+}
+
 func (d *InMemoryDiscovery) Close() error {
 	if d.tracker != nil {
 		d.tracker.Close()
+	}
+	if d.sink != nil {
+		_ = d.sink.Close()
 	}
 	return nil
 }
@@ -55,8 +68,17 @@ func (d *InMemoryDiscovery) listAll() []ServiceRegistration {
 
 func (d *InMemoryDiscovery) remove(id string) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	delete(d.services, id)
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(context.Background(), DiscoveryEvent{
+			Kind:      EventUnregisterService,
+			ServiceID: id,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (d *InMemoryDiscovery) Get(ctx context.Context, id string) (ServiceDescription, bool) {
@@ -131,8 +153,6 @@ func (d *InMemoryDiscovery) Find(ctx context.Context, protocol, tag string, coun
 }
 
 func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistration) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	protocolsCopy := make([]string, len(reg.Protocols))
 	copy(protocolsCopy, reg.Protocols)
 	var tagsCopy []string
@@ -144,7 +164,7 @@ func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistratio
 	if reg.Identity != nil {
 		idCopy = &NodeIdentity{Name: reg.Identity.Name, Email: reg.Identity.Email}
 	}
-	d.services[reg.ID] = ServiceRegistration{
+	savedReg := ServiceRegistration{
 		ID:        reg.ID,
 		Address:   reg.Address,
 		Protocols: protocolsCopy,
@@ -152,16 +172,40 @@ func (d *InMemoryDiscovery) Register(ctx context.Context, reg ServiceRegistratio
 		PublicKey: reg.PublicKey,
 		Identity:  idCopy,
 	}
-	if d.tracker != nil {
-		d.tracker.MarkHealthy(reg.ID)
+
+	d.mu.Lock()
+	d.services[reg.ID] = savedReg
+	tracker := d.tracker
+	sink := d.sink
+	d.mu.Unlock()
+
+	if tracker != nil {
+		tracker.MarkHealthy(reg.ID)
+	}
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRegisterService,
+			Service:   &savedReg,
+			Timestamp: time.Now().UTC(),
+		})
 	}
 	return nil
 }
 
 func (d *InMemoryDiscovery) RegisterClient(ctx context.Context, publicKey string, id NodeIdentity) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.clients[publicKey] = id
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:        EventRegisterClient,
+			ClientKey:   publicKey,
+			ClientIdent: &id,
+			Timestamp:   time.Now().UTC(),
+		})
+	}
 	return nil
 }
 
@@ -207,4 +251,102 @@ func (d *InMemoryDiscovery) AuthorizedKeys(ctx context.Context) ([]string, error
 	}
 	slices.Sort(keys)
 	return keys, nil
+}
+
+func (d *InMemoryDiscovery) CreateServiceKey(ctx context.Context, name string, creator NodeIdentity, expiresAt *time.Time) (*ServiceKeyRecord, error) {
+	rec, err := GenerateServiceKey(name, creator, expiresAt)
+	if err != nil {
+		return nil, err
+	}
+
+	d.mu.Lock()
+	d.serviceKeys[rec.Key] = *rec
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:       EventCreateServiceKey,
+			ServiceKey: rec,
+			Timestamp:  time.Now().UTC(),
+		})
+	}
+
+	recCopy := *rec
+	return &recCopy, nil
+}
+
+func (d *InMemoryDiscovery) VerifyServiceKey(ctx context.Context, key string) (bool, *ServiceKeyRecord, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	rec, ok := d.serviceKeys[key]
+	if !ok {
+		return false, nil, ErrServiceKeyNotFound
+	}
+	if rec.Revoked {
+		return false, nil, ErrServiceKeyRevoked
+	}
+	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
+		return false, nil, ErrServiceKeyExpired
+	}
+	recCopy := rec
+	return true, &recCopy, nil
+}
+
+func (d *InMemoryDiscovery) ListServiceKeys(ctx context.Context) ([]ServiceKeyRecord, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	records := make([]ServiceKeyRecord, 0, len(d.serviceKeys))
+	for _, rec := range d.serviceKeys {
+		records = append(records, rec)
+	}
+	slices.SortFunc(records, func(a, b ServiceKeyRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *InMemoryDiscovery) RevokeServiceKey(ctx context.Context, keyOrID string, revoker NodeIdentity) error {
+	d.mu.Lock()
+	var foundKey string
+	var rec ServiceKeyRecord
+	for k, r := range d.serviceKeys {
+		if k == keyOrID || r.ID == keyOrID {
+			foundKey = k
+			rec = r
+			break
+		}
+	}
+	if foundKey == "" {
+		d.mu.Unlock()
+		return ErrServiceKeyNotFound
+	}
+
+	now := time.Now().UTC()
+	rec.Revoked = true
+	rec.RevokedAt = &now
+	rec.RevokedBy = &revoker
+	d.serviceKeys[foundKey] = rec
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeServiceKey,
+			RevokeKey: foundKey,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+// RestoreServiceKey directly restores an existing service key record during replay or disaster recovery.
+func (d *InMemoryDiscovery) RestoreServiceKey(ctx context.Context, rec ServiceKeyRecord) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.serviceKeys[rec.Key] = rec
+	return nil
 }

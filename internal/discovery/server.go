@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"invariant/internal/trace"
 )
@@ -15,7 +17,10 @@ type DiscoveryServer struct {
 	id           string
 	discovery    Discovery
 	controlPlane ControlPlane
-	authToken    string
+	serviceKeys  ServiceKeyManager
+	oauthAuth    Authenticator
+	staticKeys   map[string]struct{}
+	requireAuth  bool
 	handler      http.Handler
 	tracer       *trace.Tracer
 }
@@ -26,11 +31,15 @@ func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
 	id := hex.EncodeToString(idBytes)
 
 	s := &DiscoveryServer{
-		id:        id,
-		discovery: discovery,
+		id:         id,
+		discovery:  discovery,
+		staticKeys: make(map[string]struct{}),
 	}
 	if cp, ok := discovery.(ControlPlane); ok {
 		s.controlPlane = cp
+	}
+	if skm, ok := discovery.(ServiceKeyManager); ok {
+		s.serviceKeys = skm
 	}
 	s.handler = s.Handler()
 	return s
@@ -43,9 +52,34 @@ func (s *DiscoveryServer) WithControlPlane(cp ControlPlane) *DiscoveryServer {
 	return s
 }
 
-// WithAuthToken sets the required bearer token for authenticating requests.
-func (s *DiscoveryServer) WithAuthToken(token string) *DiscoveryServer {
-	s.authToken = token
+// WithServiceKeyManager sets the ServiceKeyManager for managing service keys.
+func (s *DiscoveryServer) WithServiceKeyManager(skm ServiceKeyManager) *DiscoveryServer {
+	s.serviceKeys = skm
+	s.handler = s.Handler()
+	return s
+}
+
+// WithOAuthAuthenticator sets the Authenticator for validating OAuth user tokens.
+func (s *DiscoveryServer) WithOAuthAuthenticator(auth Authenticator) *DiscoveryServer {
+	s.oauthAuth = auth
+	s.handler = s.Handler()
+	return s
+}
+
+// WithServiceKeys adds static service keys allowed to authenticate.
+func (s *DiscoveryServer) WithServiceKeys(keys ...string) *DiscoveryServer {
+	for _, k := range keys {
+		if k != "" {
+			s.staticKeys[k] = struct{}{}
+		}
+	}
+	s.handler = s.Handler()
+	return s
+}
+
+// WithRequireAuth explicitly enforces that all requests must have valid credentials.
+func (s *DiscoveryServer) WithRequireAuth(require bool) *DiscoveryServer {
+	s.requireAuth = require
 	s.handler = s.Handler()
 	return s
 }
@@ -72,11 +106,13 @@ func (s *DiscoveryServer) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/keys", s.handleAuthorizedKeys)
 	mux.HandleFunc("GET /whois", s.handleWhoIs)
 
-	var h http.Handler = mux
-	if s.authToken != "" {
-		h = s.authMiddleware(h)
-	}
+	// Service key routes
+	mux.HandleFunc("POST /auth/service-key", s.handleCreateServiceKey)
+	mux.HandleFunc("GET /auth/service-keys", s.handleListServiceKeys)
+	mux.HandleFunc("GET /auth/verify-service-key", s.handleVerifyServiceKey)
+	mux.HandleFunc("DELETE /auth/service-key/{key}", s.handleRevokeServiceKey)
 
+	h := s.authMiddleware(mux)
 	return trace.Middleware("discovery", s.tracer)(h)
 }
 
@@ -87,13 +123,74 @@ func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+
+		mustAuth := s.requireAuth || len(s.staticKeys) > 0 || s.oauthAuth != nil
+
 		authHeader := r.Header.Get("Authorization")
-		expected := "Bearer " + s.authToken
-		if authHeader != expected && authHeader != s.authToken {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		token = strings.TrimSpace(token)
+		if token == "" && authHeader != "" && !strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimSpace(authHeader)
+		}
+
+		if token == "" {
+			if mustAuth {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			caller := Caller{
+				Kind:     CallerKindAnonymous,
+				Identity: NodeIdentity{Name: "anonymous"},
+			}
+			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
+			return
+		}
+
+		// 1. Check static service keys
+		if _, ok := s.staticKeys[token]; ok {
+			caller := Caller{
+				Kind:     CallerKindService,
+				Identity: NodeIdentity{Name: "service"},
+			}
+			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
+			return
+		}
+
+		// 3. Check dynamic ServiceKeyManager
+		if s.serviceKeys != nil {
+			if ok, keyRec, err := s.serviceKeys.VerifyServiceKey(r.Context(), token); err == nil && ok && keyRec != nil {
+				caller := Caller{
+					Kind:      CallerKindService,
+					Identity:  keyRec.CreatedBy,
+					KeyRecord: keyRec,
+				}
+				next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
+				return
+			}
+		}
+
+		// 4. Check OAuth Authenticator
+		if s.oauthAuth != nil {
+			if ident, err := s.oauthAuth.Authenticate(r.Context(), token); err == nil && ident != nil {
+				caller := Caller{
+					Kind:     CallerKindUser,
+					Identity: *ident,
+				}
+				next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
+				return
+			}
+		}
+
+		if mustAuth {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+
+		caller := Caller{
+			Kind:     CallerKindAnonymous,
+			Identity: NodeIdentity{Name: "anonymous"},
+		}
+		next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
 	})
 }
 
@@ -198,6 +295,17 @@ func (s *DiscoveryServer) handleRegisterClient(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Missing public_key", http.StatusBadRequest)
 		return
 	}
+
+	caller, hasCaller := CallerFromContext(r.Context())
+	if hasCaller && caller.Kind == CallerKindUser {
+		if caller.Identity.Name != "" {
+			req.Identity.Name = caller.Identity.Name
+		}
+		if caller.Identity.Email != "" {
+			req.Identity.Email = caller.Identity.Email
+		}
+	}
+
 	if err := s.controlPlane.RegisterClient(r.Context(), req.PublicKey, req.Identity); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -266,4 +374,145 @@ func (s *DiscoveryServer) handleWhoIs(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(id)
+}
+
+type createServiceKeyRequest struct {
+	Name      string `json:"name"`
+	ExpiresIn string `json:"expires_in,omitempty"`
+}
+
+func (s *DiscoveryServer) handleCreateServiceKey(w http.ResponseWriter, r *http.Request) {
+	if s.serviceKeys == nil {
+		http.Error(w, "Service key management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
+		http.Error(w, "Only authenticated users can create service keys", http.StatusForbidden)
+		return
+	}
+
+	var req createServiceKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Missing key name", http.StatusBadRequest)
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresIn != "" {
+		dur, err := time.ParseDuration(req.ExpiresIn)
+		if err != nil {
+			http.Error(w, "Invalid expires_in duration", http.StatusBadRequest)
+			return
+		}
+		t := time.Now().UTC().Add(dur)
+		expiresAt = &t
+	}
+
+	creator := caller.Identity
+	if creator.Name == "" {
+		creator.Name = "user"
+	}
+
+	rec, err := s.serviceKeys.CreateServiceKey(r.Context(), req.Name, creator, expiresAt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(rec)
+}
+
+func (s *DiscoveryServer) handleListServiceKeys(w http.ResponseWriter, r *http.Request) {
+	if s.serviceKeys == nil {
+		http.Error(w, "Service key management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
+		http.Error(w, "Only authenticated users can list service keys", http.StatusForbidden)
+		return
+	}
+
+	keys, err := s.serviceKeys.ListServiceKeys(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	masked := make([]ServiceKeyRecord, len(keys))
+	for i, k := range keys {
+		masked[i] = k.Masked()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(masked)
+}
+
+func (s *DiscoveryServer) handleRevokeServiceKey(w http.ResponseWriter, r *http.Request) {
+	if s.serviceKeys == nil {
+		http.Error(w, "Service key management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
+		http.Error(w, "Only authenticated users can revoke service keys", http.StatusForbidden)
+		return
+	}
+
+	key := r.PathValue("key")
+	if key == "" {
+		http.Error(w, "Missing key parameter", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.serviceKeys.RevokeServiceKey(r.Context(), key, caller.Identity); err != nil {
+		if errors.Is(err, ErrServiceKeyNotFound) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+type verifyServiceKeyResponse struct {
+	Valid  bool              `json:"valid"`
+	Record *ServiceKeyRecord `json:"record,omitempty"`
+}
+
+func (s *DiscoveryServer) handleVerifyServiceKey(w http.ResponseWriter, r *http.Request) {
+	if s.serviceKeys == nil {
+		http.Error(w, "Service key management not supported", http.StatusNotImplemented)
+		return
+	}
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "Missing key parameter", http.StatusBadRequest)
+		return
+	}
+	valid, rec, err := s.serviceKeys.VerifyServiceKey(r.Context(), key)
+	if err != nil && !errors.Is(err, ErrServiceKeyNotFound) && !errors.Is(err, ErrServiceKeyRevoked) && !errors.Is(err, ErrServiceKeyExpired) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	resp := verifyServiceKeyResponse{
+		Valid:  valid,
+		Record: rec,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

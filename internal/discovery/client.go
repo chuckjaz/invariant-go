@@ -10,19 +10,21 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
-// Assert that Client implements Discovery and ControlPlane interfaces
+// Assert that Client implements Discovery, ControlPlane, and ServiceKeyManager interfaces
 var (
-	_ Discovery    = (*Client)(nil)
-	_ ControlPlane = (*Client)(nil)
+	_ Discovery         = (*Client)(nil)
+	_ ControlPlane      = (*Client)(nil)
+	_ ServiceKeyManager = (*Client)(nil)
 )
 
 // Client implements the Discovery and ControlPlane interfaces by forwarding requests to a remote HTTP server.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
-	authToken  string
+	token      string
 }
 
 // NewClient creates a new HTTP discovery client.
@@ -37,9 +39,15 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	}
 }
 
-// WithAuthToken sets the bearer token for authenticating requests.
-func (c *Client) WithAuthToken(token string) *Client {
-	c.authToken = token
+// WithServiceKey sets the service key for authenticating requests.
+func (c *Client) WithServiceKey(key string) *Client {
+	c.token = key
+	return c
+}
+
+// WithUserToken sets the OAuth user token for authenticating requests.
+func (c *Client) WithUserToken(token string) *Client {
+	c.token = token
 	return c
 }
 
@@ -49,8 +57,8 @@ func (c *Client) Get(ctx context.Context, id string) (ServiceDescription, bool) 
 	if err != nil {
 		return ServiceDescription{}, false
 	}
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -91,8 +99,8 @@ func (c *Client) Find(ctx context.Context, protocol, tag string, count int) ([]S
 	if err != nil {
 		return nil, err
 	}
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -125,8 +133,8 @@ func (c *Client) Register(ctx context.Context, reg ServiceRegistration) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -144,7 +152,7 @@ func (c *Client) Register(ctx context.Context, reg ServiceRegistration) error {
 }
 
 func (c *Client) cpClient() *ControlPlaneClient {
-	return NewControlPlaneClient(c.baseURL, c.httpClient, c.authToken)
+	return NewControlPlaneClient(c.baseURL, c.httpClient, c.token)
 }
 
 // RegisterClient registers a client WireGuard public key and identity with the control plane.
@@ -160,4 +168,123 @@ func (c *Client) VerifyKey(ctx context.Context, publicKey string) (bool, *NodeId
 // AuthorizedKeys returns the list of all authorized WireGuard public keys.
 func (c *Client) AuthorizedKeys(ctx context.Context) ([]string, error) {
 	return c.cpClient().AuthorizedKeys(ctx)
+}
+
+// CreateServiceKey creates a new service key on Discovery.
+func (c *Client) CreateServiceKey(ctx context.Context, name string, creator NodeIdentity, expiresAt *time.Time) (*ServiceKeyRecord, error) {
+	reqBody := map[string]string{
+		"name": name,
+	}
+	if expiresAt != nil {
+		reqBody["expires_in"] = time.Until(*expiresAt).String()
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/auth/service-key", c.baseURL), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var rec ServiceKeyRecord
+	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// VerifyServiceKey checks if a service key is valid.
+func (c *Client) VerifyServiceKey(ctx context.Context, key string) (bool, *ServiceKeyRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/verify-service-key?key=%s", c.baseURL, url.QueryEscape(key)), nil)
+	if err != nil {
+		return false, nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return false, nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var vResp verifyServiceKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&vResp); err != nil {
+		return false, nil, err
+	}
+	return vResp.Valid, vResp.Record, nil
+}
+
+// ListServiceKeys lists active service keys.
+func (c *Client) ListServiceKeys(ctx context.Context) ([]ServiceKeyRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/service-keys", c.baseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var recs []ServiceKeyRecord
+	if err := json.NewDecoder(resp.Body).Decode(&recs); err != nil {
+		return nil, err
+	}
+	return recs, nil
+}
+
+// RevokeServiceKey revokes a service key by key or ID.
+func (c *Client) RevokeServiceKey(ctx context.Context, keyOrID string, revoker NodeIdentity) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/auth/service-key/%s", c.baseURL, url.PathEscape(keyOrID)), nil)
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }

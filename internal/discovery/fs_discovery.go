@@ -11,16 +11,20 @@ import (
 	"invariant/internal/journal"
 )
 
-// Assert that FileSystemDiscovery implements Discovery and ControlPlane interfaces
+// Assert that FileSystemDiscovery implements Discovery, ControlPlane, ServiceKeyManager, and ServiceKeyRestorer interfaces
 var (
-	_ Discovery    = (*FileSystemDiscovery)(nil)
-	_ ControlPlane = (*FileSystemDiscovery)(nil)
+	_ Discovery          = (*FileSystemDiscovery)(nil)
+	_ ControlPlane       = (*FileSystemDiscovery)(nil)
+	_ ServiceKeyManager  = (*FileSystemDiscovery)(nil)
+	_ ServiceKeyRestorer = (*FileSystemDiscovery)(nil)
 )
 
 type FileSystemDiscovery struct {
 	store       *journal.Store[string, ServiceRegistration]
 	clientStore *journal.Store[string, NodeIdentity]
+	keyStore    *journal.Store[string, ServiceKeyRecord]
 	tracker     *HealthTracker
+	sink        EventSink
 	closeOnce   sync.Once
 	closeErr    error
 }
@@ -47,9 +51,24 @@ func NewFileSystemDiscovery(baseDir string, snapshotInterval time.Duration) (*Fi
 		return nil, err
 	}
 
+	keysDir := filepath.Join(baseDir, "service_keys")
+	if err := os.MkdirAll(keysDir, 0700); err != nil {
+		store.Close()
+		clientStore.Close()
+		return nil, err
+	}
+
+	keyStore, err := journal.NewStore[string, ServiceKeyRecord](keysDir, snapshotInterval)
+	if err != nil {
+		store.Close()
+		clientStore.Close()
+		return nil, err
+	}
+
 	d := &FileSystemDiscovery{
 		store:       store,
 		clientStore: clientStore,
+		keyStore:    keyStore,
 	}
 
 	return d, nil
@@ -72,9 +91,21 @@ func (d *FileSystemDiscovery) WithHealthTracking(interval, timeout time.Duration
 
 	removeFn := func(id string) {
 		d.store.Delete(id, nil)
+		if d.sink != nil {
+			_ = d.sink.Append(context.Background(), DiscoveryEvent{
+				Kind:      EventUnregisterService,
+				ServiceID: id,
+				Timestamp: time.Now().UTC(),
+			})
+		}
 	}
 
 	d.tracker = NewHealthTracker(interval, timeout, listFn, removeFn)
+	return d
+}
+
+func (d *FileSystemDiscovery) WithEventSink(sink EventSink) *FileSystemDiscovery {
+	d.sink = sink
 	return d
 }
 
@@ -86,6 +117,12 @@ func (d *FileSystemDiscovery) Close() error {
 		if d.clientStore != nil {
 			d.clientStore.Close()
 		}
+		if d.keyStore != nil {
+			d.keyStore.Close()
+		}
+		if d.sink != nil {
+			_ = d.sink.Close()
+		}
 		d.closeErr = d.store.Close()
 	})
 	return d.closeErr
@@ -94,6 +131,11 @@ func (d *FileSystemDiscovery) Close() error {
 func (d *FileSystemDiscovery) Snapshot() error {
 	if d.clientStore != nil {
 		if err := d.clientStore.Snapshot(); err != nil {
+			return err
+		}
+	}
+	if d.keyStore != nil {
+		if err := d.keyStore.Snapshot(); err != nil {
 			return err
 		}
 	}
@@ -195,14 +237,32 @@ func (d *FileSystemDiscovery) Register(ctx context.Context, reg ServiceRegistrat
 	}
 
 	err := d.store.Put(reg.ID, regCopy, nil)
-	if err == nil && d.tracker != nil {
-		d.tracker.MarkHealthy(reg.ID)
+	if err == nil {
+		if d.tracker != nil {
+			d.tracker.MarkHealthy(reg.ID)
+		}
+		if d.sink != nil {
+			_ = d.sink.Append(ctx, DiscoveryEvent{
+				Kind:      EventRegisterService,
+				Service:   &regCopy,
+				Timestamp: time.Now().UTC(),
+			})
+		}
 	}
 	return err
 }
 
 func (d *FileSystemDiscovery) RegisterClient(ctx context.Context, publicKey string, id NodeIdentity) error {
-	return d.clientStore.Put(publicKey, id, nil)
+	err := d.clientStore.Put(publicKey, id, nil)
+	if err == nil && d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:        EventRegisterClient,
+			ClientKey:   publicKey,
+			ClientIdent: &id,
+			Timestamp:   time.Now().UTC(),
+		})
+	}
+	return err
 }
 
 func (d *FileSystemDiscovery) VerifyKey(ctx context.Context, publicKey string) (bool, *NodeIdentity, error) {
@@ -252,4 +312,94 @@ func (d *FileSystemDiscovery) AuthorizedKeys(ctx context.Context) ([]string, err
 	}
 	slices.Sort(keys)
 	return keys, nil
+}
+
+func (d *FileSystemDiscovery) CreateServiceKey(ctx context.Context, name string, creator NodeIdentity, expiresAt *time.Time) (*ServiceKeyRecord, error) {
+	rec, err := GenerateServiceKey(name, creator, expiresAt)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.keyStore.Put(rec.Key, *rec, nil); err != nil {
+		return nil, err
+	}
+
+	if d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:       EventCreateServiceKey,
+			ServiceKey: rec,
+			Timestamp:  time.Now().UTC(),
+		})
+	}
+
+	recCopy := *rec
+	return &recCopy, nil
+}
+
+func (d *FileSystemDiscovery) VerifyServiceKey(ctx context.Context, key string) (bool, *ServiceKeyRecord, error) {
+	rec, ok := d.keyStore.Get(key)
+	if !ok {
+		return false, nil, ErrServiceKeyNotFound
+	}
+	if rec.Revoked {
+		return false, nil, ErrServiceKeyRevoked
+	}
+	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
+		return false, nil, ErrServiceKeyExpired
+	}
+	recCopy := rec
+	return true, &recCopy, nil
+}
+
+func (d *FileSystemDiscovery) ListServiceKeys(ctx context.Context) ([]ServiceKeyRecord, error) {
+	var records []ServiceKeyRecord
+	d.keyStore.Read(func(m map[string]ServiceKeyRecord) {
+		for _, r := range m {
+			records = append(records, r)
+		}
+	})
+	slices.SortFunc(records, func(a, b ServiceKeyRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *FileSystemDiscovery) RevokeServiceKey(ctx context.Context, keyOrID string, revoker NodeIdentity) error {
+	var foundKey string
+	var rec ServiceKeyRecord
+	d.keyStore.Read(func(m map[string]ServiceKeyRecord) {
+		for k, r := range m {
+			if k == keyOrID || r.ID == keyOrID {
+				foundKey = k
+				rec = r
+				break
+			}
+		}
+	})
+	if foundKey == "" {
+		return ErrServiceKeyNotFound
+	}
+
+	now := time.Now().UTC()
+	rec.Revoked = true
+	rec.RevokedAt = &now
+	rec.RevokedBy = &revoker
+	if err := d.keyStore.Put(foundKey, rec, nil); err != nil {
+		return err
+	}
+
+	if d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeServiceKey,
+			RevokeKey: foundKey,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+// RestoreServiceKey directly restores an existing service key record during replay or disaster recovery.
+func (d *FileSystemDiscovery) RestoreServiceKey(ctx context.Context, rec ServiceKeyRecord) error {
+	return d.keyStore.Put(rec.Key, rec, nil)
 }

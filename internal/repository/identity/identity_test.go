@@ -10,11 +10,11 @@ func TestEnvironmentProvider(t *testing.T) {
 	ctx := context.Background()
 	os.Setenv("GIT_AUTHOR_NAME", "Env Author")
 	os.Setenv("GIT_AUTHOR_EMAIL", "env.author@example.com")
-	os.Setenv("INVARIANT_AUTH_TOKEN", "env-token-xyz")
+	os.Setenv("INVARIANT_OAUTH_TOKEN", "env-token-xyz")
 	defer func() {
 		os.Unsetenv("GIT_AUTHOR_NAME")
 		os.Unsetenv("GIT_AUTHOR_EMAIL")
-		os.Unsetenv("INVARIANT_AUTH_TOKEN")
+		os.Unsetenv("INVARIANT_OAUTH_TOKEN")
 	}()
 
 	provider := NewEnvironmentProvider()

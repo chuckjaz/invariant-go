@@ -24,6 +24,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  workspace   Manage layered workspaces\n")
 	fmt.Fprintf(os.Stderr, "  scan-repo   Scan a Git repository and index mappings to KV service\n")
 	fmt.Fprintf(os.Stderr, "  repository  Manage Invariant version control repositories\n")
+	fmt.Fprintf(os.Stderr, "  login       Authenticate user with OAuth provider\n")
+	fmt.Fprintf(os.Stderr, "  service-key Manage service keys authorized by user account\n")
 	os.Exit(1)
 }
 
@@ -67,6 +69,10 @@ func main() {
 		runScanRepo(cfg, os.Args[2:])
 	case "repository", "repo":
 		runRepository(cfg, os.Args[2:])
+	case "login":
+		runLogin(cfg, os.Args[2:])
+	case "service-key":
+		runServiceKey(cfg, os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		usage()

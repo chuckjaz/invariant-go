@@ -18,11 +18,11 @@ var _ ControlPlane = (*ControlPlaneClient)(nil)
 type ControlPlaneClient struct {
 	baseURL    string
 	httpClient *http.Client
-	authToken  string
+	token      string
 }
 
 // NewControlPlaneClient creates a new HTTP client for the itp-v1 ControlPlane protocol.
-func NewControlPlaneClient(baseURL string, httpClient *http.Client, authToken string) *ControlPlaneClient {
+func NewControlPlaneClient(baseURL string, httpClient *http.Client, token string) *ControlPlaneClient {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -30,7 +30,7 @@ func NewControlPlaneClient(baseURL string, httpClient *http.Client, authToken st
 	return &ControlPlaneClient{
 		baseURL:    baseURL,
 		httpClient: httpClient,
-		authToken:  authToken,
+		token:      token,
 	}
 }
 
@@ -49,8 +49,8 @@ func (c *ControlPlaneClient) RegisterClient(ctx context.Context, publicKey strin
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -70,8 +70,8 @@ func (c *ControlPlaneClient) VerifyKey(ctx context.Context, publicKey string) (b
 	if err != nil {
 		return false, nil, err
 	}
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -95,8 +95,8 @@ func (c *ControlPlaneClient) AuthorizedKeys(ctx context.Context) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	if c.authToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

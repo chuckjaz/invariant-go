@@ -62,7 +62,10 @@ func (p *EnvironmentProvider) CurrentIdentity(ctx context.Context) (Identity, er
 		email = fmt.Sprintf("%s@%s", strings.ToLower(name), hostname)
 	}
 
-	token := os.Getenv("INVARIANT_AUTH_TOKEN")
+	token := os.Getenv("INVARIANT_OAUTH_TOKEN")
+	if token == "" {
+		token = os.Getenv("INVARIANT_SERVICE_KEY")
+	}
 
 	return Identity{
 		Name:  name,

@@ -38,8 +38,8 @@ func main() {
 	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
 	var port int
 	flag.IntVar(&port, "port", 0, "Port to listen on when -listen-ip is enabled (0 for random available port)")
-	var authToken string
-	flag.StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with discovery / control plane (defaults to INVARIANT_AUTH_TOKEN)")
+	var serviceKey string
+	flag.StringVar(&serviceKey, "service-key", "", "Service key for authenticating with discovery / control plane (defaults to INVARIANT_SERVICE_KEY)")
 	var keyFile string
 	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
 	var derpMapURL string
@@ -77,8 +77,8 @@ func main() {
 
 	flag.Parse()
 
-	if authToken == "" {
-		authToken = os.Getenv("INVARIANT_AUTH_TOKEN")
+	if serviceKey == "" {
+		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
 	}
 
 	if btreeSlotID == "" {
@@ -118,11 +118,11 @@ func main() {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
 	}
 
-	httpClient := itp.NewHTTPClient(privKey.Private, authToken, itp.WithDERPMapURL(derpMapURL))
+	httpClient := itp.NewHTTPClient(privKey.Private, serviceKey, itp.WithDERPMapURL(derpMapURL))
 
 	disc := discovery.NewClient(discoveryURL, httpClient)
-	if authToken != "" {
-		disc = disc.WithAuthToken(authToken)
+	if serviceKey != "" {
+		disc = disc.WithServiceKey(serviceKey)
 	}
 
 	findService := func(kind string) string {

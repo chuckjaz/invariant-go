@@ -125,8 +125,8 @@ func TestFileSystemDiscovery_ControlPlane(t *testing.T) {
 
 func TestDiscoveryServer_ControlPlaneHTTP(t *testing.T) {
 	d := NewInMemoryDiscovery()
-	authToken := "test-secret-token"
-	server := NewDiscoveryServer(d).WithAuthToken(authToken)
+	serviceKey := "test-secret-token"
+	server := NewDiscoveryServer(d).WithServiceKeys(serviceKey)
 
 	ts := httptest.NewServer(server)
 	defer ts.Close()
@@ -141,7 +141,7 @@ func TestDiscoveryServer_ControlPlaneHTTP(t *testing.T) {
 	}
 
 	// Client with correct token succeeds
-	goodClient := NewControlPlaneClient(ts.URL, ts.Client(), authToken)
+	goodClient := NewControlPlaneClient(ts.URL, ts.Client(), serviceKey)
 	clientKey := "nodekey:testclient"
 	err = goodClient.RegisterClient(ctx, clientKey, NodeIdentity{Name: "charlie", Email: "charlie@example.com"})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestDiscoveryServer_ControlPlaneHTTP(t *testing.T) {
 	}
 
 	// Test unified discovery.Client
-	discClient := NewClient(ts.URL, ts.Client()).WithAuthToken(authToken)
+	discClient := NewClient(ts.URL, ts.Client()).WithServiceKey(serviceKey)
 	ok, id, err = discClient.VerifyKey(ctx, clientKey)
 	if err != nil {
 		t.Fatalf("discClient.VerifyKey failed: %v", err)
