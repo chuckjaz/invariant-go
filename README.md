@@ -12,6 +12,9 @@ The file system can be layered, which allows for files in a dirctory to go to di
 ### Key-Value store
 A key-value store is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data. The key-value store is backed by an immutable journal, an immutable B-Tree index, and an in-memory cache. 
 
+### Version Control Repository
+A distributed version control and code review system ([protocol and command description](docs/Repository.md)) is built natively on top of Invariant's content-addressable storage, mutable slots, names service, and layered FUSE workspaces. Commits, file trees, and blobs are stored directly in CAS rather than a local `.git` directory, and branches and change sets are mounted as isolated workspaces. It supports branching, 3-way merges and rebasing, integrated code reviews, and bidirectional synchronization with Git repositories.
+
 ### Automatic backup and recovery
 The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encyrpted copies of the files at rest.
 
@@ -133,6 +136,51 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - `mount <directory>`: Parses the `.invariant-workspace` and mounts the virtual composite layered file system locally via FUSE natively inheriting standard disk caching (`~/.cache/invariant`) and offline overflow. Runs as a background daemon by default, or supports `-foreground`.
   - `unmount <directory>`: Unmounts the current layered workspace.
   - `pull [directory]`: Parses the workspace and caches all required source layer blocks directly into the local disk storage natively utilizing concurrency limits and `~/.cache/invariant/overflow` validation fallbacks.
+- `repository` (or `repo`): Manage Invariant version control repositories ([detailed documentation](docs/Repository.md)).
+  - **Primary workflow**:
+    - `change <name>`: Create a writable change branch workspace branched from upstream (supports `-private`, `-upstream`, and `-tag`).
+    - `status`: Show working tree file modifications, additions, and deletions relative to the current `HEAD` commit.
+    - `diff [<commit1>] [<commit2>]`: Produce unified diffs of workspace changes or between commits (supports `--stat`).
+    - `sync`: Synchronize and rebase the active change workspace onto the latest upstream `HEAD` via 3-way merge (supports `--continue`, `--abort`, and `-tag`).
+    - `log [<path>]`: Display the commit history log (supports `-tree` / `-graph` for full DAG history and `-n <count>`).
+    - `commit`: Snapshot and commit workspace changes to the current branch slot (supports repeatable `-m <msg>`, `--amend`, `--squash <commit>`, and `-tag`).
+    - `review`: Manage code reviews, inline comments, and approvals:
+      - `request [<directory>]`: Request a code review on the active change branch and emit a review token.
+      - `open <sha|token|name>`: Open a review workspace for inspection without changing its status (supports `-d <dir>` and `-writable`).
+      - `start [<sha|token|name>]`: Transition a review to `in_progress` and open/mount its workspace (supports `-d <dir>`, `-writable`, and `-reviewer`).
+      - `comment [<comment-file>]`: Add structured review comments via a JSON file or flags (`-token`, `-m`, `-file`, `-line`, `-end-line`, `-author`).
+      - `comments [<identifier>]`: Display review comments formatted as markdown with code context or raw JSON (`-json`).
+      - `approve [<identifier>]`: Approve a code review and retire the review workspace.
+      - `reject [<identifier>]`: Reject a code review and retire the review workspace.
+      - `abandon [<identifier>]`: Abandon a code review and retire the review workspace.
+      - `update [<identifier>]`: Update an existing review record with the latest committed changes on the branch.
+    - `submit [<directory>]`: Fast-forward/push changes from the change workspace to the target upstream branch (default `main`) and retire the workspace (supports `-target` and `-tag`).
+    - `show [<commit>[:<path>]]`: Inspect commit metadata and diffs, or view a file's contents at a specific commit snapshot.
+  - **Initialization and configuration**:
+    - `create <name> [<content>]`: Create a new repository, register it with the Names Service, and initialize the `main` branch (supports `-content`, `-d`, `-tag`, `-create-only`, `-encrypt`, `-compress`, `-writable`, and `-readonly` / `-read-only`).
+    - `open <name> [<directory>]`: Open an existing repository from the Names Service into a layered FUSE workspace (supports `-b` / `-branch`, `-d` / `-directory`, `-layers`, `-create-only`, `-foreground`, `-writable`, and `-tag`).
+    - `config <get|set|unset|list>`: Manage repository-scoped or global user (`--global`) configuration settings.
+  - **Branch management**:
+    - `branch [list|delete <name>]`: List local workspaces, upstream branches, and discovered peer branches, or delete a branch.
+    - `checkout <branch|peer-branch>`: Switch to or mount a local, upstream, or peer-published change branch (supports `-writable`).
+    - `cherry-pick <branch|commit> [<end-commit>]`: Apply commits from another branch or commit range onto the current workspace (supports `-tag`).
+    - `rebase [-i] [<upstream>]`: Interactively edit, reorder, squash, or drop commits in a change branch.
+    - `tag [create <name> [<commit>]|list|delete <name>]`: Create, list, or delete immutable release tags.
+  - **Workspace management**:
+    - `clean`: Purge untracked and temporary files from the workspace (supports `-f`, `-d`, and `-x`).
+    - `layer <add <repo_name> <mount_path> [--commit=<sha>]|list|remove <mount_path>>`: Manage pinned sub-repository dependency layers.
+    - `restore [<path>]`: Discard uncommitted local edits and restore files from a commit snapshot (supports `-source <commit>`, defaults to `HEAD`).
+    - `revert <commit>`: Apply the inverse patch of a commit and record a new revert commit (supports `-tag`).
+    - `stash [push [-m <msg>]|pop|list|drop [<index>]]`: Shelve and restore uncommitted local changes to/from temporary CAS commits.
+    - `mount <name> [<directory>]`: Mount an existing repository workspace.
+    - `unmount [<directory>]`: Unmount a repository workspace and its nested workspaces.
+  - **Diagnostics**:
+    - `blame <file>`: Show line-by-line commit and author attribution for a file (supports `-commit <hash>`).
+    - `grep <pattern> [<path>]`: Search for patterns across commit trees in CAS (supports `-i`, `-n`, and `-commit <hash>`).
+    - `bisect <start [<bad> [<good>]]|bad [<commit>]|good [<commit>]|reset|run <cmd> [args...]>`: Perform binary search across commit history to isolate regressions.
+  - **Import / Export**:
+    - `git import [<git-dir>]`: Import commit history and file trees from a Git repository into Invariant CAS (supports `-repository` / `-repo`, `-branch`, `-directory` / `-d`, `-depth`, `-writable`, and `-tag`).
+    - `git export <target-git-dir>`: Export Invariant commits and file trees to a Git repository (supports `-branch` and `-from <commit>`).
 - `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe. Subpath traversal is also supported (e.g., `invariant print <content-link>/path/to/file`). Supports `-s` to treat the target hash code or name as a mutable slot.
 
 ```bash
