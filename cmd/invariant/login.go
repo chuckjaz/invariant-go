@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -74,6 +76,30 @@ func LoadOAuthToken() (string, error) {
 	return t.AccessToken, nil
 }
 
+const (
+	defaultGoogleClientID     = "624751386960-o472j5n2rhib1odebc13lkqeptddp6dt.apps.googleusercontent.com"
+	defaultGoogleClientSecret = "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"
+	defaultGoogleAuthURL      = "https://accounts.google.com/o/oauth2/v2/auth"
+	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
+	defaultGoogleDeviceURL    = "https://oauth2.googleapis.com/device/code"
+)
+
+// openBrowser launches the default system browser for the given URL.
+func openBrowser(targetURL string) error {
+	var err error
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", targetURL).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", targetURL).Start()
+	case "darwin":
+		err = exec.Command("open", targetURL).Start()
+	default:
+		err = fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+	return err
+}
+
 func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	var manualToken string
@@ -82,6 +108,8 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs.BoolVar(&deviceFlow, "device", false, "Use OAuth 2.0 Device Authorization Grant (for headless environments)")
 	var clientID string
 	fs.StringVar(&clientID, "client-id", "", "OAuth Client ID")
+	var clientSecret string
+	fs.StringVar(&clientSecret, "client-secret", "", "OAuth Client Secret")
 	var authURL string
 	fs.StringVar(&authURL, "auth-url", "", "OAuth Authorization URL")
 	var tokenURL string
@@ -94,17 +122,32 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	if clientID == "" {
 		clientID = os.Getenv("INVARIANT_OAUTH_CLIENT_ID")
 		if clientID == "" {
-			clientID = "invariant-cli"
+			clientID = defaultGoogleClientID
+		}
+	}
+	if clientSecret == "" {
+		clientSecret = os.Getenv("INVARIANT_OAUTH_CLIENT_SECRET")
+		if clientSecret == "" {
+			clientSecret = defaultGoogleClientSecret
 		}
 	}
 	if authURL == "" {
 		authURL = os.Getenv("INVARIANT_OAUTH_AUTH_URL")
+		if authURL == "" {
+			authURL = defaultGoogleAuthURL
+		}
 	}
 	if tokenURL == "" {
 		tokenURL = os.Getenv("INVARIANT_OAUTH_TOKEN_URL")
+		if tokenURL == "" {
+			tokenURL = defaultGoogleTokenURL
+		}
 	}
 	if deviceURL == "" {
 		deviceURL = os.Getenv("INVARIANT_OAUTH_DEVICE_URL")
+		if deviceURL == "" {
+			deviceURL = defaultGoogleDeviceURL
+		}
 	}
 
 	// 1. Manual token specification
@@ -128,7 +171,7 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: --device-url and --token-url are required for device flow (or set INVARIANT_OAUTH_DEVICE_URL)\n")
 			os.Exit(1)
 		}
-		runDeviceLogin(clientID, deviceURL, tokenURL)
+		runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL)
 		return
 	}
 
@@ -157,10 +200,23 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 		return
 	}
 
-	runBrowserLogin(clientID, authURL, tokenURL)
+	runBrowserLogin(clientID, clientSecret, authURL, tokenURL)
 }
 
-func runBrowserLogin(clientID, authURL, tokenURL string) {
+type oauthTokenResponse struct {
+	OAuthTokenFile
+	ExpiresIn int `json:"expires_in"`
+}
+
+func (r *oauthTokenResponse) toTokenFile() OAuthTokenFile {
+	tf := r.OAuthTokenFile
+	if tf.Expiry.IsZero() && r.ExpiresIn > 0 {
+		tf.Expiry = time.Now().Add(time.Duration(r.ExpiresIn) * time.Second)
+	}
+	return tf
+}
+
+func runBrowserLogin(clientID, clientSecret, authURL, tokenURL string) {
 	// PKCE
 	verifierBytes := make([]byte, 32)
 	rand.Read(verifierBytes)
@@ -181,16 +237,29 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 	defer listener.Close()
 
 	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	authReqURL := fmt.Sprintf("%s?response_type=code&client_id=%s&redirect_uri=%s&scope=openid%%20profile%%20email&state=%s&code_challenge=%s&code_challenge_method=S256",
-		authURL, url.QueryEscape(clientID), url.QueryEscape(redirectURI), url.QueryEscape(state), url.QueryEscape(challenge))
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientID},
+		"redirect_uri":          {redirectURI},
+		"scope":                 {"openid https://www.googleapis.com/auth/userinfo.email"},
+		"state":                 {state},
+		"access_type":           {"offline"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
+	authReqURL := fmt.Sprintf("%s?%s", authURL, params.Encode())
 
-	codeCh := make(chan string)
-	errCh := make(chan error)
+	codeCh := make(chan string, 1)
+	errCh := make(chan error, 1)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "/callback" {
+			http.NotFound(w, r)
+			return
+		}
 		q := r.URL.Query()
 		if q.Get("state") != state {
 			http.Error(w, "State mismatch", http.StatusBadRequest)
@@ -204,7 +273,7 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>")
+		fmt.Fprint(w, "<html><body><h1>Authentication Successful!</h1><p>You can now close this browser window and head back to the terminal.</p></body></html>")
 		codeCh <- code
 	})
 
@@ -212,7 +281,13 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 	go srv.Serve(listener)
 	defer srv.Shutdown(context.Background())
 
-	fmt.Printf("Please log in by opening this URL in your browser:\n\n  %s\n\nWaiting for authorization callback on :%d...\n", authReqURL, port)
+	fmt.Printf("Opening system browser to authenticate...\n")
+	if err := openBrowser(authReqURL); err != nil {
+		fmt.Printf("Could not open browser automatically. Please click or visit:\n\n  %s\n\n", authReqURL)
+	} else {
+		fmt.Printf("If the browser did not open automatically, please visit:\n\n  %s\n\n", authReqURL)
+	}
+	fmt.Printf("Waiting for authorization callback on :%d...\n", port)
 
 	var code string
 	select {
@@ -233,6 +308,9 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 		"client_id":     {clientID},
 		"code_verifier": {verifier},
 	}
+	if clientSecret != "" {
+		data.Set("client_secret", clientSecret)
+	}
 
 	resp, err := http.PostForm(tokenURL, data)
 	if err != nil {
@@ -247,12 +325,13 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 		os.Exit(1)
 	}
 
-	var tokenFile OAuthTokenFile
-	if err := json.NewDecoder(resp.Body).Decode(&tokenFile); err != nil {
+	var tokenResp oauthTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to decode token response: %v\n", err)
 		os.Exit(1)
 	}
 
+	tokenFile := tokenResp.toTokenFile()
 	if err := SaveOAuthToken(&tokenFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving token: %v\n", err)
 		os.Exit(1)
@@ -262,7 +341,7 @@ func runBrowserLogin(clientID, authURL, tokenURL string) {
 	fmt.Printf("\nLogin successful! Credentials saved to %s\n", path)
 }
 
-func runDeviceLogin(clientID, deviceURL, tokenURL string) {
+func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
 	data := url.Values{
 		"client_id": {clientID},
 		"scope":     {"openid profile email"},
@@ -314,6 +393,9 @@ func runDeviceLogin(clientID, deviceURL, tokenURL string) {
 			"device_code": {deviceResp.DeviceCode},
 			"client_id":   {clientID},
 		}
+		if clientSecret != "" {
+			pollData.Set("client_secret", clientSecret)
+		}
 
 		pollResp, err := http.PostForm(tokenURL, pollData)
 		if err != nil {
@@ -321,9 +403,10 @@ func runDeviceLogin(clientID, deviceURL, tokenURL string) {
 		}
 
 		if pollResp.StatusCode == http.StatusOK {
-			var tokenFile OAuthTokenFile
-			_ = json.NewDecoder(pollResp.Body).Decode(&tokenFile)
+			var tokenResp oauthTokenResponse
+			_ = json.NewDecoder(pollResp.Body).Decode(&tokenResp)
 			pollResp.Body.Close()
+			tokenFile := tokenResp.toTokenFile()
 			_ = SaveOAuthToken(&tokenFile)
 			path, _ := OAuthTokenPath()
 			fmt.Printf("\nLogin successful! Credentials saved to %s\n", path)
