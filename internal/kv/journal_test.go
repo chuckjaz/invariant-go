@@ -142,10 +142,10 @@ func TestJournal_CloseMultipleTimes(t *testing.T) {
 		t.Errorf("Expected error on second close, got nil")
 	}
 
-	// Manually set currentFile to nil and close to cover nil branch
-	j.currentFile = nil
+	// Manually set cj to nil and close to cover nil branch
+	j.cj = nil
 	if err := j.Close(); err != nil {
-		t.Errorf("Close on nil currentFile failed: %v", err)
+		t.Errorf("Close on nil cj failed: %v", err)
 	}
 }
 

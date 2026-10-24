@@ -35,7 +35,6 @@ type Record struct {
 type Journal struct {
 	cj             *chainedjournal.ChainedJournal[Record]
 	baseDir        string
-	currentFile    *os.File
 	mu             sync.Mutex
 	lastRecordType RecordType
 	closed         bool
@@ -56,9 +55,8 @@ func NewJournal(baseDir string, store storage.Storage, slotClient slots.Slots, s
 		return nil, err
 	}
 	return &Journal{
-		cj:          cj,
-		baseDir:     baseDir,
-		currentFile: os.NewFile(0, "active"),
+		cj:      cj,
+		baseDir: baseDir,
 	}, nil
 }
 
@@ -100,7 +98,7 @@ func (j *Journal) Close() error {
 	defer j.mu.Unlock()
 
 	if j.closed {
-		if j.currentFile == nil {
+		if j.cj == nil {
 			return nil
 		}
 		return fmt.Errorf("journal already closed")
