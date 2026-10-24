@@ -27,6 +27,7 @@ type DiscoveryServer struct {
 	serviceKeys       ServiceKeyManager
 	invitations       InvitationManager
 	peerResolver      PeerKeyResolver
+	controlPlaneURL   string
 	oauthAuth         Authenticator
 	staticKeys        map[string]struct{}
 	requireAuth       bool
@@ -85,6 +86,14 @@ func (s *DiscoveryServer) WithInvitationManager(im InvitationManager) *Discovery
 // WireGuard public key pinning on access tokens and invitation redemption.
 func (s *DiscoveryServer) WithPeerKeyResolver(r PeerKeyResolver) *DiscoveryServer {
 	s.peerResolver = r
+	s.handler = s.Handler()
+	return s
+}
+
+// WithControlPlaneURL configures the control plane / discovery service address (e.g. itp://tc1...)
+// embedded into generated invitation codes.
+func (s *DiscoveryServer) WithControlPlaneURL(url string) *DiscoveryServer {
+	s.controlPlaneURL = strings.TrimSpace(url)
 	s.handler = s.Handler()
 	return s
 }
@@ -729,6 +738,12 @@ func (s *DiscoveryServer) handleCreateInvitation(w http.ResponseWriter, r *http.
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if s.controlPlaneURL != "" {
+		if inv.ControlPlaneURL == "" {
+			inv.ControlPlaneURL = s.controlPlaneURL
+		}
+		inv.Code = FormatInvitationCode(inv.Code, inv.ControlPlaneURL)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

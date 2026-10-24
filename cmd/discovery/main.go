@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -147,33 +148,6 @@ func main() {
 	}
 	server.WithRequireAuth(!allowAnonymous)
 
-	if !allowAnonymous {
-		if im, ok := localD.(discovery.InvitationManager); ok {
-			invitePath := bootstrapInviteFile
-			if invitePath == "" {
-				if dir != "" {
-					invitePath = filepath.Join(dir, "bootstrap.invite")
-				} else {
-					home, _ := os.UserHomeDir()
-					if home == "" {
-						home = "."
-					}
-					invitePath = filepath.Join(home, ".invariant", "keys", "bootstrap.invite")
-				}
-			}
-			inv, created, err := discovery.EnsureBootstrapInvitation(context.Background(), im, bootstrapTTL, invitePath)
-			if err != nil {
-				log.Printf("Warning: failed to ensure bootstrap admin invitation: %v", err)
-			} else if inv != nil {
-				if created {
-					log.Printf("Generated bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
-				} else {
-					log.Printf("Active bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
-				}
-			}
-		}
-	}
-
 	if serviceKey != "" {
 		server.WithServiceKeys(serviceKey)
 	}
@@ -201,6 +175,7 @@ func main() {
 
 	var listener *itp.Listener
 	var err error
+	var controlPlaneURL string
 	if listenIP {
 		listener, err = itp.Listen(context.Background(), itp.ListenOptions{
 			ListenIP: true,
@@ -210,6 +185,7 @@ func main() {
 			log.Fatalf("Failed to listen on IP port %d: %v", port, err)
 		}
 		defer listener.Close()
+		controlPlaneURL = fmt.Sprintf("http://127.0.0.1:%d", listener.Port())
 		log.Printf("Discovery service listening on :%d (HTTP)...", listener.Port())
 	} else {
 		if keyFile == "" {
@@ -232,7 +208,40 @@ func main() {
 		}
 		defer listener.Close()
 		server.WithPeerKeyResolver(listener)
+		controlPlaneURL = listener.ITPAddr
 		log.Printf("Discovery service listening on ITP address %s (Public Key: %s)...", listener.ITPAddr, listener.PublicKey)
+	}
+
+	server.WithControlPlaneURL(controlPlaneURL)
+	if cpSetter, ok := localD.(interface{ WithControlPlaneURL(string) }); ok {
+		cpSetter.WithControlPlaneURL(controlPlaneURL)
+	}
+
+	if !allowAnonymous {
+		if im, ok := localD.(discovery.InvitationManager); ok {
+			invitePath := bootstrapInviteFile
+			if invitePath == "" {
+				if dir != "" {
+					invitePath = filepath.Join(dir, "bootstrap.invite")
+				} else {
+					home, _ := os.UserHomeDir()
+					if home == "" {
+						home = "."
+					}
+					invitePath = filepath.Join(home, ".invariant", "keys", "bootstrap.invite")
+				}
+			}
+			inv, created, err := discovery.EnsureBootstrapInvitation(context.Background(), im, bootstrapTTL, invitePath, controlPlaneURL)
+			if err != nil {
+				log.Printf("Warning: failed to ensure bootstrap admin invitation: %v", err)
+			} else if inv != nil {
+				if created {
+					log.Printf("Generated bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
+				} else {
+					log.Printf("Active bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
+				}
+			}
+		}
 	}
 
 	log.Fatal(http.Serve(listener, server))

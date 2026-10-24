@@ -19,14 +19,15 @@ var (
 )
 
 type InMemoryDiscovery struct {
-	mu           sync.RWMutex
-	services     map[string]ServiceRegistration
-	clients      map[string]NodeIdentity
-	serviceKeys  map[string]ServiceKeyRecord
-	invitations  map[string]InvitationRecord
-	accessTokens map[string]AccessTokenRecord
-	tracker      *HealthTracker
-	sink         EventSink
+	mu              sync.RWMutex
+	services        map[string]ServiceRegistration
+	clients         map[string]NodeIdentity
+	serviceKeys     map[string]ServiceKeyRecord
+	invitations     map[string]InvitationRecord
+	accessTokens    map[string]AccessTokenRecord
+	controlPlaneURL string
+	tracker         *HealthTracker
+	sink            EventSink
 }
 
 func NewInMemoryDiscovery() *InMemoryDiscovery {
@@ -50,6 +51,13 @@ func (d *InMemoryDiscovery) WithHealthTracking(interval, timeout time.Duration) 
 
 func (d *InMemoryDiscovery) WithEventSink(sink EventSink) *InMemoryDiscovery {
 	d.sink = sink
+	return d
+}
+
+func (d *InMemoryDiscovery) WithControlPlaneURL(url string) *InMemoryDiscovery {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.controlPlaneURL = strings.TrimSpace(url)
 	return d
 }
 
@@ -400,7 +408,12 @@ func (d *InMemoryDiscovery) CreateInvitation(ctx context.Context, name string, r
 	}
 
 	d.mu.Lock()
-	d.invitations[inv.Code] = *inv
+	if d.controlPlaneURL != "" {
+		inv.ControlPlaneURL = d.controlPlaneURL
+		inv.Code = FormatInvitationCode(inv.Code, d.controlPlaneURL)
+	}
+	rawCode, _ := ParseInvitationCode(inv.Code)
+	d.invitations[rawCode] = *inv
 	sink := d.sink
 	d.mu.Unlock()
 
@@ -417,11 +430,14 @@ func (d *InMemoryDiscovery) CreateInvitation(ctx context.Context, name string, r
 }
 
 func (d *InMemoryDiscovery) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
-	code = strings.TrimSpace(code)
+	rawCode, cpURL := ParseInvitationCode(code)
 	publicKey = strings.TrimSpace(publicKey)
 
 	d.mu.Lock()
-	inv, ok := d.invitations[code]
+	inv, ok := d.invitations[rawCode]
+	if !ok {
+		inv, ok = d.invitations[strings.TrimSpace(code)]
+	}
 	if !ok {
 		d.mu.Unlock()
 		return nil, ErrInvitationNotFound
@@ -456,12 +472,19 @@ func (d *InMemoryDiscovery) RedeemInvitation(ctx context.Context, code string, p
 		d.mu.Unlock()
 		return nil, err
 	}
+	if inv.ControlPlaneURL != "" {
+		tokRec.ControlPlaneURL = inv.ControlPlaneURL
+	} else if cpURL != "" {
+		tokRec.ControlPlaneURL = cpURL
+	} else if d.controlPlaneURL != "" {
+		tokRec.ControlPlaneURL = d.controlPlaneURL
+	}
 
 	now := time.Now().UTC()
 	inv.Used = true
 	inv.UsedAt = &now
 	inv.UsedByKey = publicKey
-	d.invitations[code] = inv
+	d.invitations[rawCode] = inv
 	d.accessTokens[tokRec.Token] = *tokRec
 	if publicKey != "" {
 		d.clients[publicKey] = NodeIdentity{Name: name, Email: email}
@@ -498,11 +521,12 @@ func (d *InMemoryDiscovery) ListInvitations(ctx context.Context) ([]InvitationRe
 }
 
 func (d *InMemoryDiscovery) RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error {
+	rawTarget, _ := ParseInvitationCode(codeOrID)
 	d.mu.Lock()
 	var foundCode string
 	var inv InvitationRecord
 	for c, r := range d.invitations {
-		if c == codeOrID || r.ID == codeOrID {
+		if c == codeOrID || c == rawTarget || r.Code == codeOrID || r.ID == codeOrID {
 			foundCode = c
 			inv = r
 			break
@@ -621,7 +645,8 @@ func (d *InMemoryDiscovery) RevokeAccessToken(ctx context.Context, tokenOrID str
 func (d *InMemoryDiscovery) RestoreInvitation(ctx context.Context, rec InvitationRecord) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.invitations[rec.Code] = rec
+	rawCode, _ := ParseInvitationCode(rec.Code)
+	d.invitations[rawCode] = rec
 	return nil
 }
 

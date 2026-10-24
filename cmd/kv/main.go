@@ -116,14 +116,15 @@ func main() {
 		}
 	}
 
-	if discoveryURL == "" {
-		log.Fatalf("A discovery service URL is required to find storage and slots services")
-	}
-
 	keyID := "kv"
 	if explicitBTreeSlotID != "" {
 		keyID = "kv-" + explicitBTreeSlotID[:8]
 	}
+	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
+	if discoveryURL == "" {
+		log.Fatalf("A discovery service URL is required to find storage and slots services")
+	}
+
 	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {

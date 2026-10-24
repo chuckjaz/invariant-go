@@ -54,6 +54,7 @@ func main() {
 		inviteCode = provisionInvite
 	}
 
+	discoveryURL = itp.ResolveDiscoveryURL(dir, "files", discoveryURL, inviteCode)
 	if discoveryURL == "" {
 		log.Fatalf("Discovery URL is required")
 	}

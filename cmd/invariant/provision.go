@@ -93,6 +93,15 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 	if discoveryURL == "" && detectedDiscURL != "" {
 		discoveryURL = detectedDiscURL
 	}
+	if discoveryURL == "" && discoverySvc != nil {
+		if d := discoverySvc.Args["dir"]; d != "" {
+			if data, err := os.ReadFile(filepath.Join(d, "bootstrap.invite")); err == nil {
+				if _, cpURL := discovery.ParseInvitationCode(string(data)); cpURL != "" {
+					discoveryURL = cpURL
+				}
+			}
+		}
+	}
 	if discoveryURL == "" {
 		for _, sc := range svcCfg.Services {
 			if filepath.Base(sc.Command) != "discovery" && sc.Args["discovery"] != "" {
@@ -144,9 +153,10 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 		if err != nil {
 			return fmt.Errorf("failed to create service invitation for [%s]: %w", svcName, err)
 		}
+		invCode := discovery.FormatInvitationCode(inv.Code, discoveryURL)
 		log.Printf("Created single-use service invitation %s for [%s]", inv.ID, svcName)
 
-		if err := runServiceWithProvisionFlag(ctx, sc, binDir, discoveryURL, inv.Code); err != nil {
+		if err := runServiceWithProvisionFlag(ctx, sc, binDir, invCode); err != nil {
 			return fmt.Errorf("failed to provision service [%s]: %w", svcName, err)
 		}
 
@@ -309,6 +319,7 @@ func ensureProvisionAdminToken(ctx context.Context, globalCfg *config.InvariantC
 	if err := itp.SaveAccessToken(tokenPath, rec.Token); err != nil {
 		return "", fmt.Errorf("failed to save admin access token to %s: %w", tokenPath, err)
 	}
+	_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), discoveryURL)
 	_ = SaveOAuthToken(&OAuthTokenFile{
 		AccessToken: rec.Token,
 		TokenType:   "Bearer",
@@ -346,23 +357,13 @@ func resolveServiceTokenForConfig(sc start.ServiceConfig) (string, string) {
 	return tokenPath, ""
 }
 
-func runServiceWithProvisionFlag(ctx context.Context, sc start.ServiceConfig, binDir, discoveryURL, inviteCode string) error {
-	args := make([]string, 0, len(sc.Args)*2+4)
-	hasDiscovery := false
+func runServiceWithProvisionFlag(ctx context.Context, sc start.ServiceConfig, binDir, inviteCode string) error {
+	args := make([]string, 0, len(sc.Args)*2+2)
 	for k, v := range sc.Args {
 		if k == "provision" {
 			continue
 		}
-		if k == "discovery" {
-			hasDiscovery = true
-			if v == "" {
-				v = discoveryURL
-			}
-		}
 		args = append(args, fmt.Sprintf("--%s=%s", k, v))
-	}
-	if !hasDiscovery && discoveryURL != "" {
-		args = append(args, fmt.Sprintf("--discovery=%s", discoveryURL))
 	}
 	args = append(args, fmt.Sprintf("--provision=%s", inviteCode))
 

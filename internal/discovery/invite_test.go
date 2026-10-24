@@ -45,7 +45,7 @@ func (m *mockPeerKeyResolver) PeerKey(remoteAddr string) (key.NodePublic, bool) 
 }
 
 func TestInvitationLifecycleAndSingleUse(t *testing.T) {
-	d := NewInMemoryDiscovery()
+	d := NewInMemoryDiscovery().WithControlPlaneURL("itp://tc1example")
 	ctx := context.Background()
 
 	// 1. Create invitation
@@ -53,8 +53,12 @@ func TestInvitationLifecycleAndSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInvitation failed: %v", err)
 	}
-	if inv.Code == "" || inv.Role != RoleService {
+	if inv.Code == "" || inv.Role != RoleService || inv.ControlPlaneURL != "itp://tc1example" {
 		t.Fatalf("unexpected invitation: %+v", inv)
+	}
+	rawCode, cpURL := ParseInvitationCode(inv.Code)
+	if cpURL != "itp://tc1example" || rawCode == "" {
+		t.Fatalf("expected embedded control plane URL in invitation code %q, got raw=%q cpURL=%q", inv.Code, rawCode, cpURL)
 	}
 
 	// 2. Redeem once -> succeeds

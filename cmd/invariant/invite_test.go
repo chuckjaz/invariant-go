@@ -95,14 +95,17 @@ func TestProvisionHelperProcess(t *testing.T) {
 		}
 		defer fsd.Close()
 
+		cpURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+		fsd.WithControlPlaneURL(cpURL)
 		srv := discovery.NewDiscoveryServer(fsd).
 			WithControlPlane(fsd).
 			WithServiceKeyManager(fsd).
 			WithInvitationManager(fsd).
+			WithControlPlaneURL(cpURL).
 			WithRequireAuth(true)
 
 		invitePath := filepath.Join(dir, "bootstrap.invite")
-		_, _, _ = discovery.EnsureBootstrapInvitation(context.Background(), fsd, time.Hour, invitePath)
+		_, _, _ = discovery.EnsureBootstrapInvitation(context.Background(), fsd, time.Hour, invitePath, cpURL)
 
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
@@ -174,10 +177,6 @@ func TestProvisionServicesCommand(t *testing.T) {
 	ln.Close()
 
 	yamlContent := fmt.Sprintf(`
-common:
-  cluster:
-    discovery: "http://127.0.0.1:%d"
-
 services:
   - command: discovery
     args:
@@ -186,15 +185,13 @@ services:
       listen-ip: "true"
 
   - command: names
-    use: cluster
     args:
       dir: "*/data/names"
 
   - command: storage
-    use: cluster
     args:
       dir: "*/data/storage"
-`, port, port)
+`, port)
 
 	configPath := filepath.Join(tmpDir, "services.yaml")
 	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
@@ -214,12 +211,18 @@ services:
 		t.Fatalf("provisionServices failed: %v", err)
 	}
 
-	// Verify service.token files exist in each service's configuration directory
+	// Verify service.token and discovery.url files exist in each service's configuration directory
+	expectedDiscURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	for _, svcDir := range []string{"names", "storage"} {
 		tokPath := filepath.Join(tmpDir, "data", svcDir, "service.token")
 		tok, err := itp.LoadAccessToken(tokPath)
 		if err != nil || tok == "" {
 			t.Fatalf("expected provisioned service token at %s, got err=%v", tokPath, err)
+		}
+		discURLPath := filepath.Join(tmpDir, "data", svcDir, "discovery.url")
+		discURL, err := itp.LoadAccessToken(discURLPath)
+		if err != nil || discURL != expectedDiscURL {
+			t.Fatalf("expected persisted discovery.url %q at %s, got %q (err=%v)", expectedDiscURL, discURLPath, discURL, err)
 		}
 	}
 

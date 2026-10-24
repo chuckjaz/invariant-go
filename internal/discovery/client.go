@@ -344,6 +344,13 @@ func (c *Client) CreateInvitation(ctx context.Context, name string, role TokenRo
 
 // RedeemInvitation exchanges an invitation code and WireGuard public key for an access token.
 func (c *Client) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
+	baseURL := c.baseURL
+	if baseURL == "" {
+		if _, cpURL := ParseInvitationCode(code); cpURL != "" {
+			baseURL = cpURL
+		}
+	}
+
 	reqBody := redeemInvitationRequest{
 		Code:      code,
 		PublicKey: publicKey,
@@ -354,7 +361,7 @@ func (c *Client) RedeemInvitation(ctx context.Context, code string, publicKey st
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/auth/invite/redeem", c.baseURL), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/auth/invite/redeem", baseURL), bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

@@ -77,6 +77,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
 	}
+	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
 		DiscoveryURL: discoveryURL,

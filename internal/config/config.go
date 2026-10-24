@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -80,19 +81,27 @@ func Load() (*InvariantConfig, error) {
 
 	configPath := filepath.Join(configDir, "config.yaml")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Return empty config if file doesn't exist
-			return &InvariantConfig{}, nil
-		}
-		return nil, err
-	}
-
 	var cfg InvariantConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	} else {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
 	}
 
+	if cfg.Discovery == "" {
+		cfg.Discovery = os.Getenv("INVARIANT_DISCOVERY")
+	}
+	if cfg.Discovery == "" {
+		if keysDir, err := KeysDir(); err == nil {
+			if discBytes, err := os.ReadFile(filepath.Join(keysDir, "client.discovery")); err == nil {
+				cfg.Discovery = strings.TrimSpace(string(discBytes))
+			}
+		}
+	}
 	if cfg.AccessToken == "" {
 		cfg.AccessToken = os.Getenv("INVARIANT_ACCESS_TOKEN")
 	}

@@ -23,16 +23,17 @@ var (
 )
 
 type FileSystemDiscovery struct {
-	store       *journal.Store[string, ServiceRegistration]
-	clientStore *journal.Store[string, NodeIdentity]
-	keyStore    *journal.Store[string, ServiceKeyRecord]
-	inviteStore *journal.Store[string, InvitationRecord]
-	tokenStore  *journal.Store[string, AccessTokenRecord]
-	redeemMu    sync.Mutex
-	tracker     *HealthTracker
-	sink        EventSink
-	closeOnce   sync.Once
-	closeErr    error
+	store           *journal.Store[string, ServiceRegistration]
+	clientStore     *journal.Store[string, NodeIdentity]
+	keyStore        *journal.Store[string, ServiceKeyRecord]
+	inviteStore     *journal.Store[string, InvitationRecord]
+	tokenStore      *journal.Store[string, AccessTokenRecord]
+	controlPlaneURL string
+	redeemMu        sync.Mutex
+	tracker         *HealthTracker
+	sink            EventSink
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 func NewFileSystemDiscovery(baseDir string, snapshotInterval time.Duration) (*FileSystemDiscovery, error) {
@@ -148,6 +149,13 @@ func (d *FileSystemDiscovery) WithHealthTracking(interval, timeout time.Duration
 
 func (d *FileSystemDiscovery) WithEventSink(sink EventSink) *FileSystemDiscovery {
 	d.sink = sink
+	return d
+}
+
+func (d *FileSystemDiscovery) WithControlPlaneURL(url string) *FileSystemDiscovery {
+	d.redeemMu.Lock()
+	defer d.redeemMu.Unlock()
+	d.controlPlaneURL = strings.TrimSpace(url)
 	return d
 }
 
@@ -512,7 +520,16 @@ func (d *FileSystemDiscovery) CreateInvitation(ctx context.Context, name string,
 		return nil, err
 	}
 
-	if err := d.inviteStore.Put(inv.Code, *inv, nil); err != nil {
+	d.redeemMu.Lock()
+	cpURL := d.controlPlaneURL
+	d.redeemMu.Unlock()
+	if cpURL != "" {
+		inv.ControlPlaneURL = cpURL
+		inv.Code = FormatInvitationCode(inv.Code, cpURL)
+	}
+	rawCode, _ := ParseInvitationCode(inv.Code)
+
+	if err := d.inviteStore.Put(rawCode, *inv, nil); err != nil {
 		return nil, err
 	}
 
@@ -529,13 +546,18 @@ func (d *FileSystemDiscovery) CreateInvitation(ctx context.Context, name string,
 }
 
 func (d *FileSystemDiscovery) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
-	code = strings.TrimSpace(code)
+	rawCode, cpURL := ParseInvitationCode(code)
 	publicKey = strings.TrimSpace(publicKey)
 
 	d.redeemMu.Lock()
 	defer d.redeemMu.Unlock()
 
-	inv, ok := d.inviteStore.Get(code)
+	storeKey := rawCode
+	inv, ok := d.inviteStore.Get(rawCode)
+	if !ok {
+		storeKey = strings.TrimSpace(code)
+		inv, ok = d.inviteStore.Get(storeKey)
+	}
 	if !ok {
 		return nil, ErrInvitationNotFound
 	}
@@ -565,12 +587,19 @@ func (d *FileSystemDiscovery) RedeemInvitation(ctx context.Context, code string,
 	if err != nil {
 		return nil, err
 	}
+	if inv.ControlPlaneURL != "" {
+		tokRec.ControlPlaneURL = inv.ControlPlaneURL
+	} else if cpURL != "" {
+		tokRec.ControlPlaneURL = cpURL
+	} else if d.controlPlaneURL != "" {
+		tokRec.ControlPlaneURL = d.controlPlaneURL
+	}
 
 	now := time.Now().UTC()
 	inv.Used = true
 	inv.UsedAt = &now
 	inv.UsedByKey = publicKey
-	if err := d.inviteStore.Put(code, inv, nil); err != nil {
+	if err := d.inviteStore.Put(storeKey, inv, nil); err != nil {
 		return nil, err
 	}
 	if err := d.tokenStore.Put(tokRec.Token, *tokRec, nil); err != nil {
@@ -608,6 +637,7 @@ func (d *FileSystemDiscovery) ListInvitations(ctx context.Context) ([]Invitation
 }
 
 func (d *FileSystemDiscovery) RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error {
+	rawTarget, _ := ParseInvitationCode(codeOrID)
 	d.redeemMu.Lock()
 	defer d.redeemMu.Unlock()
 
@@ -615,7 +645,7 @@ func (d *FileSystemDiscovery) RevokeInvitation(ctx context.Context, codeOrID str
 	var inv InvitationRecord
 	d.inviteStore.Read(func(m map[string]InvitationRecord) {
 		for c, r := range m {
-			if c == codeOrID || r.ID == codeOrID {
+			if c == codeOrID || c == rawTarget || r.Code == codeOrID || r.ID == codeOrID {
 				foundCode = c
 				inv = r
 				break
@@ -738,7 +768,8 @@ func (d *FileSystemDiscovery) RevokeAccessToken(ctx context.Context, tokenOrID s
 }
 
 func (d *FileSystemDiscovery) RestoreInvitation(ctx context.Context, rec InvitationRecord) error {
-	return d.inviteStore.Put(rec.Code, rec, nil)
+	rawCode, _ := ParseInvitationCode(rec.Code)
+	return d.inviteStore.Put(rawCode, rec, nil)
 }
 
 func (d *FileSystemDiscovery) RestoreAccessToken(ctx context.Context, rec AccessTokenRecord) error {

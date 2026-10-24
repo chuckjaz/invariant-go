@@ -122,6 +122,59 @@ func ServiceTokenPath(dir, serviceID, explicitTokenFile string) string {
 	return DefaultTokenPath(serviceID)
 }
 
+// DefaultDiscoveryURLPath returns the default path for storing a redeemed control plane URL for a named service or client.
+func DefaultDiscoveryURLPath(name string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	if name == "" {
+		name = "default"
+	}
+	return filepath.Join(home, ".invariant", "keys", name+".discovery")
+}
+
+// ServiceDiscoveryURLPath resolves the persisted control plane URL file path for a service.
+func ServiceDiscoveryURLPath(dir, serviceID string) string {
+	if dir != "" {
+		return filepath.Join(dir, "discovery.url")
+	}
+	return DefaultDiscoveryURLPath(serviceID)
+}
+
+// ResolveDiscoveryURL resolves the Discovery control plane URL from an explicit flag, an invitation code/file,
+// or a previously persisted discovery.url file in the service's configuration directory.
+func ResolveDiscoveryURL(dir, serviceID, explicitDiscoveryURL, inviteCode string) string {
+	if strings.TrimSpace(explicitDiscoveryURL) != "" {
+		return strings.TrimSpace(explicitDiscoveryURL)
+	}
+	code := strings.TrimSpace(inviteCode)
+	if code == "" {
+		code = strings.TrimSpace(os.Getenv("INVARIANT_INVITE"))
+	}
+	if code != "" {
+		if !strings.HasPrefix(code, "inv_invite_") {
+			if data, err := os.ReadFile(code); err == nil {
+				code = strings.TrimSpace(string(data))
+			}
+		}
+		if _, cpURL := discovery.ParseInvitationCode(code); cpURL != "" {
+			return cpURL
+		}
+	}
+	if dir != "" {
+		if u, err := LoadAccessToken(filepath.Join(dir, "discovery.url")); err == nil && u != "" {
+			return u
+		}
+	}
+	if serviceID != "" {
+		if u, err := LoadAccessToken(DefaultDiscoveryURLPath(serviceID)); err == nil && u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
 // LoadAccessToken reads a persisted access token from tokenPath.
 func LoadAccessToken(tokenPath string) (string, error) {
 	if tokenPath == "" {
@@ -172,17 +225,19 @@ func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string,
 		inviteCode = strings.TrimSpace(os.Getenv("INVARIANT_INVITE"))
 	}
 
-	// If an explicit invite code is provided, redeem it with Discovery
-	if inviteCode != "" && opts.DiscoveryURL != "" && opts.PrivateKey != nil {
-		// Support passing a path to an invite file as well as the raw code
-		if !strings.HasPrefix(inviteCode, "inv_invite_") {
-			if data, err := os.ReadFile(inviteCode); err == nil {
-				inviteCode = strings.TrimSpace(string(data))
-			}
+	// Support passing a path to an invite file as well as the raw code
+	if inviteCode != "" && !strings.HasPrefix(inviteCode, "inv_invite_") {
+		if data, err := os.ReadFile(inviteCode); err == nil {
+			inviteCode = strings.TrimSpace(string(data))
 		}
+	}
 
+	discoveryURL := ResolveDiscoveryURL(opts.Dir, opts.ServiceID, opts.DiscoveryURL, inviteCode)
+
+	// If an explicit invite code is provided, redeem it with Discovery
+	if inviteCode != "" && discoveryURL != "" && opts.PrivateKey != nil {
 		httpClient := NewHTTPClient(opts.PrivateKey.Private, "", WithDERPMapURL(opts.DERPMapURL))
-		dClient := discovery.NewClient(opts.DiscoveryURL, httpClient)
+		dClient := discovery.NewClient(discoveryURL, httpClient)
 
 		redeemCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
@@ -211,6 +266,17 @@ func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string,
 		}
 		if opts.Dir != "" && opts.ServiceID != "" {
 			_ = SaveAccessToken(DefaultTokenPath(opts.ServiceID), tokRec.Token)
+		}
+
+		persistedDiscURL := tokRec.ControlPlaneURL
+		if persistedDiscURL == "" {
+			persistedDiscURL = discoveryURL
+		}
+		if persistedDiscURL != "" {
+			_ = SaveAccessToken(ServiceDiscoveryURLPath(opts.Dir, opts.ServiceID), persistedDiscURL)
+			if opts.Dir != "" && opts.ServiceID != "" {
+				_ = SaveAccessToken(DefaultDiscoveryURLPath(opts.ServiceID), persistedDiscURL)
+			}
 		}
 		return tokRec.Token, nil
 	}

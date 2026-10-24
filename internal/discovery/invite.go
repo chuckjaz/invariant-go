@@ -55,20 +55,45 @@ type PeerKeyResolver interface {
 
 // InvitationRecord stores metadata and state for a one-time invitation code.
 type InvitationRecord struct {
-	ID        string        `json:"id"`
-	Code      string        `json:"code"`
-	Name      string        `json:"name"`
-	Email     string        `json:"email,omitempty"`
-	Role      TokenRole     `json:"role"`
-	CreatedBy NodeIdentity  `json:"created_by"`
-	CreatedAt time.Time     `json:"created_at"`
-	ExpiresAt time.Time     `json:"expires_at"`
-	Used      bool          `json:"used,omitempty"`
-	UsedAt    *time.Time    `json:"used_at,omitempty"`
-	UsedByKey string        `json:"used_by_key,omitempty"`
-	Revoked   bool          `json:"revoked,omitempty"`
-	RevokedAt *time.Time    `json:"revoked_at,omitempty"`
-	RevokedBy *NodeIdentity `json:"revoked_by,omitempty"`
+	ID              string        `json:"id"`
+	Code            string        `json:"code"`
+	ControlPlaneURL string        `json:"control_plane_url,omitempty"`
+	Name            string        `json:"name"`
+	Email           string        `json:"email,omitempty"`
+	Role            TokenRole     `json:"role"`
+	CreatedBy       NodeIdentity  `json:"created_by"`
+	CreatedAt       time.Time     `json:"created_at"`
+	ExpiresAt       time.Time     `json:"expires_at"`
+	Used            bool          `json:"used,omitempty"`
+	UsedAt          *time.Time    `json:"used_at,omitempty"`
+	UsedByKey       string        `json:"used_by_key,omitempty"`
+	Revoked         bool          `json:"revoked,omitempty"`
+	RevokedAt       *time.Time    `json:"revoked_at,omitempty"`
+	RevokedBy       *NodeIdentity `json:"revoked_by,omitempty"`
+}
+
+// FormatInvitationCode combines a raw secret invitation code and a control plane URL
+// into a single self-contained invitation string: "<rawCode>@<controlPlaneURL>".
+func FormatInvitationCode(rawCode, controlPlaneURL string) string {
+	raw, existingURL := ParseInvitationCode(rawCode)
+	cpURL := strings.TrimSpace(controlPlaneURL)
+	if cpURL == "" {
+		cpURL = existingURL
+	}
+	if cpURL == "" {
+		return raw
+	}
+	return raw + "@" + cpURL
+}
+
+// ParseInvitationCode splits an invitation string into its raw secret code ("inv_invite_...")
+// and the embedded control plane URL (e.g. "itp://tc1..." or "http://..."), if present.
+func ParseInvitationCode(code string) (rawCode, controlPlaneURL string) {
+	code = strings.TrimSpace(code)
+	if idx := strings.IndexByte(code, '@'); idx != -1 {
+		return strings.TrimSpace(code[:idx]), strings.TrimSpace(code[idx+1:])
+	}
+	return code, ""
 }
 
 // IsActive returns true if the invitation has not been used, revoked, or expired.
@@ -81,25 +106,35 @@ func (r *InvitationRecord) IsActive() bool {
 
 // Masked returns a copy of the invitation with the secret code masked for safe display.
 func (r InvitationRecord) Masked() InvitationRecord {
-	r.Code = MaskServiceKey(r.Code)
+	raw, cpURL := ParseInvitationCode(r.Code)
+	if cpURL == "" {
+		cpURL = r.ControlPlaneURL
+	}
+	maskedRaw := MaskServiceKey(raw)
+	if cpURL != "" {
+		r.Code = maskedRaw + "@" + cpURL
+	} else {
+		r.Code = maskedRaw
+	}
 	return r
 }
 
 // AccessTokenRecord stores metadata and state for an issued access token bound to a peer key.
 type AccessTokenRecord struct {
-	ID           string        `json:"id"`
-	Token        string        `json:"token"`
-	Name         string        `json:"name"`
-	Email        string        `json:"email,omitempty"`
-	Role         TokenRole     `json:"role"`
-	PublicKey    string        `json:"public_key,omitempty"`
-	InvitationID string        `json:"invitation_id,omitempty"`
-	CreatedBy    NodeIdentity  `json:"created_by"`
-	CreatedAt    time.Time     `json:"created_at"`
-	ExpiresAt    *time.Time    `json:"expires_at,omitempty"`
-	Revoked      bool          `json:"revoked,omitempty"`
-	RevokedAt    *time.Time    `json:"revoked_at,omitempty"`
-	RevokedBy    *NodeIdentity `json:"revoked_by,omitempty"`
+	ID              string        `json:"id"`
+	Token           string        `json:"token"`
+	ControlPlaneURL string        `json:"control_plane_url,omitempty"`
+	Name            string        `json:"name"`
+	Email           string        `json:"email,omitempty"`
+	Role            TokenRole     `json:"role"`
+	PublicKey       string        `json:"public_key,omitempty"`
+	InvitationID    string        `json:"invitation_id,omitempty"`
+	CreatedBy       NodeIdentity  `json:"created_by"`
+	CreatedAt       time.Time     `json:"created_at"`
+	ExpiresAt       *time.Time    `json:"expires_at,omitempty"`
+	Revoked         bool          `json:"revoked,omitempty"`
+	RevokedAt       *time.Time    `json:"revoked_at,omitempty"`
+	RevokedBy       *NodeIdentity `json:"revoked_by,omitempty"`
 }
 
 // IsActive returns true if the access token is not revoked and not expired.
@@ -210,9 +245,13 @@ type InvitationRestorer interface {
 
 // EnsureBootstrapInvitation checks if any active admin access token or active admin invitation exists.
 // If none exist, it creates a new admin invitation and optionally writes the code to inviteFilePath with 0600 permissions.
-func EnsureBootstrapInvitation(ctx context.Context, m InvitationManager, ttl time.Duration, inviteFilePath string) (*InvitationRecord, bool, error) {
+func EnsureBootstrapInvitation(ctx context.Context, m InvitationManager, ttl time.Duration, inviteFilePath string, controlPlaneURL ...string) (*InvitationRecord, bool, error) {
 	if ttl <= 0 {
 		ttl = 1 * time.Hour
+	}
+	cpURL := ""
+	if len(controlPlaneURL) > 0 {
+		cpURL = strings.TrimSpace(controlPlaneURL[0])
 	}
 
 	tokens, err := m.ListAccessTokens(ctx)
@@ -229,6 +268,10 @@ func EnsureBootstrapInvitation(ctx context.Context, m InvitationManager, ttl tim
 		for i := range invites {
 			if invites[i].Role == RoleAdmin && invites[i].IsActive() {
 				inv := invites[i]
+				if cpURL != "" {
+					inv.ControlPlaneURL = cpURL
+					inv.Code = FormatInvitationCode(inv.Code, cpURL)
+				}
 				if inviteFilePath != "" {
 					_ = writeBootstrapInviteFile(inviteFilePath, inv.Code)
 				}
@@ -240,6 +283,10 @@ func EnsureBootstrapInvitation(ctx context.Context, m InvitationManager, ttl tim
 	inv, err := m.CreateInvitation(ctx, "bootstrap-admin", RoleAdmin, NodeIdentity{Name: "system"}, ttl)
 	if err != nil {
 		return nil, false, err
+	}
+	if cpURL != "" {
+		inv.ControlPlaneURL = cpURL
+		inv.Code = FormatInvitationCode(inv.Code, cpURL)
 	}
 	if inviteFilePath != "" {
 		if err := writeBootstrapInviteFile(inviteFilePath, inv.Code); err != nil {

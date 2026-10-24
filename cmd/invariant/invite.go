@@ -98,17 +98,21 @@ func runInviteCreate(cfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
+	invCode := discovery.FormatInvitationCode(inv.Code, cfg.Discovery)
 	fmt.Println("Created single-use invitation successfully!")
-	fmt.Printf("  ID:         %s\n", inv.ID)
-	fmt.Printf("  Name:       %s\n", inv.Name)
-	fmt.Printf("  Role:       %s\n", inv.Role)
-	fmt.Printf("  Code:       %s\n", inv.Code)
-	fmt.Printf("  Created At: %s\n", inv.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("  Expires At: %s\n", inv.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("  ID:            %s\n", inv.ID)
+	fmt.Printf("  Name:          %s\n", inv.Name)
+	fmt.Printf("  Role:          %s\n", inv.Role)
+	if inv.ControlPlaneURL != "" {
+		fmt.Printf("  Control Plane: %s\n", inv.ControlPlaneURL)
+	}
+	fmt.Printf("  Invitation:    %s\n", invCode)
+	fmt.Printf("  Created At:    %s\n", inv.CreatedAt.Format(time.RFC3339))
+	fmt.Printf("  Expires At:    %s\n", inv.ExpiresAt.Format(time.RFC3339))
 	if inv.Role == discovery.RoleService {
-		fmt.Printf("\nRedeem on a service node with:\n  --invite %s\n", inv.Code)
+		fmt.Printf("\nProvision the service with:\n  --provision %s\n", invCode)
 	} else {
-		fmt.Printf("\nRedeem with:\n  invariant login --invite %s\n", inv.Code)
+		fmt.Printf("\nRedeem with:\n  invariant login --invite %s\n", invCode)
 	}
 }
 
@@ -130,20 +134,26 @@ func runInviteRedeem(cfg *config.InvariantConfig, args []string) {
 }
 
 func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string) {
+	code := strings.TrimSpace(inviteCodeOrFile)
+	if !strings.HasPrefix(code, "inv_invite_") {
+		if data, err := os.ReadFile(code); err == nil {
+			code = strings.TrimSpace(string(data))
+		}
+	}
+	if code == "" {
+		fmt.Fprintf(os.Stderr, "Error: invitation code is empty\n")
+		os.Exit(1)
+	}
+
+	_, embeddedURL := discovery.ParseInvitationCode(code)
+	if discoveryURL == "" && embeddedURL != "" {
+		discoveryURL = embeddedURL
+	}
 	if discoveryURL == "" && cfg != nil {
 		discoveryURL = cfg.Discovery
 	}
 	if discoveryURL == "" {
 		discoveryURL = "http://127.0.0.1:3003"
-	}
-
-	code := strings.TrimSpace(inviteCodeOrFile)
-	if data, err := os.ReadFile(code); err == nil {
-		code = strings.TrimSpace(string(data))
-	}
-	if code == "" {
-		fmt.Fprintf(os.Stderr, "Error: invitation code is empty\n")
-		os.Exit(1)
 	}
 
 	if nodeName == "" {
@@ -174,6 +184,13 @@ func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discover
 	if err := itp.SaveAccessToken(tokenPath, rec.Token); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving access token to %s: %v\n", tokenPath, err)
 		os.Exit(1)
+	}
+	cpURL := rec.ControlPlaneURL
+	if cpURL == "" {
+		cpURL = discoveryURL
+	}
+	if cpURL != "" {
+		_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), cpURL)
 	}
 
 	var expiry time.Time
