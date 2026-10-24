@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"net"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +15,7 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/config"
 	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/start"
 )
 
 func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
@@ -50,5 +56,175 @@ func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
 	resolved := resolveUserToken(cfg)
 	if resolved != rec.Token {
 		t.Fatalf("expected resolveUserToken to return %q, got %q", rec.Token, resolved)
+	}
+}
+
+func TestProvisionHelperProcess(t *testing.T) {
+	svcType := os.Getenv("GO_PROVISION_HELPER_SVC")
+	if svcType == "" {
+		return
+	}
+
+	// Find args after "--"
+	var args []string
+	for i, a := range os.Args {
+		if a == "--" {
+			args = os.Args[i+1:]
+			break
+		}
+	}
+
+	fs := flag.NewFlagSet(svcType, flag.ExitOnError)
+	var dir, discoveryURL, provisionInvite, inviteCode, tokenFile, keyFile string
+	var port int
+	var listenIP bool
+	fs.StringVar(&dir, "dir", "", "")
+	fs.StringVar(&discoveryURL, "discovery", "", "")
+	fs.StringVar(&provisionInvite, "provision", "", "")
+	fs.StringVar(&inviteCode, "invite", "", "")
+	fs.StringVar(&tokenFile, "token-file", "", "")
+	fs.StringVar(&keyFile, "key-file", "", "")
+	fs.IntVar(&port, "port", 3003, "")
+	fs.BoolVar(&listenIP, "listen-ip", false, "")
+	_ = fs.Parse(args)
+
+	if svcType == "discovery" {
+		fsd, err := discovery.NewFileSystemDiscovery(dir, time.Hour)
+		if err != nil {
+			os.Exit(1)
+		}
+		defer fsd.Close()
+
+		srv := discovery.NewDiscoveryServer(fsd).
+			WithControlPlane(fsd).
+			WithServiceKeyManager(fsd).
+			WithInvitationManager(fsd).
+			WithRequireAuth(true)
+
+		invitePath := filepath.Join(dir, "bootstrap.invite")
+		_, _, _ = discovery.EnsureBootstrapInvitation(context.Background(), fsd, time.Hour, invitePath)
+
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			os.Exit(1)
+		}
+		fmt.Printf("Discovery service listening on :%d (HTTP)...\n", port)
+		_ = http.Serve(ln, srv)
+		os.Exit(0)
+	}
+
+	// Service helper (names / storage)
+	if provisionInvite != "" {
+		inviteCode = provisionInvite
+	}
+	keyFile = itp.ServiceKeyPath(dir, svcType, keyFile)
+	privKey, err := itp.LoadOrGenerateKey(keyFile)
+	if err != nil {
+		os.Exit(1)
+	}
+	_, err = itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
+		DiscoveryURL: discoveryURL,
+		Dir:          dir,
+		ServiceID:    svcType,
+		ServiceName:  svcType,
+		InviteCode:   inviteCode,
+		TokenFile:    tokenFile,
+		PrivateKey:   privKey,
+	})
+	if err != nil {
+		os.Exit(1)
+	}
+	if provisionInvite != "" {
+		os.Exit(0)
+	}
+	os.Exit(0)
+}
+
+func TestProvisionServicesCommand(t *testing.T) {
+	testExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("failed to get test executable: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("failed to create binDir: %v", err)
+	}
+
+	for _, svc := range []string{"discovery", "names", "storage"} {
+		script := fmt.Sprintf("#!/bin/sh\nexport GO_PROVISION_HELPER_SVC=%s\nexec %q -test.run=TestProvisionHelperProcess -- \"$@\"\n", svc, testExe)
+		scriptPath := filepath.Join(binDir, svc)
+		if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+			t.Fatalf("failed to write helper script %s: %v", svc, err)
+		}
+	}
+
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("INVARIANT_ACCESS_TOKEN", "")
+	t.Setenv("INVARIANT_OAUTH_TOKEN", "")
+	t.Setenv("INVARIANT_SERVICE_KEY", "")
+
+	// Pick a free local port for discovery in listen-ip mode
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to allocate free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	yamlContent := fmt.Sprintf(`
+common:
+  cluster:
+    discovery: "http://127.0.0.1:%d"
+
+services:
+  - command: discovery
+    args:
+      dir: "*/data/discovery"
+      port: "%d"
+      listen-ip: "true"
+
+  - command: names
+    use: cluster
+    args:
+      dir: "*/data/names"
+
+  - command: storage
+    use: cluster
+    args:
+      dir: "*/data/storage"
+`, port, port)
+
+	configPath := filepath.Join(tmpDir, "services.yaml")
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write services.yaml: %v", err)
+	}
+
+	svcCfg, err := start.LoadConfig(configPath, "")
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	globalCfg := &config.InvariantConfig{}
+	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, ""); err != nil {
+		t.Fatalf("provisionServices failed: %v", err)
+	}
+
+	// Verify service.token files exist in each service's configuration directory
+	for _, svcDir := range []string{"names", "storage"} {
+		tokPath := filepath.Join(tmpDir, "data", svcDir, "service.token")
+		tok, err := itp.LoadAccessToken(tokPath)
+		if err != nil || tok == "" {
+			t.Fatalf("expected provisioned service token at %s, got err=%v", tokPath, err)
+		}
+	}
+
+	// Running provisionServices a second time should validate existing tokens and succeed idempotently
+	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, ""); err != nil {
+		t.Fatalf("second provisionServices run failed: %v", err)
 	}
 }

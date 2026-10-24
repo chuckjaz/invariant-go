@@ -10,6 +10,7 @@ import (
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: invariant <command> [options]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
+	fmt.Fprintf(os.Stderr, "  provision   Provision discovery and service tokens for a services.yaml configuration\n")
 	fmt.Fprintf(os.Stderr, "  start       Start invariant services from configuration\n")
 	fmt.Fprintf(os.Stderr, "  slot        Allocate a new slot from the slots service\n")
 	fmt.Fprintf(os.Stderr, "  name        Register a name to a 32-byte hex value\n")
@@ -43,6 +44,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "provision":
+		runProvision(cfg, os.Args[2:])
 	case "start":
 		runStart(cfg, os.Args[2:])
 	case "slot":

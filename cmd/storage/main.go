@@ -72,10 +72,12 @@ func main() {
 	flag.StringVar(&serviceKey, "service-key", "", "Access token or service key for authenticating with discovery / control plane (defaults to INVARIANT_ACCESS_TOKEN or INVARIANT_SERVICE_KEY)")
 	var inviteCode string
 	flag.StringVar(&inviteCode, "invite", "", "One-time invitation code to redeem for a discovery access token (defaults to INVARIANT_INVITE)")
+	var provisionInvite string
+	flag.StringVar(&provisionInvite, "provision", "", "Redeem an invitation code, store the service token in the configuration directory, and exit")
 	var tokenFile string
-	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token (defaults to ~/.invariant/keys/<service-id>.token)")
+	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token")
 	var keyFile string
-	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP")
 	var derpMapURL string
 	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
@@ -86,6 +88,40 @@ func main() {
 
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
+	}
+	if provisionInvite != "" {
+		inviteCode = provisionInvite
+	}
+
+	if provisionInvite != "" {
+		var id string
+		if dir != "" {
+			s := storage.NewFileSystemStorage(dir)
+			id = s.ID()
+		} else {
+			id = "storage"
+		}
+		keyFile = itp.ServiceKeyPath(dir, id, keyFile)
+		privKey, err := itp.LoadOrGenerateKey(keyFile)
+		if err != nil {
+			log.Fatalf("Failed to load or generate ITP key: %v", err)
+		}
+		_, err = itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
+			DiscoveryURL: discoveryURL,
+			Dir:          dir,
+			ServiceID:    id,
+			ServiceName:  name,
+			ExplicitKey:  serviceKey,
+			InviteCode:   inviteCode,
+			TokenFile:    tokenFile,
+			PrivateKey:   privKey,
+			DERPMapURL:   derpMapURL,
+		})
+		if err != nil {
+			log.Fatalf("Failed to provision service token: %v", err)
+		}
+		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, id, tokenFile))
+		return
 	}
 
 	var s storage.Storage
@@ -134,10 +170,12 @@ func main() {
 
 	server := storage.NewStorageServer(s)
 	id := s.(identity.Identity).ID()
-
-	if keyFile == "" {
-		keyFile = itp.DefaultKeyPath(id)
+	keyID := id
+	if dir == "" {
+		keyID = "storage"
 	}
+
+	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
@@ -145,7 +183,8 @@ func main() {
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
 		DiscoveryURL: discoveryURL,
-		ServiceID:    id,
+		Dir:          dir,
+		ServiceID:    keyID,
 		ServiceName:  name,
 		ExplicitKey:  serviceKey,
 		InviteCode:   inviteCode,

@@ -42,10 +42,12 @@ func main() {
 	flag.StringVar(&serviceKey, "service-key", "", "Access token or service key for authenticating with discovery / control plane")
 	var inviteCode string
 	flag.StringVar(&inviteCode, "invite", "", "One-time invitation code to redeem for a discovery access token (defaults to INVARIANT_INVITE)")
+	var provisionInvite string
+	flag.StringVar(&provisionInvite, "provision", "", "Redeem an invitation code, store the service token in the configuration directory, and exit")
 	var tokenFile string
 	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token")
 	var keyFile string
-	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP")
 	var derpMapURL string
 	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
@@ -84,7 +86,11 @@ func main() {
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
 	}
+	if provisionInvite != "" {
+		inviteCode = provisionInvite
+	}
 
+	explicitBTreeSlotID := btreeSlotID
 	if btreeSlotID == "" {
 		btreeSlotID = generateID()
 	}
@@ -114,9 +120,11 @@ func main() {
 		log.Fatalf("A discovery service URL is required to find storage and slots services")
 	}
 
-	if keyFile == "" {
-		keyFile = itp.DefaultKeyPath("kv-" + btreeSlotID[:8])
+	keyID := "kv"
+	if explicitBTreeSlotID != "" {
+		keyID = "kv-" + explicitBTreeSlotID[:8]
 	}
+	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
@@ -124,7 +132,8 @@ func main() {
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
 		DiscoveryURL: discoveryURL,
-		ServiceID:    "kv-" + btreeSlotID[:8],
+		Dir:          dir,
+		ServiceID:    keyID,
 		ServiceName:  name,
 		ExplicitKey:  serviceKey,
 		InviteCode:   inviteCode,
@@ -134,6 +143,10 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+	}
+	if provisionInvite != "" {
+		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, keyID, tokenFile))
+		return
 	}
 	serviceKey = resolvedToken
 

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/discovery"
@@ -26,6 +27,8 @@ func generateID() string {
 func main() {
 	var id string
 	flag.StringVar(&id, "id", "", "ID of the distribute service (32-byte hex). Randomly generated if not provided.")
+	var dir string
+	flag.StringVar(&dir, "dir", "", "Directory for persisting distribute state and credentials")
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
 	var advertiseAddr string
@@ -45,10 +48,12 @@ func main() {
 	flag.StringVar(&serviceKey, "service-key", "", "Access token or service key for authenticating with discovery / control plane")
 	var inviteCode string
 	flag.StringVar(&inviteCode, "invite", "", "One-time invitation code to redeem for a discovery access token (defaults to INVARIANT_INVITE)")
+	var provisionInvite string
+	flag.StringVar(&provisionInvite, "provision", "", "Redeem an invitation code, store the service token in the configuration directory, and exit")
 	var tokenFile string
-	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token (defaults to ~/.invariant/keys/<service-id>.token)")
+	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token")
 	var keyFile string
-	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP")
 	var derpMapURL string
 	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var name string
@@ -60,14 +65,31 @@ func main() {
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
 	}
+	if provisionInvite != "" {
+		inviteCode = provisionInvite
+	}
 
+	explicitID := id
 	if id == "" {
-		id = generateID()
+		if dir != "" {
+			_ = os.MkdirAll(dir, 0755)
+			idPath := filepath.Join(dir, "id")
+			if data, err := os.ReadFile(idPath); err == nil && len(data) == 64 {
+				id = string(data)
+			} else {
+				id = generateID()
+				_ = os.WriteFile(idPath, []byte(id), 0644)
+			}
+		} else {
+			id = generateID()
+		}
 	}
 
-	if keyFile == "" {
-		keyFile = itp.DefaultKeyPath(id)
+	keyID := id
+	if dir == "" && explicitID == "" {
+		keyID = "distribute"
 	}
+	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
@@ -75,7 +97,8 @@ func main() {
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
 		DiscoveryURL: discoveryURL,
-		ServiceID:    id,
+		Dir:          dir,
+		ServiceID:    keyID,
 		ServiceName:  name,
 		ExplicitKey:  serviceKey,
 		InviteCode:   inviteCode,
@@ -85,6 +108,10 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+	}
+	if provisionInvite != "" {
+		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, keyID, tokenFile))
+		return
 	}
 	serviceKey = resolvedToken
 

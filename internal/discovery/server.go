@@ -148,6 +148,7 @@ func (s *DiscoveryServer) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/invites", s.handleListInvitations)
 	mux.HandleFunc("DELETE /auth/invite/{id}", s.handleRevokeInvitation)
 	mux.HandleFunc("GET /auth/tokens", s.handleListAccessTokens)
+	mux.HandleFunc("GET /auth/verify-token", s.handleVerifyAccessToken)
 	mux.HandleFunc("DELETE /auth/token/{id}", s.handleRevokeAccessToken)
 
 	h := s.authMiddleware(mux)
@@ -903,4 +904,34 @@ func (s *DiscoveryServer) handleRevokeAccessToken(w http.ResponseWriter, r *http
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+type verifyAccessTokenResponse struct {
+	Valid  bool               `json:"valid"`
+	Record *AccessTokenRecord `json:"record,omitempty"`
+}
+
+func (s *DiscoveryServer) handleVerifyAccessToken(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Access token management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	targetToken := strings.TrimSpace(r.URL.Query().Get("token"))
+	if targetToken == "" {
+		http.Error(w, "Missing token query parameter", http.StatusBadRequest)
+		return
+	}
+
+	valid, rec, err := s.invitations.VerifyAccessToken(r.Context(), targetToken)
+	resp := verifyAccessTokenResponse{
+		Valid: err == nil && valid,
+	}
+	if resp.Valid && rec != nil {
+		masked := rec.Masked()
+		resp.Record = &masked
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

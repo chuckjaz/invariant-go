@@ -431,11 +431,17 @@ func (c *Client) RevokeInvitation(ctx context.Context, codeOrID string, revoker 
 
 // VerifyAccessToken verifies an access token via Discovery.
 func (c *Client) VerifyAccessToken(ctx context.Context, token string) (bool, *AccessTokenRecord, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/id", c.baseURL), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/verify-token?token=%s", c.baseURL, url.QueryEscape(token)), nil)
 	if err != nil {
 		return false, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	bearer := c.token
+	if bearer == "" {
+		bearer = token
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -445,7 +451,15 @@ func (c *Client) VerifyAccessToken(ctx context.Context, token string) (bool, *Ac
 	if resp.StatusCode != http.StatusOK {
 		return false, nil, ErrAccessTokenNotFound
 	}
-	return true, &AccessTokenRecord{Token: token}, nil
+
+	var vResp verifyAccessTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&vResp); err != nil {
+		return false, nil, err
+	}
+	if !vResp.Valid {
+		return false, nil, ErrAccessTokenNotFound
+	}
+	return true, vResp.Record, nil
 }
 
 // ListAccessTokens lists issued access tokens on Discovery.

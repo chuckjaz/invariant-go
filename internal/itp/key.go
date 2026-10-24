@@ -88,6 +88,40 @@ func DefaultTokenPath(name string) string {
 	return filepath.Join(home, ".invariant", "keys", name+".token")
 }
 
+// ServiceKeyPath resolves the private key file path for a service, preferring explicitKeyFile,
+// then <dir>/service.key if dir is set, and finally ~/.invariant/keys/<serviceID>.key.
+func ServiceKeyPath(dir, serviceID, explicitKeyFile string) string {
+	if explicitKeyFile != "" {
+		return explicitKeyFile
+	}
+	if dir != "" {
+		dirKey := filepath.Join(dir, "service.key")
+		if _, err := os.Stat(dirKey); err == nil {
+			return dirKey
+		}
+		if serviceID != "" {
+			defKey := DefaultKeyPath(serviceID)
+			if _, err := os.Stat(defKey); err == nil {
+				return defKey
+			}
+		}
+		return dirKey
+	}
+	return DefaultKeyPath(serviceID)
+}
+
+// ServiceTokenPath resolves the access token file path for a service, preferring explicitTokenFile,
+// then <dir>/service.token if dir is set, and finally ~/.invariant/keys/<serviceID>.token.
+func ServiceTokenPath(dir, serviceID, explicitTokenFile string) string {
+	if explicitTokenFile != "" {
+		return explicitTokenFile
+	}
+	if dir != "" {
+		return filepath.Join(dir, "service.token")
+	}
+	return DefaultTokenPath(serviceID)
+}
+
 // LoadAccessToken reads a persisted access token from tokenPath.
 func LoadAccessToken(tokenPath string) (string, error) {
 	if tokenPath == "" {
@@ -118,6 +152,7 @@ func SaveAccessToken(tokenPath, token string) error {
 // ServiceAuthOptions configures how a service resolves or redeems its Discovery access token.
 type ServiceAuthOptions struct {
 	DiscoveryURL string
+	Dir          string
 	ServiceID    string
 	ServiceName  string
 	ExplicitKey  string
@@ -130,10 +165,7 @@ type ServiceAuthOptions struct {
 // ResolveOrRedeemToken resolves an existing access token / service key or redeems an invitation code
 // with the Discovery service using the node's WireGuard public key, persisting the issued access token.
 func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string, error) {
-	tokenFile := opts.TokenFile
-	if tokenFile == "" && opts.ServiceID != "" {
-		tokenFile = DefaultTokenPath(opts.ServiceID)
-	}
+	tokenFile := ServiceTokenPath(opts.Dir, opts.ServiceID, opts.TokenFile)
 
 	inviteCode := strings.TrimSpace(opts.InviteCode)
 	if inviteCode == "" {
@@ -173,7 +205,12 @@ func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string,
 			return "", fmt.Errorf("failed to redeem invitation: %w", err)
 		}
 		if tokenFile != "" {
-			_ = SaveAccessToken(tokenFile, tokRec.Token)
+			if err := SaveAccessToken(tokenFile, tokRec.Token); err != nil {
+				return "", fmt.Errorf("failed to save access token to %s: %w", tokenFile, err)
+			}
+		}
+		if opts.Dir != "" && opts.ServiceID != "" {
+			_ = SaveAccessToken(DefaultTokenPath(opts.ServiceID), tokRec.Token)
 		}
 		return tokRec.Token, nil
 	}
@@ -189,6 +226,11 @@ func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string,
 	}
 	if savedTok, err := LoadAccessToken(tokenFile); err == nil && savedTok != "" {
 		return savedTok, nil
+	}
+	if opts.Dir != "" && opts.ServiceID != "" {
+		if savedTok, err := LoadAccessToken(DefaultTokenPath(opts.ServiceID)); err == nil && savedTok != "" {
+			return savedTok, nil
+		}
 	}
 
 	return "", nil

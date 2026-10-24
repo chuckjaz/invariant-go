@@ -21,6 +21,8 @@ import (
 func main() {
 	var discoveryURL string
 	flag.StringVar(&discoveryURL, "discovery", "", "URL of the discovery service")
+	var dir string
+	flag.StringVar(&dir, "dir", "", "Directory for persisting files service credentials")
 	var rootAddr string
 	flag.StringVar(&rootAddr, "root", "", "Root block or slot address")
 	var slot string
@@ -33,10 +35,12 @@ func main() {
 	flag.StringVar(&serviceKey, "service-key", "", "Access token or service key for authenticating with discovery / control plane")
 	var inviteCode string
 	flag.StringVar(&inviteCode, "invite", "", "One-time invitation code to redeem for a discovery access token (defaults to INVARIANT_INVITE)")
+	var provisionInvite string
+	flag.StringVar(&provisionInvite, "provision", "", "Redeem an invitation code, store the service token in the configuration directory, and exit")
 	var tokenFile string
 	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token")
 	var keyFile string
-	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/files.key)")
+	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP")
 	var derpMapURL string
 	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var enableTrace bool
@@ -46,14 +50,15 @@ func main() {
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")
 	}
+	if provisionInvite != "" {
+		inviteCode = provisionInvite
+	}
 
 	if discoveryURL == "" {
 		log.Fatalf("Discovery URL is required")
 	}
 
-	if keyFile == "" {
-		keyFile = itp.DefaultKeyPath("files")
-	}
+	keyFile = itp.ServiceKeyPath(dir, "files", keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
@@ -61,6 +66,7 @@ func main() {
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
 		DiscoveryURL: discoveryURL,
+		Dir:          dir,
 		ServiceID:    "files",
 		ServiceName:  "files",
 		ExplicitKey:  serviceKey,
@@ -71,6 +77,10 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+	}
+	if provisionInvite != "" {
+		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, "files", tokenFile))
+		return
 	}
 	serviceKey = resolvedToken
 
