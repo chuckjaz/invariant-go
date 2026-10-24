@@ -57,14 +57,18 @@ type ListenOptions struct {
 // Listener wraps a net.Listener and provides ITP metadata.
 type Listener struct {
 	net.Listener
-	server      *tailcat.Server
-	IsTailcat   bool
-	TailcatAddr tailcat.Addr
-	ITPAddr     string
-	PublicKey   key.NodePublic
-	stopSync    chan struct{}
-	closeOnce   sync.Once
-	closeErr    error
+	server           *tailcat.Server
+	IsTailcat        bool
+	TailcatAddr      tailcat.Addr
+	ITPAddr          string
+	PublicKey        key.NodePublic
+	allowedMu        sync.RWMutex
+	allowedSet       map[key.NodePublic]bool
+	staticAllowed    []key.NodePublic
+	enforceAllowlist bool
+	stopSync         chan struct{}
+	closeOnce        sync.Once
+	closeErr         error
 }
 
 // Port returns the TCP port if listening on IP, or 0 if listening on ITP.
@@ -108,17 +112,29 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 	}
 
 	var allowed []key.NodePublic
+	allowedSet := make(map[key.NodePublic]bool)
+	enforceAllowlist := len(opts.AllowedClients) > 0 || opts.ControlPlane != nil
+
 	if len(opts.AllowedClients) > 0 {
 		allowed = append(allowed, opts.AllowedClients...)
+		for _, k := range opts.AllowedClients {
+			allowedSet[k] = true
+		}
 	}
 
 	// Fetch authorized keys from ControlPlane if available
 	if opts.ControlPlane != nil {
+		// Seed with own public key so tailcat.Server activates allowlist mode immediately
+		selfPub := pk.Private.Public()
+		allowed = append(allowed, selfPub)
+		allowedSet[selfPub] = true
+
 		if authKeys, err := opts.ControlPlane.AuthorizedKeys(ctx); err == nil {
 			for _, kStr := range authKeys {
 				var k key.NodePublic
 				if err := k.UnmarshalText([]byte(kStr)); err == nil {
 					allowed = append(allowed, k)
+					allowedSet[k] = true
 				}
 			}
 		}
@@ -140,14 +156,20 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 
 	tcAddr := srv.TailcatAddr()
 
+	staticCopy := make([]key.NodePublic, len(opts.AllowedClients))
+	copy(staticCopy, opts.AllowedClients)
+
 	l := &Listener{
-		Listener:    ln,
-		server:      srv,
-		IsTailcat:   true,
-		TailcatAddr: tcAddr,
-		ITPAddr:     fmt.Sprintf("itp://%s", tcAddr),
-		PublicKey:   pk.Private.Public(),
-		stopSync:    make(chan struct{}),
+		Listener:         ln,
+		server:           srv,
+		IsTailcat:        true,
+		TailcatAddr:      tcAddr,
+		ITPAddr:          fmt.Sprintf("itp://%s", tcAddr),
+		PublicKey:        pk.Private.Public(),
+		allowedSet:       allowedSet,
+		staticAllowed:    staticCopy,
+		enforceAllowlist: enforceAllowlist,
+		stopSync:         make(chan struct{}),
 	}
 
 	// If ControlPlane is provided, periodically refresh authorized keys
@@ -160,6 +182,25 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 	}
 
 	return l, nil
+}
+
+// Accept waits for and returns the next connection to the listener,
+// rejecting connections from clients that have been evicted from the allowlist.
+func (l *Listener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if l.IsTailcat && l.enforceAllowlist {
+			pk, ok := l.PeerKey(conn.RemoteAddr().String())
+			if !ok || !l.IsClientAllowed(pk) {
+				_ = conn.Close()
+				continue
+			}
+		}
+		return conn, nil
+	}
 }
 
 func (l *Listener) syncLoop(cp discovery.ControlPlane, interval time.Duration) {
@@ -175,12 +216,21 @@ func (l *Listener) syncLoop(cp discovery.ControlPlane, interval time.Duration) {
 			keys, err := cp.AuthorizedKeys(ctx)
 			cancel()
 			if err == nil {
+				newSet := make(map[key.NodePublic]bool)
+				newSet[l.PublicKey] = true
+				for _, sk := range l.staticAllowed {
+					newSet[sk] = true
+				}
 				for _, kStr := range keys {
 					var k key.NodePublic
 					if err := k.UnmarshalText([]byte(kStr)); err == nil {
+						newSet[k] = true
 						l.server.AddAllowedClient(k)
 					}
 				}
+				l.allowedMu.Lock()
+				l.allowedSet = newSet
+				l.allowedMu.Unlock()
 			}
 		}
 	}
@@ -188,9 +238,34 @@ func (l *Listener) syncLoop(cp discovery.ControlPlane, interval time.Duration) {
 
 // AddAllowedClient adds a client's public key to the server's allowlist.
 func (l *Listener) AddAllowedClient(k key.NodePublic) {
+	l.allowedMu.Lock()
+	if l.allowedSet == nil {
+		l.allowedSet = make(map[key.NodePublic]bool)
+	}
+	l.allowedSet[k] = true
+	l.enforceAllowlist = true
+	l.allowedMu.Unlock()
+
 	if l.server != nil {
 		l.server.AddAllowedClient(k)
 	}
+}
+
+// RemoveAllowedClient removes a client's public key from the listener's active allowlist.
+func (l *Listener) RemoveAllowedClient(k key.NodePublic) {
+	l.allowedMu.Lock()
+	delete(l.allowedSet, k)
+	l.allowedMu.Unlock()
+}
+
+// IsClientAllowed reports whether the given WireGuard public key is currently permitted to connect.
+func (l *Listener) IsClientAllowed(k key.NodePublic) bool {
+	l.allowedMu.RLock()
+	defer l.allowedMu.RUnlock()
+	if !l.enforceAllowlist {
+		return true
+	}
+	return l.allowedSet[k]
 }
 
 // PeerKey extracts the client's WireGuard public key from a remote TCP address string (e.g. r.RemoteAddr).

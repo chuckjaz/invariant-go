@@ -118,6 +118,37 @@ func (b *ChainedBackup) Replay(ctx context.Context, target ReplayTarget) error {
 				revoker = *event.RevokedBy
 			}
 			_ = target.RevokeServiceKey(ctx, event.RevokeKey, revoker)
+		case discovery.EventCreateInvitation:
+			if event.Invitation != nil {
+				if restorer, ok := target.(discovery.InvitationRestorer); ok {
+					_ = restorer.RestoreInvitation(ctx, *event.Invitation)
+				}
+			}
+		case discovery.EventRedeemInvitation:
+			if restorer, ok := target.(discovery.InvitationRestorer); ok {
+				if event.Invitation != nil {
+					_ = restorer.RestoreInvitation(ctx, *event.Invitation)
+				}
+				if event.AccessToken != nil {
+					_ = restorer.RestoreAccessToken(ctx, *event.AccessToken)
+				}
+			}
+		case discovery.EventRevokeInvitation:
+			if invMgr, ok := target.(discovery.InvitationManager); ok {
+				revoker := discovery.NodeIdentity{Name: "system"}
+				if event.RevokedBy != nil {
+					revoker = *event.RevokedBy
+				}
+				_ = invMgr.RevokeInvitation(ctx, event.RevokeKey, revoker)
+			}
+		case discovery.EventRevokeAccessToken:
+			if invMgr, ok := target.(discovery.InvitationManager); ok {
+				revoker := discovery.NodeIdentity{Name: "system"}
+				if event.RevokedBy != nil {
+					revoker = *event.RevokedBy
+				}
+				_ = invMgr.RevokeAccessToken(ctx, event.RevokeKey, revoker)
+			}
 		}
 	}
 

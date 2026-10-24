@@ -3,32 +3,39 @@ package discovery
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
-// Assert that InMemoryDiscovery implements Discovery, ControlPlane, ServiceKeyManager, and ServiceKeyRestorer interfaces
+// Assert that InMemoryDiscovery implements Discovery, ControlPlane, ServiceKeyManager, ServiceKeyRestorer, InvitationManager, and InvitationRestorer interfaces
 var (
 	_ Discovery          = (*InMemoryDiscovery)(nil)
 	_ ControlPlane       = (*InMemoryDiscovery)(nil)
 	_ ServiceKeyManager  = (*InMemoryDiscovery)(nil)
 	_ ServiceKeyRestorer = (*InMemoryDiscovery)(nil)
+	_ InvitationManager  = (*InMemoryDiscovery)(nil)
+	_ InvitationRestorer = (*InMemoryDiscovery)(nil)
 )
 
 type InMemoryDiscovery struct {
-	mu          sync.RWMutex
-	services    map[string]ServiceRegistration
-	clients     map[string]NodeIdentity
-	serviceKeys map[string]ServiceKeyRecord
-	tracker     *HealthTracker
-	sink        EventSink
+	mu           sync.RWMutex
+	services     map[string]ServiceRegistration
+	clients      map[string]NodeIdentity
+	serviceKeys  map[string]ServiceKeyRecord
+	invitations  map[string]InvitationRecord
+	accessTokens map[string]AccessTokenRecord
+	tracker      *HealthTracker
+	sink         EventSink
 }
 
 func NewInMemoryDiscovery() *InMemoryDiscovery {
 	d := &InMemoryDiscovery{
-		services:    make(map[string]ServiceRegistration),
-		clients:     make(map[string]NodeIdentity),
-		serviceKeys: make(map[string]ServiceKeyRecord),
+		services:     make(map[string]ServiceRegistration),
+		clients:      make(map[string]NodeIdentity),
+		serviceKeys:  make(map[string]ServiceKeyRecord),
+		invitations:  make(map[string]InvitationRecord),
+		accessTokens: make(map[string]AccessTokenRecord),
 	}
 	return d
 }
@@ -213,6 +220,19 @@ func (d *InMemoryDiscovery) VerifyKey(ctx context.Context, publicKey string) (bo
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
+	hasTokenForKey := false
+	for _, tok := range d.accessTokens {
+		if tok.PublicKey != "" && tok.PublicKey == publicKey {
+			hasTokenForKey = true
+			if tok.IsActive() {
+				return true, &NodeIdentity{Name: tok.Name, Email: tok.Email}, nil
+			}
+		}
+	}
+	if hasTokenForKey {
+		return false, nil, nil
+	}
+
 	if id, ok := d.clients[publicKey]; ok {
 		idCopy := id
 		return true, &idCopy, nil
@@ -235,12 +255,34 @@ func (d *InMemoryDiscovery) AuthorizedKeys(ctx context.Context) ([]string, error
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
+	activeTokenKeys := make(map[string]bool)
+	revokedTokenKeys := make(map[string]bool)
+	for _, tok := range d.accessTokens {
+		if tok.PublicKey == "" {
+			continue
+		}
+		if tok.IsActive() {
+			activeTokenKeys[tok.PublicKey] = true
+		} else {
+			revokedTokenKeys[tok.PublicKey] = true
+		}
+	}
+
 	keySet := make(map[string]struct{})
+	for k := range activeTokenKeys {
+		keySet[k] = struct{}{}
+	}
 	for k := range d.clients {
+		if revokedTokenKeys[k] && !activeTokenKeys[k] {
+			continue
+		}
 		keySet[k] = struct{}{}
 	}
 	for _, reg := range d.services {
 		if reg.PublicKey != "" {
+			if revokedTokenKeys[reg.PublicKey] && !activeTokenKeys[reg.PublicKey] {
+				continue
+			}
 			keySet[reg.PublicKey] = struct{}{}
 		}
 	}
@@ -348,5 +390,247 @@ func (d *InMemoryDiscovery) RestoreServiceKey(ctx context.Context, rec ServiceKe
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.serviceKeys[rec.Key] = rec
+	return nil
+}
+
+func (d *InMemoryDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
+	inv, err := GenerateInvitation(name, role, creator, ttl)
+	if err != nil {
+		return nil, err
+	}
+
+	d.mu.Lock()
+	d.invitations[inv.Code] = *inv
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:       EventCreateInvitation,
+			Invitation: inv,
+			Timestamp:  time.Now().UTC(),
+		})
+	}
+
+	invCopy := *inv
+	return &invCopy, nil
+}
+
+func (d *InMemoryDiscovery) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
+	code = strings.TrimSpace(code)
+	publicKey = strings.TrimSpace(publicKey)
+
+	d.mu.Lock()
+	inv, ok := d.invitations[code]
+	if !ok {
+		d.mu.Unlock()
+		return nil, ErrInvitationNotFound
+	}
+	if inv.Revoked {
+		d.mu.Unlock()
+		return nil, ErrInvitationRevoked
+	}
+	if inv.Used {
+		d.mu.Unlock()
+		return nil, ErrInvitationUsed
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		d.mu.Unlock()
+		return nil, ErrInvitationExpired
+	}
+
+	name := inv.Name
+	if name == "" {
+		name = identity.Name
+	}
+	if name == "" {
+		name = string(inv.Role)
+	}
+	email := inv.Email
+	if email == "" {
+		email = identity.Email
+	}
+
+	tokRec, err := GenerateAccessToken(name, email, inv.Role, publicKey, inv.ID, inv.CreatedBy, nil)
+	if err != nil {
+		d.mu.Unlock()
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	inv.Used = true
+	inv.UsedAt = &now
+	inv.UsedByKey = publicKey
+	d.invitations[code] = inv
+	d.accessTokens[tokRec.Token] = *tokRec
+	if publicKey != "" {
+		d.clients[publicKey] = NodeIdentity{Name: name, Email: email}
+	}
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		invCopy := inv
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:        EventRedeemInvitation,
+			Invitation:  &invCopy,
+			AccessToken: tokRec,
+			Timestamp:   now,
+		})
+	}
+
+	ret := *tokRec
+	return &ret, nil
+}
+
+func (d *InMemoryDiscovery) ListInvitations(ctx context.Context) ([]InvitationRecord, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	records := make([]InvitationRecord, 0, len(d.invitations))
+	for _, r := range d.invitations {
+		records = append(records, r)
+	}
+	slices.SortFunc(records, func(a, b InvitationRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *InMemoryDiscovery) RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error {
+	d.mu.Lock()
+	var foundCode string
+	var inv InvitationRecord
+	for c, r := range d.invitations {
+		if c == codeOrID || r.ID == codeOrID {
+			foundCode = c
+			inv = r
+			break
+		}
+	}
+	if foundCode == "" {
+		d.mu.Unlock()
+		return ErrInvitationNotFound
+	}
+
+	now := time.Now().UTC()
+	inv.Revoked = true
+	inv.RevokedAt = &now
+	inv.RevokedBy = &revoker
+	d.invitations[foundCode] = inv
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeInvitation,
+			RevokeKey: foundCode,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+func (d *InMemoryDiscovery) VerifyAccessToken(ctx context.Context, token string) (bool, *AccessTokenRecord, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	rec, ok := d.accessTokens[token]
+	if !ok {
+		return false, nil, ErrAccessTokenNotFound
+	}
+	if rec.Revoked {
+		return false, nil, ErrAccessTokenRevoked
+	}
+	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
+		return false, nil, ErrAccessTokenExpired
+	}
+	recCopy := rec
+	return true, &recCopy, nil
+}
+
+func (d *InMemoryDiscovery) ListAccessTokens(ctx context.Context) ([]AccessTokenRecord, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	records := make([]AccessTokenRecord, 0, len(d.accessTokens))
+	for _, r := range d.accessTokens {
+		records = append(records, r)
+	}
+	slices.SortFunc(records, func(a, b AccessTokenRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *InMemoryDiscovery) RevokeAccessToken(ctx context.Context, tokenOrID string, revoker NodeIdentity) error {
+	d.mu.Lock()
+	var foundToken string
+	var rec AccessTokenRecord
+	for t, r := range d.accessTokens {
+		if t == tokenOrID || r.ID == tokenOrID {
+			foundToken = t
+			rec = r
+			break
+		}
+	}
+	if foundToken == "" {
+		d.mu.Unlock()
+		return ErrAccessTokenNotFound
+	}
+
+	now := time.Now().UTC()
+	rec.Revoked = true
+	rec.RevokedAt = &now
+	rec.RevokedBy = &revoker
+	d.accessTokens[foundToken] = rec
+
+	if rec.PublicKey != "" {
+		stillActive := false
+		for _, other := range d.accessTokens {
+			if other.PublicKey == rec.PublicKey && other.IsActive() {
+				stillActive = true
+				break
+			}
+		}
+		if !stillActive {
+			delete(d.clients, rec.PublicKey)
+			for svcID, svc := range d.services {
+				if svc.PublicKey == rec.PublicKey {
+					delete(d.services, svcID)
+				}
+			}
+		}
+	}
+
+	sink := d.sink
+	d.mu.Unlock()
+
+	if sink != nil {
+		_ = sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeAccessToken,
+			RevokeKey: foundToken,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+func (d *InMemoryDiscovery) RestoreInvitation(ctx context.Context, rec InvitationRecord) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.invitations[rec.Code] = rec
+	return nil
+}
+
+func (d *InMemoryDiscovery) RestoreAccessToken(ctx context.Context, rec AccessTokenRecord) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.accessTokens[rec.Token] = rec
+	if rec.PublicKey != "" && rec.IsActive() {
+		d.clients[rec.PublicKey] = NodeIdentity{Name: rec.Name, Email: rec.Email}
+	}
 	return nil
 }

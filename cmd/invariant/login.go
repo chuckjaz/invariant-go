@@ -102,8 +102,14 @@ func openBrowser(targetURL string) error {
 
 func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
+	var invite string
+	fs.StringVar(&invite, "invite", "", "Redeem an invitation code or file from the Discovery service")
+	var discoveryURL string
+	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL (used with --invite)")
+	var nodeName string
+	fs.StringVar(&nodeName, "name", "", "Node/user name when redeeming an invitation")
 	var manualToken string
-	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth user access token")
+	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth or access token")
 	var deviceFlow bool
 	fs.BoolVar(&deviceFlow, "device", false, "Use OAuth 2.0 Device Authorization Grant (for headless environments)")
 	var clientID string
@@ -118,6 +124,14 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs.StringVar(&deviceURL, "device-url", "", "OAuth Device Authorization URL")
 
 	_ = fs.Parse(args)
+
+	if invite == "" {
+		invite = os.Getenv("INVARIANT_INVITE")
+	}
+	if invite != "" {
+		runInviteRedeemFlow(cfg, invite, discoveryURL, nodeName)
+		return
+	}
 
 	if clientID == "" {
 		clientID = os.Getenv("INVARIANT_OAUTH_CLIENT_ID")

@@ -5,24 +5,35 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
+const (
+	maxRedeemFailuresPerWindow = 5
+	redeemFailureWindow        = 1 * time.Minute
+)
+
 type DiscoveryServer struct {
-	id           string
-	discovery    Discovery
-	controlPlane ControlPlane
-	serviceKeys  ServiceKeyManager
-	oauthAuth    Authenticator
-	staticKeys   map[string]struct{}
-	requireAuth  bool
-	handler      http.Handler
-	tracer       *trace.Tracer
+	id                string
+	discovery         Discovery
+	controlPlane      ControlPlane
+	serviceKeys       ServiceKeyManager
+	invitations       InvitationManager
+	peerResolver      PeerKeyResolver
+	oauthAuth         Authenticator
+	staticKeys        map[string]struct{}
+	requireAuth       bool
+	handler           http.Handler
+	tracer            *trace.Tracer
+	rateMu            sync.Mutex
+	failedRedemptions map[string][]time.Time
 }
 
 func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
@@ -31,15 +42,19 @@ func NewDiscoveryServer(discovery Discovery) *DiscoveryServer {
 	id := hex.EncodeToString(idBytes)
 
 	s := &DiscoveryServer{
-		id:         id,
-		discovery:  discovery,
-		staticKeys: make(map[string]struct{}),
+		id:                id,
+		discovery:         discovery,
+		staticKeys:        make(map[string]struct{}),
+		failedRedemptions: make(map[string][]time.Time),
 	}
 	if cp, ok := discovery.(ControlPlane); ok {
 		s.controlPlane = cp
 	}
 	if skm, ok := discovery.(ServiceKeyManager); ok {
 		s.serviceKeys = skm
+	}
+	if im, ok := discovery.(InvitationManager); ok {
+		s.invitations = im
 	}
 	s.handler = s.Handler()
 	return s
@@ -55,6 +70,21 @@ func (s *DiscoveryServer) WithControlPlane(cp ControlPlane) *DiscoveryServer {
 // WithServiceKeyManager sets the ServiceKeyManager for managing service keys.
 func (s *DiscoveryServer) WithServiceKeyManager(skm ServiceKeyManager) *DiscoveryServer {
 	s.serviceKeys = skm
+	s.handler = s.Handler()
+	return s
+}
+
+// WithInvitationManager sets the InvitationManager for managing invitations and access tokens.
+func (s *DiscoveryServer) WithInvitationManager(im InvitationManager) *DiscoveryServer {
+	s.invitations = im
+	s.handler = s.Handler()
+	return s
+}
+
+// WithPeerKeyResolver configures the ITP peer key resolver (e.g. *itp.Listener) to enforce
+// WireGuard public key pinning on access tokens and invitation redemption.
+func (s *DiscoveryServer) WithPeerKeyResolver(r PeerKeyResolver) *DiscoveryServer {
+	s.peerResolver = r
 	s.handler = s.Handler()
 	return s
 }
@@ -112,14 +142,23 @@ func (s *DiscoveryServer) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/verify-service-key", s.handleVerifyServiceKey)
 	mux.HandleFunc("DELETE /auth/service-key/{key}", s.handleRevokeServiceKey)
 
+	// Invitation & access token routes
+	mux.HandleFunc("POST /auth/invite", s.handleCreateInvitation)
+	mux.HandleFunc("POST /auth/invite/redeem", s.handleRedeemInvitation)
+	mux.HandleFunc("GET /auth/invites", s.handleListInvitations)
+	mux.HandleFunc("DELETE /auth/invite/{id}", s.handleRevokeInvitation)
+	mux.HandleFunc("GET /auth/tokens", s.handleListAccessTokens)
+	mux.HandleFunc("DELETE /auth/token/{id}", s.handleRevokeAccessToken)
+
 	h := s.authMiddleware(mux)
 	return trace.Middleware("discovery", s.tracer)(h)
 }
 
 func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /id is allowed unauthenticated for basic health probing
-		if r.URL.Path == "/id" {
+		// /id is allowed unauthenticated for basic health probing, and
+		// POST /auth/invite/redeem is allowed unauthenticated to exchange an invitation code for an access token.
+		if r.URL.Path == "/id" || (r.Method == http.MethodPost && r.URL.Path == "/auth/invite/redeem") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -154,6 +193,39 @@ func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
 			return
+		}
+
+		// 2. Check InvitationManager Access Tokens
+		if s.invitations != nil {
+			if ok, tokRec, err := s.invitations.VerifyAccessToken(r.Context(), token); err == nil && ok && tokRec != nil {
+				// Enforce WireGuard public key pinning if peerResolver is configured and the token has a pinned key
+				if s.peerResolver != nil && tokRec.PublicKey != "" {
+					if peerKey, hasPeerKey := s.peerResolver.PeerKey(r.RemoteAddr); hasPeerKey && !peerKey.IsZero() {
+						if peerKey.String() != tokRec.PublicKey {
+							http.Error(w, "Unauthorized: peer WireGuard key does not match pinned token key", http.StatusUnauthorized)
+							return
+						}
+					}
+				}
+
+				kind := CallerKindUser
+				switch tokRec.Role {
+				case RoleAdmin:
+					kind = CallerKindAdmin
+				case RoleService:
+					kind = CallerKindService
+				case RoleUser:
+					kind = CallerKindUser
+				}
+
+				caller := Caller{
+					Kind:        kind,
+					Identity:    NodeIdentity{Name: tokRec.Name, Email: tokRec.Email},
+					TokenRecord: tokRec,
+				}
+				next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
+				return
+			}
 		}
 
 		// 3. Check dynamic ServiceKeyManager
@@ -255,12 +327,28 @@ func (s *DiscoveryServer) handleFind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *DiscoveryServer) handlePut(w http.ResponseWriter, r *http.Request) {
+	caller, hasCaller := CallerFromContext(r.Context())
+	if hasCaller && caller.Kind == CallerKindUser {
+		http.Error(w, "Forbidden: user tokens are not permitted to register services", http.StatusForbidden)
+		return
+	}
+
 	var reg ServiceRegistration
 	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
+
+	if hasCaller && caller.TokenRecord != nil && caller.TokenRecord.PublicKey != "" {
+		if reg.PublicKey != "" && reg.PublicKey != caller.TokenRecord.PublicKey && caller.Kind != CallerKindAdmin {
+			http.Error(w, "Forbidden: service public_key does not match pinned token public_key", http.StatusForbidden)
+			return
+		}
+		if reg.PublicKey == "" {
+			reg.PublicKey = caller.TokenRecord.PublicKey
+		}
+	}
 
 	if err := s.discovery.Register(r.Context(), reg); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -297,7 +385,13 @@ func (s *DiscoveryServer) handleRegisterClient(w http.ResponseWriter, r *http.Re
 	}
 
 	caller, hasCaller := CallerFromContext(r.Context())
-	if hasCaller && caller.Kind == CallerKindUser {
+	if hasCaller && caller.TokenRecord != nil && caller.TokenRecord.PublicKey != "" {
+		if req.PublicKey != caller.TokenRecord.PublicKey && caller.Kind != CallerKindAdmin {
+			http.Error(w, "Forbidden: access token is pinned to a different WireGuard public key", http.StatusForbidden)
+			return
+		}
+	}
+	if hasCaller && (caller.Kind == CallerKindUser || caller.Kind == CallerKindAdmin) {
 		if caller.Identity.Name != "" {
 			req.Identity.Name = caller.Identity.Name
 		}
@@ -376,6 +470,20 @@ func (s *DiscoveryServer) handleWhoIs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(id)
 }
 
+func (s *DiscoveryServer) isAdminCaller(caller Caller) bool {
+	if caller.Kind == CallerKindAdmin {
+		return true
+	}
+	// Allow OAuth-authenticated users (TokenRecord == nil) to manage keys/invites when OAuth is used
+	if caller.Kind == CallerKindUser && caller.TokenRecord == nil {
+		return true
+	}
+	if !s.requireAuth && len(s.staticKeys) == 0 && s.oauthAuth == nil && caller.Kind == CallerKindAnonymous {
+		return true
+	}
+	return false
+}
+
 type createServiceKeyRequest struct {
 	Name      string `json:"name"`
 	ExpiresIn string `json:"expires_in,omitempty"`
@@ -388,8 +496,8 @@ func (s *DiscoveryServer) handleCreateServiceKey(w http.ResponseWriter, r *http.
 	}
 
 	caller, _ := CallerFromContext(r.Context())
-	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
-		http.Error(w, "Only authenticated users can create service keys", http.StatusForbidden)
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Only administrators or authenticated users can create service keys", http.StatusForbidden)
 		return
 	}
 
@@ -439,8 +547,8 @@ func (s *DiscoveryServer) handleListServiceKeys(w http.ResponseWriter, r *http.R
 	}
 
 	caller, _ := CallerFromContext(r.Context())
-	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
-		http.Error(w, "Only authenticated users can list service keys", http.StatusForbidden)
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Only administrators or authenticated users can list service keys", http.StatusForbidden)
 		return
 	}
 
@@ -466,8 +574,8 @@ func (s *DiscoveryServer) handleRevokeServiceKey(w http.ResponseWriter, r *http.
 	}
 
 	caller, _ := CallerFromContext(r.Context())
-	if (s.oauthAuth != nil || s.requireAuth) && caller.Kind != CallerKindUser {
-		http.Error(w, "Only authenticated users can revoke service keys", http.StatusForbidden)
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Only administrators or authenticated users can revoke service keys", http.StatusForbidden)
 		return
 	}
 
@@ -515,4 +623,284 @@ func (s *DiscoveryServer) handleVerifyServiceKey(w http.ResponseWriter, r *http.
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+type createInvitationRequest struct {
+	Name string    `json:"name"`
+	Role TokenRole `json:"role,omitempty"`
+	TTL  string    `json:"ttl,omitempty"`
+}
+
+type redeemInvitationRequest struct {
+	Code      string       `json:"code"`
+	PublicKey string       `json:"public_key,omitempty"`
+	Identity  NodeIdentity `json:"identity"`
+}
+
+func (s *DiscoveryServer) peerRateLimitKey(r *http.Request) string {
+	if s.peerResolver != nil {
+		if pk, ok := s.peerResolver.PeerKey(r.RemoteAddr); ok && !pk.IsZero() {
+			return pk.String()
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (s *DiscoveryServer) isRateLimited(peerKey string) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-redeemFailureWindow)
+	attempts := s.failedRedemptions[peerKey]
+	valid := attempts[:0]
+	for _, t := range attempts {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	if len(valid) == 0 {
+		delete(s.failedRedemptions, peerKey)
+		return false
+	}
+	s.failedRedemptions[peerKey] = valid
+	return len(valid) >= maxRedeemFailuresPerWindow
+}
+
+func (s *DiscoveryServer) recordFailedRedemption(peerKey string) {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	s.failedRedemptions[peerKey] = append(s.failedRedemptions[peerKey], time.Now())
+}
+
+func (s *DiscoveryServer) handleCreateInvitation(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Invitation management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Forbidden: only administrators can create invitations", http.StatusForbidden)
+		return
+	}
+
+	var req createInvitationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Missing invitation name", http.StatusBadRequest)
+		return
+	}
+
+	role := req.Role
+	if role == "" {
+		role = RoleUser
+	}
+	if !ValidRole(role) {
+		http.Error(w, ErrInvalidRole.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var ttl time.Duration
+	if req.TTL != "" {
+		var err error
+		ttl, err = time.ParseDuration(req.TTL)
+		if err != nil || ttl <= 0 {
+			http.Error(w, "Invalid ttl duration", http.StatusBadRequest)
+			return
+		}
+	}
+
+	creator := caller.Identity
+	if creator.Name == "" {
+		creator.Name = "admin"
+	}
+
+	inv, err := s.invitations.CreateInvitation(r.Context(), req.Name, role, creator, ttl)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(inv)
+}
+
+func (s *DiscoveryServer) handleRedeemInvitation(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Invitation management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	peerRLKey := s.peerRateLimitKey(r)
+	if s.isRateLimited(peerRLKey) {
+		http.Error(w, "Too Many Requests: rate limit exceeded for invitation redemption", http.StatusTooManyRequests)
+		return
+	}
+
+	var req redeemInvitationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(req.Code) == "" {
+		http.Error(w, "Missing invitation code", http.StatusBadRequest)
+		return
+	}
+
+	// Verify proof-of-possession against the ITP tunnel peer key if available
+	if s.peerResolver != nil {
+		if peerKey, ok := s.peerResolver.PeerKey(r.RemoteAddr); ok && !peerKey.IsZero() {
+			if req.PublicKey == "" {
+				req.PublicKey = peerKey.String()
+			} else if req.PublicKey != peerKey.String() {
+				s.recordFailedRedemption(peerRLKey)
+				http.Error(w, "Forbidden: submitted public_key does not match ITP tunnel peer key", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
+	tokRec, err := s.invitations.RedeemInvitation(r.Context(), req.Code, req.PublicKey, req.Identity)
+	if err != nil {
+		s.recordFailedRedemption(peerRLKey)
+		switch {
+		case errors.Is(err, ErrInvitationNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, ErrInvitationUsed), errors.Is(err, ErrInvitationExpired), errors.Is(err, ErrInvitationRevoked):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(tokRec)
+}
+
+func (s *DiscoveryServer) handleListInvitations(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Invitation management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Forbidden: only administrators can list invitations", http.StatusForbidden)
+		return
+	}
+
+	invites, err := s.invitations.ListInvitations(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	masked := make([]InvitationRecord, len(invites))
+	for i, inv := range invites {
+		masked[i] = inv.Masked()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(masked)
+}
+
+func (s *DiscoveryServer) handleRevokeInvitation(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Invitation management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Forbidden: only administrators can revoke invitations", http.StatusForbidden)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "Missing invitation id", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.invitations.RevokeInvitation(r.Context(), id, caller.Identity); err != nil {
+		if errors.Is(err, ErrInvitationNotFound) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *DiscoveryServer) handleListAccessTokens(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Access token management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Forbidden: only administrators can list access tokens", http.StatusForbidden)
+		return
+	}
+
+	tokens, err := s.invitations.ListAccessTokens(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	masked := make([]AccessTokenRecord, len(tokens))
+	for i, tok := range tokens {
+		masked[i] = tok.Masked()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(masked)
+}
+
+func (s *DiscoveryServer) handleRevokeAccessToken(w http.ResponseWriter, r *http.Request) {
+	if s.invitations == nil {
+		http.Error(w, "Access token management not supported", http.StatusNotImplemented)
+		return
+	}
+
+	caller, _ := CallerFromContext(r.Context())
+	if !s.isAdminCaller(caller) {
+		http.Error(w, "Forbidden: only administrators can revoke access tokens", http.StatusForbidden)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "Missing token id", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.invitations.RevokeAccessToken(r.Context(), id, caller.Identity); err != nil {
+		if errors.Is(err, ErrAccessTokenNotFound) {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

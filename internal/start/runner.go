@@ -8,7 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
+
+	invconfig "github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/itp"
 )
 
 // RunnerConfig provides configuration for the service runner.
@@ -26,8 +32,9 @@ const (
 
 // Runner manages the lifecycle of multiple service processes.
 type Runner struct {
-	rc      RunnerConfig
-	baseDir string
+	rc        RunnerConfig
+	baseDir   string
+	provision sync.Mutex
 }
 
 // NewRunner creates a new Runner based on the provided configuration.
@@ -45,8 +52,28 @@ func NewRunner(rc RunnerConfig) (*Runner, error) {
 
 // Start launches all configured services and blocks until the context is canceled.
 func (r *Runner) Start(ctx context.Context) {
+	hasDiscovery := false
 	for i := range r.rc.Config.Services {
 		sc := r.rc.Config.Services[i]
+		if filepath.Base(sc.Command) == "discovery" {
+			hasDiscovery = true
+			go r.runService(ctx, sc)
+		}
+	}
+
+	if hasDiscovery {
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	for i := range r.rc.Config.Services {
+		sc := r.rc.Config.Services[i]
+		if filepath.Base(sc.Command) == "discovery" {
+			continue
+		}
 		go r.runService(ctx, sc)
 	}
 	<-ctx.Done()
@@ -77,6 +104,9 @@ func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {
 		cmd.Env = os.Environ()
 		for k, v := range sc.Environment {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
+		if inviteCode := r.maybeProvisionServiceInvite(ctx, sc); inviteCode != "" {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("INVARIANT_INVITE=%s", inviteCode))
 		}
 		cmd.Stdout = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stdout}
 		cmd.Stderr = &prefixWriter{cmd: cmd, name: sc.Command, out: os.Stderr}
@@ -124,6 +154,122 @@ func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {
 			log.Printf("Restarting service [%s] in %v (exponential back-off)", sc.Command, backoff)
 		}
 	}
+}
+
+func (r *Runner) maybeProvisionServiceInvite(ctx context.Context, sc ServiceConfig) string {
+	svcName := filepath.Base(sc.Command)
+	if svcName == "discovery" {
+		return ""
+	}
+	discoveryURL := sc.Args["discovery"]
+	if discoveryURL == "" {
+		return ""
+	}
+	if sc.Args["invite"] != "" || sc.Args["service-key"] != "" {
+		return ""
+	}
+	if sc.Environment != nil {
+		if sc.Environment["INVARIANT_INVITE"] != "" || sc.Environment["INVARIANT_ACCESS_TOKEN"] != "" || sc.Environment["INVARIANT_SERVICE_KEY"] != "" {
+			return ""
+		}
+	}
+
+	serviceID := sc.Args["id"]
+	if serviceID == "" {
+		serviceID = svcName
+	}
+	tokenFile := sc.Args["token-file"]
+	if tokenFile == "" {
+		tokenFile = itp.DefaultTokenPath(serviceID)
+	}
+	if tok, err := itp.LoadAccessToken(tokenFile); err == nil && tok != "" {
+		return ""
+	}
+
+	r.provision.Lock()
+	defer r.provision.Unlock()
+
+	pk, err := itp.LoadOrGenerateKey(itp.DefaultKeyPath("client"))
+	if err != nil {
+		return ""
+	}
+
+	adminToken := r.resolveOrRedeemAdminToken(ctx, discoveryURL, pk.Private.Public().String())
+	if adminToken == "" {
+		return ""
+	}
+
+	httpClient := itp.NewHTTPClient(pk.Private, adminToken)
+	client := discovery.NewClient(discoveryURL, httpClient).WithAccessToken(adminToken)
+
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	inv, err := client.CreateInvitation(reqCtx, svcName, discovery.RoleService, discovery.NodeIdentity{}, discovery.DefaultInvitationTTL)
+	if err != nil {
+		log.Printf("Runner could not auto-provision invitation for [%s]: %v", svcName, err)
+		return ""
+	}
+	log.Printf("Provisioned single-use service invitation %s for [%s]", inv.ID, svcName)
+	return inv.Code
+}
+
+func (r *Runner) resolveOrRedeemAdminToken(ctx context.Context, discoveryURL, pubKey string) string {
+	if tok := os.Getenv("INVARIANT_ACCESS_TOKEN"); tok != "" {
+		return tok
+	}
+	if tok, err := itp.LoadAccessToken(itp.DefaultTokenPath("client")); err == nil && tok != "" {
+		return tok
+	}
+	if tok := os.Getenv("INVARIANT_OAUTH_TOKEN"); tok != "" {
+		return tok
+	}
+
+	var candidateFiles []string
+	for _, svc := range r.rc.Config.Services {
+		if filepath.Base(svc.Command) == "discovery" {
+			if f := svc.Args["bootstrap-invite-file"]; f != "" {
+				candidateFiles = append(candidateFiles, f)
+			}
+			if d := svc.Args["dir"]; d != "" {
+				candidateFiles = append(candidateFiles, filepath.Join(d, "bootstrap.invite"))
+			}
+		}
+	}
+	if keysDir, err := invconfig.KeysDir(); err == nil {
+		candidateFiles = append(candidateFiles, filepath.Join(keysDir, "bootstrap.invite"))
+	}
+
+	var bootstrapCode string
+	for _, path := range candidateFiles {
+		if data, err := os.ReadFile(path); err == nil {
+			code := strings.TrimSpace(string(data))
+			if code != "" {
+				bootstrapCode = code
+				break
+			}
+		}
+	}
+	if bootstrapCode == "" {
+		return ""
+	}
+
+	pk, err := itp.LoadOrGenerateKey(itp.DefaultKeyPath("client"))
+	if err != nil {
+		return ""
+	}
+	httpClient := itp.NewHTTPClient(pk.Private, "")
+	client := discovery.NewClient(discoveryURL, httpClient)
+
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	rec, err := client.RedeemInvitation(reqCtx, bootstrapCode, pubKey, discovery.NodeIdentity{Name: "runner-admin"})
+	if err != nil {
+		return ""
+	}
+	_ = itp.SaveAccessToken(itp.DefaultTokenPath("client"), rec.Token)
+	return rec.Token
 }
 
 type prefixWriter struct {

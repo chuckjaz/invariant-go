@@ -14,13 +14,14 @@ type RepositoryGlobalConfig struct {
 
 // InvariantConfig holds global configuration for invariant CLI tools.
 type InvariantConfig struct {
-	Discovery  string                  `yaml:"discovery"`
-	OAuthToken string                  `yaml:"oauth_token,omitempty"`
-	ServiceKey string                  `yaml:"service_key,omitempty"`
-	ListenIP   bool                    `yaml:"listen_ip,omitempty"`
-	DERPMapURL string                  `yaml:"derp_map_url,omitempty"`
-	Repository *RepositoryGlobalConfig `yaml:"repository,omitempty"`
-	WriteTag   string                  `yaml:"write_tag,omitempty"`
+	Discovery   string                  `yaml:"discovery"`
+	AccessToken string                  `yaml:"access_token,omitempty"`
+	OAuthToken  string                  `yaml:"oauth_token,omitempty"`
+	ServiceKey  string                  `yaml:"service_key,omitempty"`
+	ListenIP    bool                    `yaml:"listen_ip,omitempty"`
+	DERPMapURL  string                  `yaml:"derp_map_url,omitempty"`
+	Repository  *RepositoryGlobalConfig `yaml:"repository,omitempty"`
+	WriteTag    string                  `yaml:"write_tag,omitempty"`
 }
 
 // ConfigDir returns the path to the ~/.invariant directory.
@@ -92,6 +93,9 @@ func Load() (*InvariantConfig, error) {
 		return nil, err
 	}
 
+	if cfg.AccessToken == "" {
+		cfg.AccessToken = os.Getenv("INVARIANT_ACCESS_TOKEN")
+	}
 	if cfg.ServiceKey == "" {
 		cfg.ServiceKey = os.Getenv("INVARIANT_SERVICE_KEY")
 	}

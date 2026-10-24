@@ -14,6 +14,10 @@ const (
 	EventRegisterClient    DiscoveryEventKind = "register_client"
 	EventCreateServiceKey  DiscoveryEventKind = "create_service_key"
 	EventRevokeServiceKey  DiscoveryEventKind = "revoke_service_key"
+	EventCreateInvitation  DiscoveryEventKind = "create_invitation"
+	EventRedeemInvitation  DiscoveryEventKind = "redeem_invitation"
+	EventRevokeInvitation  DiscoveryEventKind = "revoke_invitation"
+	EventRevokeAccessToken DiscoveryEventKind = "revoke_access_token"
 )
 
 // DiscoveryEvent represents an immutable state mutation in Discovery.
@@ -24,6 +28,8 @@ type DiscoveryEvent struct {
 	ClientKey   string               `json:"client_key,omitempty"`
 	ClientIdent *NodeIdentity        `json:"client_ident,omitempty"`
 	ServiceKey  *ServiceKeyRecord    `json:"service_key,omitempty"`
+	Invitation  *InvitationRecord    `json:"invitation,omitempty"`
+	AccessToken *AccessTokenRecord   `json:"access_token,omitempty"`
 	RevokeKey   string               `json:"revoke_key,omitempty"`
 	RevokedBy   *NodeIdentity        `json:"revoked_by,omitempty"`
 	Timestamp   time.Time            `json:"timestamp"`

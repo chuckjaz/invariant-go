@@ -24,7 +24,9 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  workspace   Manage layered workspaces\n")
 	fmt.Fprintf(os.Stderr, "  scan-repo   Scan a Git repository and index mappings to KV service\n")
 	fmt.Fprintf(os.Stderr, "  repository  Manage Invariant version control repositories\n")
-	fmt.Fprintf(os.Stderr, "  login       Authenticate user with OAuth provider\n")
+	fmt.Fprintf(os.Stderr, "  login       Authenticate user with invitation code or OAuth provider\n")
+	fmt.Fprintf(os.Stderr, "  invite      Manage single-use control plane invitations\n")
+	fmt.Fprintf(os.Stderr, "  token       Manage control plane access tokens\n")
 	fmt.Fprintf(os.Stderr, "  service-key Manage service keys authorized by user account\n")
 	os.Exit(1)
 }
@@ -71,6 +73,10 @@ func main() {
 		runRepository(cfg, os.Args[2:])
 	case "login":
 		runLogin(cfg, os.Args[2:])
+	case "invite":
+		runInvite(cfg, os.Args[2:])
+	case "token":
+		runToken(cfg, os.Args[2:])
 	case "service-key":
 		runServiceKey(cfg, os.Args[2:])
 	default:

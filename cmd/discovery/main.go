@@ -50,6 +50,12 @@ func main() {
 	flag.DurationVar(&healthInterval, "health-interval", 30*time.Second, "Interval for active health checks")
 	var healthTimeout time.Duration
 	flag.DurationVar(&healthTimeout, "health-timeout", 5*time.Minute, "Time before a continuously unhealthy node is evicted")
+	var allowAnonymous bool
+	flag.BoolVar(&allowAnonymous, "allow-anonymous", false, "Allow unauthenticated requests when no credentials are provided")
+	var bootstrapInviteFile string
+	flag.StringVar(&bootstrapInviteFile, "bootstrap-invite-file", "", "Path to write initial bootstrap admin invitation code (defaults to <dir>/bootstrap.invite or ~/.invariant/keys/bootstrap.invite)")
+	var bootstrapTTL time.Duration
+	flag.DurationVar(&bootstrapTTL, "bootstrap-ttl", 1*time.Hour, "TTL for the initial bootstrap admin invitation")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	flag.Parse()
@@ -130,6 +136,44 @@ func main() {
 	}
 
 	server := discovery.NewDiscoveryServer(d)
+	if cp, ok := localD.(discovery.ControlPlane); ok {
+		server.WithControlPlane(cp)
+	}
+	if skm, ok := localD.(discovery.ServiceKeyManager); ok {
+		server.WithServiceKeyManager(skm)
+	}
+	if im, ok := localD.(discovery.InvitationManager); ok {
+		server.WithInvitationManager(im)
+	}
+	server.WithRequireAuth(!allowAnonymous)
+
+	if !allowAnonymous {
+		if im, ok := localD.(discovery.InvitationManager); ok {
+			invitePath := bootstrapInviteFile
+			if invitePath == "" {
+				if dir != "" {
+					invitePath = filepath.Join(dir, "bootstrap.invite")
+				} else {
+					home, _ := os.UserHomeDir()
+					if home == "" {
+						home = "."
+					}
+					invitePath = filepath.Join(home, ".invariant", "keys", "bootstrap.invite")
+				}
+			}
+			inv, created, err := discovery.EnsureBootstrapInvitation(context.Background(), im, bootstrapTTL, invitePath)
+			if err != nil {
+				log.Printf("Warning: failed to ensure bootstrap admin invitation: %v", err)
+			} else if inv != nil {
+				if created {
+					log.Printf("Generated bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
+				} else {
+					log.Printf("Active bootstrap admin invitation (expires %s): %s (saved to %s)", inv.ExpiresAt.Format(time.RFC3339), inv.Code, invitePath)
+				}
+			}
+		}
+	}
+
 	if serviceKey != "" {
 		server.WithServiceKeys(serviceKey)
 	}
@@ -187,6 +231,7 @@ func main() {
 			log.Fatalf("Failed to listen on ITP: %v", err)
 		}
 		defer listener.Close()
+		server.WithPeerKeyResolver(listener)
 		log.Printf("Discovery service listening on ITP address %s (Public Key: %s)...", listener.ITPAddr, listener.PublicKey)
 	}
 

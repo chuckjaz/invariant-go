@@ -17,13 +17,15 @@ const (
 	CallerKindAnonymous CallerKind = "anonymous"
 	CallerKindService   CallerKind = "service"
 	CallerKindUser      CallerKind = "user"
+	CallerKindAdmin     CallerKind = "admin"
 )
 
 // Caller represents the authenticated entity making a request.
 type Caller struct {
-	Kind      CallerKind
-	Identity  NodeIdentity
-	KeyRecord *ServiceKeyRecord
+	Kind        CallerKind
+	Identity    NodeIdentity
+	KeyRecord   *ServiceKeyRecord
+	TokenRecord *AccessTokenRecord
 }
 
 type callerKey struct{}

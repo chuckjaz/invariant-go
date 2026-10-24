@@ -38,7 +38,11 @@ func main() {
 	var port int
 	flag.IntVar(&port, "port", 3004, "Port to listen on when -listen-ip is enabled (using 3004 by default)")
 	var serviceKey string
-	flag.StringVar(&serviceKey, "service-key", "", "Service key for authenticating with discovery / control plane (defaults to INVARIANT_SERVICE_KEY)")
+	flag.StringVar(&serviceKey, "service-key", "", "Access token or service key for authenticating with discovery / control plane")
+	var inviteCode string
+	flag.StringVar(&inviteCode, "invite", "", "One-time invitation code to redeem for a discovery access token (defaults to INVARIANT_INVITE)")
+	var tokenFile string
+	flag.StringVar(&tokenFile, "token-file", "", "Path to persist redeemed discovery access token (defaults to ~/.invariant/keys/<service-id>.token)")
 	var keyFile string
 	flag.StringVar(&keyFile, "key-file", "", "Path to private key file for ITP (defaults to ~/.invariant/keys/<service-id>.key)")
 	var derpMapURL string
@@ -82,6 +86,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load or generate ITP key: %v", err)
 	}
+
+	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
+		DiscoveryURL: discoveryURL,
+		ServiceID:    id,
+		ServiceName:  name,
+		ExplicitKey:  serviceKey,
+		InviteCode:   inviteCode,
+		TokenFile:    tokenFile,
+		PrivateKey:   privKey,
+		DERPMapURL:   derpMapURL,
+	})
+	if err != nil {
+		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+	}
+	serviceKey = resolvedToken
 
 	httpClient := itp.NewHTTPClient(privKey.Private, serviceKey, itp.WithDERPMapURL(derpMapURL))
 

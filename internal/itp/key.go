@@ -1,11 +1,15 @@
 package itp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"github.com/tailscale/tailcat"
 	"tailscale.com/types/key"
 )
@@ -69,4 +73,123 @@ func DefaultKeyPath(name string) string {
 		name = "default"
 	}
 	return filepath.Join(home, ".invariant", "keys", name+".key")
+}
+
+// DefaultTokenPath returns the default path for storing a redeemed access token for a named service or client.
+// It stores tokens under ~/.invariant/keys/<name>.token.
+func DefaultTokenPath(name string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	if name == "" {
+		name = "default"
+	}
+	return filepath.Join(home, ".invariant", "keys", name+".token")
+}
+
+// LoadAccessToken reads a persisted access token from tokenPath.
+func LoadAccessToken(tokenPath string) (string, error) {
+	if tokenPath == "" {
+		return "", os.ErrNotExist
+	}
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return "", err
+	}
+	tok := strings.TrimSpace(string(data))
+	if tok == "" {
+		return "", os.ErrNotExist
+	}
+	return tok, nil
+}
+
+// SaveAccessToken writes an access token to tokenPath with 0600 permissions.
+func SaveAccessToken(tokenPath, token string) error {
+	if tokenPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0700); err != nil {
+		return fmt.Errorf("failed to create token directory: %w", err)
+	}
+	return os.WriteFile(tokenPath, []byte(strings.TrimSpace(token)+"\n"), 0600)
+}
+
+// ServiceAuthOptions configures how a service resolves or redeems its Discovery access token.
+type ServiceAuthOptions struct {
+	DiscoveryURL string
+	ServiceID    string
+	ServiceName  string
+	ExplicitKey  string
+	InviteCode   string
+	TokenFile    string
+	PrivateKey   *tailcat.PrivateKey
+	DERPMapURL   string
+}
+
+// ResolveOrRedeemToken resolves an existing access token / service key or redeems an invitation code
+// with the Discovery service using the node's WireGuard public key, persisting the issued access token.
+func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string, error) {
+	tokenFile := opts.TokenFile
+	if tokenFile == "" && opts.ServiceID != "" {
+		tokenFile = DefaultTokenPath(opts.ServiceID)
+	}
+
+	inviteCode := strings.TrimSpace(opts.InviteCode)
+	if inviteCode == "" {
+		inviteCode = strings.TrimSpace(os.Getenv("INVARIANT_INVITE"))
+	}
+
+	// If an explicit invite code is provided, redeem it with Discovery
+	if inviteCode != "" && opts.DiscoveryURL != "" && opts.PrivateKey != nil {
+		// Support passing a path to an invite file as well as the raw code
+		if !strings.HasPrefix(inviteCode, "inv_invite_") {
+			if data, err := os.ReadFile(inviteCode); err == nil {
+				inviteCode = strings.TrimSpace(string(data))
+			}
+		}
+
+		httpClient := NewHTTPClient(opts.PrivateKey.Private, "", WithDERPMapURL(opts.DERPMapURL))
+		dClient := discovery.NewClient(opts.DiscoveryURL, httpClient)
+
+		redeemCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+
+		identName := opts.ServiceName
+		if identName == "" {
+			identName = opts.ServiceID
+		}
+		tokRec, err := dClient.RedeemInvitation(
+			redeemCtx,
+			inviteCode,
+			opts.PrivateKey.Private.Public().String(),
+			discovery.NodeIdentity{Name: identName},
+		)
+		if err != nil {
+			// If the invitation was already redeemed on a previous run, fall back to the saved token file
+			if savedTok, loadErr := LoadAccessToken(tokenFile); loadErr == nil && savedTok != "" {
+				return savedTok, nil
+			}
+			return "", fmt.Errorf("failed to redeem invitation: %w", err)
+		}
+		if tokenFile != "" {
+			_ = SaveAccessToken(tokenFile, tokRec.Token)
+		}
+		return tokRec.Token, nil
+	}
+
+	if opts.ExplicitKey != "" {
+		return opts.ExplicitKey, nil
+	}
+	if envTok := os.Getenv("INVARIANT_ACCESS_TOKEN"); envTok != "" {
+		return strings.TrimSpace(envTok), nil
+	}
+	if envKey := os.Getenv("INVARIANT_SERVICE_KEY"); envKey != "" {
+		return strings.TrimSpace(envKey), nil
+	}
+	if savedTok, err := LoadAccessToken(tokenFile); err == nil && savedTok != "" {
+		return savedTok, nil
+	}
+
+	return "", nil
 }

@@ -5,24 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/journal"
 )
 
-// Assert that FileSystemDiscovery implements Discovery, ControlPlane, ServiceKeyManager, and ServiceKeyRestorer interfaces
+// Assert that FileSystemDiscovery implements Discovery, ControlPlane, ServiceKeyManager, ServiceKeyRestorer, InvitationManager, and InvitationRestorer interfaces
 var (
 	_ Discovery          = (*FileSystemDiscovery)(nil)
 	_ ControlPlane       = (*FileSystemDiscovery)(nil)
 	_ ServiceKeyManager  = (*FileSystemDiscovery)(nil)
 	_ ServiceKeyRestorer = (*FileSystemDiscovery)(nil)
+	_ InvitationManager  = (*FileSystemDiscovery)(nil)
+	_ InvitationRestorer = (*FileSystemDiscovery)(nil)
 )
 
 type FileSystemDiscovery struct {
 	store       *journal.Store[string, ServiceRegistration]
 	clientStore *journal.Store[string, NodeIdentity]
 	keyStore    *journal.Store[string, ServiceKeyRecord]
+	inviteStore *journal.Store[string, InvitationRecord]
+	tokenStore  *journal.Store[string, AccessTokenRecord]
+	redeemMu    sync.Mutex
 	tracker     *HealthTracker
 	sink        EventSink
 	closeOnce   sync.Once
@@ -65,10 +71,46 @@ func NewFileSystemDiscovery(baseDir string, snapshotInterval time.Duration) (*Fi
 		return nil, err
 	}
 
+	invitesDir := filepath.Join(baseDir, "invitations")
+	if err := os.MkdirAll(invitesDir, 0700); err != nil {
+		store.Close()
+		clientStore.Close()
+		keyStore.Close()
+		return nil, err
+	}
+
+	inviteStore, err := journal.NewStore[string, InvitationRecord](invitesDir, snapshotInterval)
+	if err != nil {
+		store.Close()
+		clientStore.Close()
+		keyStore.Close()
+		return nil, err
+	}
+
+	tokensDir := filepath.Join(baseDir, "access_tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		store.Close()
+		clientStore.Close()
+		keyStore.Close()
+		inviteStore.Close()
+		return nil, err
+	}
+
+	tokenStore, err := journal.NewStore[string, AccessTokenRecord](tokensDir, snapshotInterval)
+	if err != nil {
+		store.Close()
+		clientStore.Close()
+		keyStore.Close()
+		inviteStore.Close()
+		return nil, err
+	}
+
 	d := &FileSystemDiscovery{
 		store:       store,
 		clientStore: clientStore,
 		keyStore:    keyStore,
+		inviteStore: inviteStore,
+		tokenStore:  tokenStore,
 	}
 
 	return d, nil
@@ -120,6 +162,12 @@ func (d *FileSystemDiscovery) Close() error {
 		if d.keyStore != nil {
 			d.keyStore.Close()
 		}
+		if d.inviteStore != nil {
+			d.inviteStore.Close()
+		}
+		if d.tokenStore != nil {
+			d.tokenStore.Close()
+		}
 		if d.sink != nil {
 			_ = d.sink.Close()
 		}
@@ -136,6 +184,16 @@ func (d *FileSystemDiscovery) Snapshot() error {
 	}
 	if d.keyStore != nil {
 		if err := d.keyStore.Snapshot(); err != nil {
+			return err
+		}
+	}
+	if d.inviteStore != nil {
+		if err := d.inviteStore.Snapshot(); err != nil {
+			return err
+		}
+	}
+	if d.tokenStore != nil {
+		if err := d.tokenStore.Snapshot(); err != nil {
 			return err
 		}
 	}
@@ -266,6 +324,26 @@ func (d *FileSystemDiscovery) RegisterClient(ctx context.Context, publicKey stri
 }
 
 func (d *FileSystemDiscovery) VerifyKey(ctx context.Context, publicKey string) (bool, *NodeIdentity, error) {
+	var hasTokenForKey bool
+	var activeTokenIdent *NodeIdentity
+	d.tokenStore.Read(func(m map[string]AccessTokenRecord) {
+		for _, tok := range m {
+			if tok.PublicKey != "" && tok.PublicKey == publicKey {
+				hasTokenForKey = true
+				if tok.IsActive() {
+					activeTokenIdent = &NodeIdentity{Name: tok.Name, Email: tok.Email}
+					break
+				}
+			}
+		}
+	})
+	if activeTokenIdent != nil {
+		return true, activeTokenIdent, nil
+	}
+	if hasTokenForKey {
+		return false, nil, nil
+	}
+
 	if id, ok := d.clientStore.Get(publicKey); ok {
 		idCopy := id
 		return true, &idCopy, nil
@@ -292,15 +370,39 @@ func (d *FileSystemDiscovery) VerifyKey(ctx context.Context, publicKey string) (
 }
 
 func (d *FileSystemDiscovery) AuthorizedKeys(ctx context.Context) ([]string, error) {
+	activeTokenKeys := make(map[string]bool)
+	revokedTokenKeys := make(map[string]bool)
+	d.tokenStore.Read(func(m map[string]AccessTokenRecord) {
+		for _, tok := range m {
+			if tok.PublicKey == "" {
+				continue
+			}
+			if tok.IsActive() {
+				activeTokenKeys[tok.PublicKey] = true
+			} else {
+				revokedTokenKeys[tok.PublicKey] = true
+			}
+		}
+	})
+
 	keySet := make(map[string]struct{})
+	for k := range activeTokenKeys {
+		keySet[k] = struct{}{}
+	}
 	d.clientStore.Read(func(m map[string]NodeIdentity) {
 		for k := range m {
+			if revokedTokenKeys[k] && !activeTokenKeys[k] {
+				continue
+			}
 			keySet[k] = struct{}{}
 		}
 	})
 	d.store.Read(func(m map[string]ServiceRegistration) {
 		for _, reg := range m {
 			if reg.PublicKey != "" {
+				if revokedTokenKeys[reg.PublicKey] && !activeTokenKeys[reg.PublicKey] {
+					continue
+				}
 				keySet[reg.PublicKey] = struct{}{}
 			}
 		}
@@ -402,4 +504,249 @@ func (d *FileSystemDiscovery) RevokeServiceKey(ctx context.Context, keyOrID stri
 // RestoreServiceKey directly restores an existing service key record during replay or disaster recovery.
 func (d *FileSystemDiscovery) RestoreServiceKey(ctx context.Context, rec ServiceKeyRecord) error {
 	return d.keyStore.Put(rec.Key, rec, nil)
+}
+
+func (d *FileSystemDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
+	inv, err := GenerateInvitation(name, role, creator, ttl)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.inviteStore.Put(inv.Code, *inv, nil); err != nil {
+		return nil, err
+	}
+
+	if d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:       EventCreateInvitation,
+			Invitation: inv,
+			Timestamp:  time.Now().UTC(),
+		})
+	}
+
+	invCopy := *inv
+	return &invCopy, nil
+}
+
+func (d *FileSystemDiscovery) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
+	code = strings.TrimSpace(code)
+	publicKey = strings.TrimSpace(publicKey)
+
+	d.redeemMu.Lock()
+	defer d.redeemMu.Unlock()
+
+	inv, ok := d.inviteStore.Get(code)
+	if !ok {
+		return nil, ErrInvitationNotFound
+	}
+	if inv.Revoked {
+		return nil, ErrInvitationRevoked
+	}
+	if inv.Used {
+		return nil, ErrInvitationUsed
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		return nil, ErrInvitationExpired
+	}
+
+	name := inv.Name
+	if name == "" {
+		name = identity.Name
+	}
+	if name == "" {
+		name = string(inv.Role)
+	}
+	email := inv.Email
+	if email == "" {
+		email = identity.Email
+	}
+
+	tokRec, err := GenerateAccessToken(name, email, inv.Role, publicKey, inv.ID, inv.CreatedBy, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	inv.Used = true
+	inv.UsedAt = &now
+	inv.UsedByKey = publicKey
+	if err := d.inviteStore.Put(code, inv, nil); err != nil {
+		return nil, err
+	}
+	if err := d.tokenStore.Put(tokRec.Token, *tokRec, nil); err != nil {
+		return nil, err
+	}
+	if publicKey != "" {
+		_ = d.clientStore.Put(publicKey, NodeIdentity{Name: name, Email: email}, nil)
+	}
+
+	if d.sink != nil {
+		invCopy := inv
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:        EventRedeemInvitation,
+			Invitation:  &invCopy,
+			AccessToken: tokRec,
+			Timestamp:   now,
+		})
+	}
+
+	ret := *tokRec
+	return &ret, nil
+}
+
+func (d *FileSystemDiscovery) ListInvitations(ctx context.Context) ([]InvitationRecord, error) {
+	var records []InvitationRecord
+	d.inviteStore.Read(func(m map[string]InvitationRecord) {
+		for _, r := range m {
+			records = append(records, r)
+		}
+	})
+	slices.SortFunc(records, func(a, b InvitationRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *FileSystemDiscovery) RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error {
+	d.redeemMu.Lock()
+	defer d.redeemMu.Unlock()
+
+	var foundCode string
+	var inv InvitationRecord
+	d.inviteStore.Read(func(m map[string]InvitationRecord) {
+		for c, r := range m {
+			if c == codeOrID || r.ID == codeOrID {
+				foundCode = c
+				inv = r
+				break
+			}
+		}
+	})
+	if foundCode == "" {
+		return ErrInvitationNotFound
+	}
+
+	now := time.Now().UTC()
+	inv.Revoked = true
+	inv.RevokedAt = &now
+	inv.RevokedBy = &revoker
+	if err := d.inviteStore.Put(foundCode, inv, nil); err != nil {
+		return err
+	}
+
+	if d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeInvitation,
+			RevokeKey: foundCode,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+func (d *FileSystemDiscovery) VerifyAccessToken(ctx context.Context, token string) (bool, *AccessTokenRecord, error) {
+	rec, ok := d.tokenStore.Get(token)
+	if !ok {
+		return false, nil, ErrAccessTokenNotFound
+	}
+	if rec.Revoked {
+		return false, nil, ErrAccessTokenRevoked
+	}
+	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
+		return false, nil, ErrAccessTokenExpired
+	}
+	recCopy := rec
+	return true, &recCopy, nil
+}
+
+func (d *FileSystemDiscovery) ListAccessTokens(ctx context.Context) ([]AccessTokenRecord, error) {
+	var records []AccessTokenRecord
+	d.tokenStore.Read(func(m map[string]AccessTokenRecord) {
+		for _, r := range m {
+			records = append(records, r)
+		}
+	})
+	slices.SortFunc(records, func(a, b AccessTokenRecord) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return records, nil
+}
+
+func (d *FileSystemDiscovery) RevokeAccessToken(ctx context.Context, tokenOrID string, revoker NodeIdentity) error {
+	d.redeemMu.Lock()
+	defer d.redeemMu.Unlock()
+
+	var foundToken string
+	var rec AccessTokenRecord
+	d.tokenStore.Read(func(m map[string]AccessTokenRecord) {
+		for t, r := range m {
+			if t == tokenOrID || r.ID == tokenOrID {
+				foundToken = t
+				rec = r
+				break
+			}
+		}
+	})
+	if foundToken == "" {
+		return ErrAccessTokenNotFound
+	}
+
+	now := time.Now().UTC()
+	rec.Revoked = true
+	rec.RevokedAt = &now
+	rec.RevokedBy = &revoker
+	if err := d.tokenStore.Put(foundToken, rec, nil); err != nil {
+		return err
+	}
+
+	if rec.PublicKey != "" {
+		var stillActive bool
+		d.tokenStore.Read(func(m map[string]AccessTokenRecord) {
+			for _, other := range m {
+				if other.PublicKey == rec.PublicKey && other.IsActive() {
+					stillActive = true
+					break
+				}
+			}
+		})
+		if !stillActive {
+			_ = d.clientStore.Delete(rec.PublicKey, nil)
+			var svcIDsToRemove []string
+			d.store.Read(func(m map[string]ServiceRegistration) {
+				for svcID, svc := range m {
+					if svc.PublicKey == rec.PublicKey {
+						svcIDsToRemove = append(svcIDsToRemove, svcID)
+					}
+				}
+			})
+			for _, svcID := range svcIDsToRemove {
+				_ = d.store.Delete(svcID, nil)
+			}
+		}
+	}
+
+	if d.sink != nil {
+		_ = d.sink.Append(ctx, DiscoveryEvent{
+			Kind:      EventRevokeAccessToken,
+			RevokeKey: foundToken,
+			RevokedBy: &revoker,
+			Timestamp: now,
+		})
+	}
+	return nil
+}
+
+func (d *FileSystemDiscovery) RestoreInvitation(ctx context.Context, rec InvitationRecord) error {
+	return d.inviteStore.Put(rec.Code, rec, nil)
+}
+
+func (d *FileSystemDiscovery) RestoreAccessToken(ctx context.Context, rec AccessTokenRecord) error {
+	if err := d.tokenStore.Put(rec.Token, rec, nil); err != nil {
+		return err
+	}
+	if rec.PublicKey != "" && rec.IsActive() {
+		_ = d.clientStore.Put(rec.PublicKey, NodeIdentity{Name: rec.Name, Email: rec.Email}, nil)
+	}
+	return nil
 }

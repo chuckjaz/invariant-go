@@ -13,11 +13,12 @@ import (
 	"time"
 )
 
-// Assert that Client implements Discovery, ControlPlane, and ServiceKeyManager interfaces
+// Assert that Client implements Discovery, ControlPlane, ServiceKeyManager, and InvitationManager interfaces
 var (
 	_ Discovery         = (*Client)(nil)
 	_ ControlPlane      = (*Client)(nil)
 	_ ServiceKeyManager = (*Client)(nil)
+	_ InvitationManager = (*Client)(nil)
 )
 
 // Client implements the Discovery and ControlPlane interfaces by forwarding requests to a remote HTTP server.
@@ -49,6 +50,17 @@ func (c *Client) WithServiceKey(key string) *Client {
 func (c *Client) WithUserToken(token string) *Client {
 	c.token = token
 	return c
+}
+
+// WithAccessToken sets the access token for authenticating requests.
+func (c *Client) WithAccessToken(token string) *Client {
+	c.token = token
+	return c
+}
+
+// Token returns the configured bearer token on this client.
+func (c *Client) Token() string {
+	return c.token
 }
 
 // Get retrieves the service description for the given ID.
@@ -269,6 +281,204 @@ func (c *Client) ListServiceKeys(ctx context.Context) ([]ServiceKeyRecord, error
 // RevokeServiceKey revokes a service key by key or ID.
 func (c *Client) RevokeServiceKey(ctx context.Context, keyOrID string, revoker NodeIdentity) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/auth/service-key/%s", c.baseURL, url.PathEscape(keyOrID)), nil)
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// CreateInvitation creates a new invitation code on Discovery.
+func (c *Client) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
+	reqBody := createInvitationRequest{
+		Name: name,
+		Role: role,
+	}
+	if ttl > 0 {
+		reqBody.TTL = ttl.String()
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/auth/invite", c.baseURL), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var inv InvitationRecord
+	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+// RedeemInvitation exchanges an invitation code and WireGuard public key for an access token.
+func (c *Client) RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error) {
+	reqBody := redeemInvitationRequest{
+		Code:      code,
+		PublicKey: publicKey,
+		Identity:  identity,
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/auth/invite/redeem", c.baseURL), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokRec AccessTokenRecord
+	if err := json.NewDecoder(resp.Body).Decode(&tokRec); err != nil {
+		return nil, err
+	}
+	return &tokRec, nil
+}
+
+// ListInvitations lists invitations on Discovery.
+func (c *Client) ListInvitations(ctx context.Context) ([]InvitationRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/invites", c.baseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var recs []InvitationRecord
+	if err := json.NewDecoder(resp.Body).Decode(&recs); err != nil {
+		return nil, err
+	}
+	return recs, nil
+}
+
+// RevokeInvitation revokes an invitation by code or ID.
+func (c *Client) RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/auth/invite/%s", c.baseURL, url.PathEscape(codeOrID)), nil)
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// VerifyAccessToken verifies an access token via Discovery.
+func (c *Client) VerifyAccessToken(ctx context.Context, token string) (bool, *AccessTokenRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/id", c.baseURL), nil)
+	if err != nil {
+		return false, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, ErrAccessTokenNotFound
+	}
+	return true, &AccessTokenRecord{Token: token}, nil
+}
+
+// ListAccessTokens lists issued access tokens on Discovery.
+func (c *Client) ListAccessTokens(ctx context.Context) ([]AccessTokenRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/tokens", c.baseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	var recs []AccessTokenRecord
+	if err := json.NewDecoder(resp.Body).Decode(&recs); err != nil {
+		return nil, err
+	}
+	return recs, nil
+}
+
+// RevokeAccessToken revokes an access token by token or ID.
+func (c *Client) RevokeAccessToken(ctx context.Context, tokenOrID string, revoker NodeIdentity) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/auth/token/%s", c.baseURL, url.PathEscape(tokenOrID)), nil)
 	if err != nil {
 		return err
 	}
