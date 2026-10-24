@@ -5,8 +5,8 @@ package commit
 import (
 	"context"
 
-	"invariant/internal/content"
-	"invariant/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/repository/identity"
 )
 
 // CreateRequest specifies parameters to create an immutable commit.

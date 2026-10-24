@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
-	"invariant/internal/content"
-	"invariant/internal/files"
-	"invariant/internal/filetree"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func setupTestFiles(t *testing.T) (*files.InMemoryFiles, *storage.InMemoryStorage) {

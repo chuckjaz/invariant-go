@@ -18,8 +18,8 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 var (

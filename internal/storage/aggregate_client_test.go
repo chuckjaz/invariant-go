@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/finder"
 )
 
 // setupTestServer creates a real httptest server wrapping an InMemoryStorage

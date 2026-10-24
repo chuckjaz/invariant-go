@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"invariant/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/content"
 )
 
 //go:fix inline

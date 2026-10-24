@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"invariant/internal/content"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func TestBTree_CompareKeys(t *testing.T) {

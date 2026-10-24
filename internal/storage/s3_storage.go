@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 	"io"
 	"os"
 	"path/filepath"

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // ChangeOptions specifies parameters for creating a change branch workspace.

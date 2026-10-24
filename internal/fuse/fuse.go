@@ -12,8 +12,8 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 
-	"invariant/internal/files"
-	"invariant/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
 )
 
 // Default FUSE kernel caching timeouts for high performance VFS stat/lookup resolution.

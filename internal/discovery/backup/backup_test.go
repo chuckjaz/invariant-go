@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"invariant/internal/discovery"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestChainedBackup_BackupAndReplay(t *testing.T) {

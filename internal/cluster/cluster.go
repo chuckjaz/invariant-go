@@ -13,15 +13,15 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/distribute"
-	"invariant/internal/finder"
-	"invariant/internal/kv"
-	"invariant/internal/names"
-	"invariant/internal/notify"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/distribute"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // serviceConfig persists configuration parameters to allow restarting services.

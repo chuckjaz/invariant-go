@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/filetree"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestFilesService_ReadOnly(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // Assert that Server implements identity.Identity

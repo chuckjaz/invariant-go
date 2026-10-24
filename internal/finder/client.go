@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"invariant/internal/httputil"
-	"invariant/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/notify"
 	"net/http"
 )
 

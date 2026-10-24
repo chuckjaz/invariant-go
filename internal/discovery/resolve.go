@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
 // ResolveName takes an idOrName string and uses the discovery client to find "names-v1" services

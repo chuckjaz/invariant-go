@@ -14,8 +14,8 @@ import (
 	"strings"
 	"text/template"
 
-	"invariant/internal/config"
-	"invariant/internal/start"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/start"
 )
 
 const serviceTemplate = `[Unit]

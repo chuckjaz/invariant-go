@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type nodeState struct {

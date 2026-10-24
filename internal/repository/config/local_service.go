@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/names"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // LocalService implements Service for managing repository and global configurations.

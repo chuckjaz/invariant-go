@@ -2,7 +2,7 @@ package identity
 
 import (
 	"fmt"
-	"invariant/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
 	"io"
 	"net/http"
 	"net/url"

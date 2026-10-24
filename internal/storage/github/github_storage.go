@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"invariant/internal/kv"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // GitHubStorage implements the Storage interface by reading blobs from GitHub.

@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"invariant/internal/content"
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // MountRepository mounts an existing repository workspace to a local directory.

@@ -22,15 +22,15 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 
-	"invariant/internal/config"
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/files"
-	"invariant/internal/finder"
-	"invariant/internal/fuse"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/workspace"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/fuse"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/workspace"
 )
 
 func runWorkspace(globalCfg *config.InvariantConfig, args []string) {

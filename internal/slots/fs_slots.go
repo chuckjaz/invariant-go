@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/journal"
+	"github.com/chuckjaz/invariant-go/internal/journal"
 )
 
 var _ Slots = (*FileSystemSlots)(nil)

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"invariant/internal/identity"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 type NamesServer struct {

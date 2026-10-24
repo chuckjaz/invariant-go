@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"invariant/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/notify"
 )
 
 func TestDistributeServer(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // StartTraceSpan starts a new traced span in the repository workflow layer.

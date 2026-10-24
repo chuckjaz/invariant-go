@@ -7,10 +7,10 @@ import (
 	"io"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/filetree"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // LineDiff computes unified diff hunks between two slices of text lines.

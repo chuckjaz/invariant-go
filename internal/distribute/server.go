@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"invariant/internal/notify"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // DistributeServer provides an HTTP interface for the Distribute service.

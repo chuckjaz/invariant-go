@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"invariant/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/kv"
 )
 
 type mockGitHubKV struct {

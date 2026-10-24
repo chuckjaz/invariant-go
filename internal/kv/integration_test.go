@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"invariant/internal/content"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func TestIntegration_ClientServerAll(t *testing.T) {

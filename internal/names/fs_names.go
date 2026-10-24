@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"invariant/internal/identity"
-	"invariant/internal/journal"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/journal"
 )
 
 // Assert that FileSystemNames implements the Names interface

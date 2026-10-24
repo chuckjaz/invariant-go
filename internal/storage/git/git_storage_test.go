@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/kv"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"

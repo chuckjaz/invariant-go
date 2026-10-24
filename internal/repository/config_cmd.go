@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"invariant/internal/repository/config"
+	"github.com/chuckjaz/invariant-go/internal/repository/config"
 )
 
 // GetConfigSetting gets a config value for repository or global scope.

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/kv"
 )
 
 type kvLocalRoundTripper struct {

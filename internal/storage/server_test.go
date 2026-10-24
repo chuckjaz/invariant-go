@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"io"
 	"net/http"
 	"net/http/httptest"

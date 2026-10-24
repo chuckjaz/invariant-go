@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // ShowOptions specifies parameters for inspecting a commit or file snapshot.

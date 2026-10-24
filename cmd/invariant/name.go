@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"invariant/internal/config"
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
 func runName(globalCfg *config.InvariantConfig, args []string) {

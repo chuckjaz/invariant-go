@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 func runLookup(globalCfg *config.InvariantConfig, args []string) {

@@ -11,14 +11,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"invariant/internal/config"
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/files"
-	"invariant/internal/filetree"
-	"invariant/internal/finder"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type CommonMountFlags struct {

@@ -8,10 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"invariant/internal/content"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // BisectState tracks the active binary search regression state.

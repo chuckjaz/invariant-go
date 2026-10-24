@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/config"
 )
 
 // OAuthTokenFile stores credentials saved to ~/.invariant/oauth_token.json.

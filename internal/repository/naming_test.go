@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"invariant/internal/names"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func TestChangeBranchNaming(t *testing.T) {

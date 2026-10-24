@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"tailscale.com/types/key"
 )
 

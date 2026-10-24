@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 
-	"invariant/internal/content"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // LayerDependency represents a pinned sub-repository layer in a workspace.

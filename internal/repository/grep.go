@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // GrepOptions specifies parameters for pattern searching in CAS commit trees.

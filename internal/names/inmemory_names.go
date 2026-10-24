@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 	"sync"
 )
 

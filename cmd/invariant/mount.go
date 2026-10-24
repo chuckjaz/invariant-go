@@ -10,8 +10,8 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 
-	"invariant/internal/config"
-	"invariant/internal/fuse"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/fuse"
 )
 
 func runMount(globalCfg *config.InvariantConfig, args []string) {

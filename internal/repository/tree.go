@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/filetree"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // CreateEmptyTree creates an empty Directory file tree in CAS storage and returns its ContentLink.

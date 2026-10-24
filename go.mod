@@ -1,4 +1,4 @@
-module invariant
+module github.com/chuckjaz/invariant-go
 
 go 1.27.1
 

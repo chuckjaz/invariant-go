@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"invariant/internal/config"
-	"invariant/internal/nfs"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/nfs"
 )
 
 func runNfs(globalCfg *config.InvariantConfig, args []string) {

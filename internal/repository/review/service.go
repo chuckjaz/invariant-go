@@ -5,7 +5,7 @@ package review
 import (
 	"context"
 
-	"invariant/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/repository/identity"
 )
 
 // Comment represents a single comment entry in a review thread.

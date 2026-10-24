@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestReadWriteBasic(t *testing.T) {

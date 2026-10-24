@@ -7,7 +7,7 @@ import (
 	"github.com/willscott/go-nfs"
 	nfshelper "github.com/willscott/go-nfs/helpers"
 
-	"invariant/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/files"
 )
 
 // Server encapsulates an NFS server.

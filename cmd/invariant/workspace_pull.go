@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"invariant/internal/config"
-	"invariant/internal/files"
-	"invariant/internal/filetree"
-	"invariant/internal/workspace"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/workspace"
 )
 
 func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {

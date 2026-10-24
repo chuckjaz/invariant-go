@@ -16,7 +16,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type KeyPolicy string

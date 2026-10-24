@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 )
 
 type HealthTracker struct {

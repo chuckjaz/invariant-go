@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"invariant/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
 	"io"
 	"mime/multipart"
 	"net/http"

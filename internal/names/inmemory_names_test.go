@@ -2,7 +2,7 @@ package names_test
 
 import (
 	"context"
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/names"
 	"testing"
 )
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"invariant/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
 )
 
 // Assert that ControlPlaneClient implements ControlPlane

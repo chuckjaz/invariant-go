@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	chainedjournal "invariant/internal/journal/chained"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	chainedjournal "github.com/chuckjaz/invariant-go/internal/journal/chained"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // Assert that ChainedBackup implements discovery.EventSink

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"invariant/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
 )
 
 func TestIgnoreRulesMatches(t *testing.T) {

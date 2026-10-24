@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/kv"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestHandler_BasicFlow(t *testing.T) {

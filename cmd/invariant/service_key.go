@@ -8,8 +8,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 func runServiceKey(cfg *config.InvariantConfig, args []string) {

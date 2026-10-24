@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"invariant/internal/config"
-	"invariant/internal/start"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/start"
 )
 
 func runStart(globalCfg *config.InvariantConfig, args []string) {

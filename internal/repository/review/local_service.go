@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/identity"
-	"invariant/internal/names"
-	repoid "invariant/internal/repository/identity"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	repoid "github.com/chuckjaz/invariant-go/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // Assert that LocalService implements Service and identity.Identity

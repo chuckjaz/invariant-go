@@ -11,10 +11,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
 func runStatus(globalCfg *config.InvariantConfig, args []string) {

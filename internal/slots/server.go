@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // Server wraps a Slots implementation and provides HTTP endpoints.

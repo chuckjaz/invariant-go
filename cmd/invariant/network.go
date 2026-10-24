@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/itp"
 	"github.com/tailscale/tailcat"
-	"invariant/internal/config"
-	"invariant/internal/discovery"
-	"invariant/internal/itp"
 )
 
 var (

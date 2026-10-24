@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/filetree"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // Server exposes a Files interface over HTTP

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"invariant/internal/discovery"
-	"invariant/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/finder"
 )
 
 var (

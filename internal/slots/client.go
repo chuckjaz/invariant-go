@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"invariant/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
 	"io"
 	"net/http"
 )

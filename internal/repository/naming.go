@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"invariant/internal/names"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 // FormatChangeBranchName constructs the canonical Names Service key for a change branch.

@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 	"io"
 	"log"
 	"os"

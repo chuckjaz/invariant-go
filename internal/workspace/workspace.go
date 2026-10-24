@@ -9,12 +9,12 @@ import (
 	"sort"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/files"
-	"invariant/internal/filetree"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // WorkspaceInfo represents the contents of the .invariant-workspace JSON file.

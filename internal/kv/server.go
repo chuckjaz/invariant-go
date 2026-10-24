@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 
 	"tailscale.com/client/local"
 	"tailscale.com/client/tailscale/apitype"

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/itp"
-	"invariant/internal/notify"
-	"invariant/internal/slots"
-	"invariant/internal/tags"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/tags"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func generateID() string {

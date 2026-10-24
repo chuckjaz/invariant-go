@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"invariant/internal/discovery"
-	"invariant/internal/notify"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // FinderServer wraps a Finder implementation and provides HTTP endpoints.

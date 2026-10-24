@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"invariant/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/content"
 )
 
 // EntryKind represents the kind of a directory entry.

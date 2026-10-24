@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 func TestServiceKeyCLI_CreateListRevoke(t *testing.T) {

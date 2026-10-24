@@ -8,14 +8,14 @@ import (
 	"os"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/files"
-	"invariant/internal/finder"
-	"invariant/internal/itp"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func main() {

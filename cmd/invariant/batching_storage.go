@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type BatchingTrackingStorage struct {

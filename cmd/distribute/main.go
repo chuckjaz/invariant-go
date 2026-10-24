@@ -10,11 +10,11 @@ import (
 	"os"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/distribute"
-	"invariant/internal/itp"
-	"invariant/internal/tags"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/distribute"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/tags"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func generateID() string {

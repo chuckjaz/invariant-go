@@ -2,7 +2,7 @@ package distribute
 
 import (
 	"context"
-	"invariant/internal/container"
+	"github.com/chuckjaz/invariant-go/internal/container"
 	"math/bits"
 )
 

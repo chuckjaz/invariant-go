@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 
 	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/tailcfg"

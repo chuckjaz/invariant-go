@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/workspace"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/workspace"
 )
 
 // OpenOptions specifies parameters for opening an existing repository FUSE workspace.

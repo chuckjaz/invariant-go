@@ -6,10 +6,10 @@ import (
 	"os"
 	"sync"
 
-	"invariant/internal/content"
-	chainedjournal "invariant/internal/journal/chained"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	chainedjournal "github.com/chuckjaz/invariant-go/internal/journal/chained"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type RecordType int

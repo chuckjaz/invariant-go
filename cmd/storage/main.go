@@ -9,16 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/distribute"
-	"invariant/internal/identity"
-	"invariant/internal/itp"
-	"invariant/internal/kv"
-	"invariant/internal/notify"
-	"invariant/internal/storage"
-	gitstorage "invariant/internal/storage/git"
-	"invariant/internal/tags"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/distribute"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/notify"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	gitstorage "github.com/chuckjaz/invariant-go/internal/storage/git"
+	"github.com/chuckjaz/invariant-go/internal/tags"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay time.Duration) (string, error) {

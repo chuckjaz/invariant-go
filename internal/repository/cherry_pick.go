@@ -6,12 +6,12 @@ import (
 	"maps"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/workspace"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/workspace"
 )
 
 // CherryPickOptions specifies parameters for cherry-picking commits.

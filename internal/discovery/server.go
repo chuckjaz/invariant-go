@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 type DiscoveryServer struct {

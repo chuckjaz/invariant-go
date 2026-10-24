@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestIntegration_ClusterResilience(t *testing.T) {

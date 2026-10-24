@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/repository/review"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/repository/review"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestReviewWorkflow_FullLifecycleAndSubmitGating(t *testing.T) {

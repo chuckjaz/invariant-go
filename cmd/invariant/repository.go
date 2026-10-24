@@ -12,17 +12,17 @@ import (
 	"strings"
 	"sync"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
-	"invariant/internal/finder"
-	"invariant/internal/kv"
-	"invariant/internal/names"
-	"invariant/internal/repository"
-	"invariant/internal/repository/commit"
-	repoconfig "invariant/internal/repository/config"
-	"invariant/internal/repository/review"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	repoconfig "github.com/chuckjaz/invariant-go/internal/repository/config"
+	"github.com/chuckjaz/invariant-go/internal/repository/review"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type stringListFlag []string

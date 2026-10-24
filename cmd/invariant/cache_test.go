@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"invariant/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/files"
 )
 
 func TestRunCache_ValidMount(t *testing.T) {

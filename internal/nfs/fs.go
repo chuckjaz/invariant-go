@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/files"
-	"invariant/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/files"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
 
 	billy "github.com/go-git/go-billy/v5"
 )

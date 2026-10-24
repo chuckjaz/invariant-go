@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/filetree"
-	"invariant/internal/names"
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func runGitCommand(dir string, args ...string) (time.Duration, error) {

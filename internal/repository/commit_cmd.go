@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"invariant/internal/repository/commit"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // CommitOptions specifies parameters for committing changes in a workspace.

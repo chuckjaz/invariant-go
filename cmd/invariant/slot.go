@@ -10,10 +10,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"invariant/internal/config"
-	"invariant/internal/finder"
-	"invariant/internal/names"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func runSlot(globalCfg *config.InvariantConfig, args []string) {

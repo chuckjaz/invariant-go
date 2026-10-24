@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/journal"
+	"github.com/chuckjaz/invariant-go/internal/journal"
 )
 
 // Assert that FileSystemDiscovery implements Discovery, ControlPlane, ServiceKeyManager, and ServiceKeyRestorer interfaces

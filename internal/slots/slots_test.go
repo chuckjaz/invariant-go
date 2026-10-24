@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func runEndToEndTest(t *testing.T, service slots.Slots) {

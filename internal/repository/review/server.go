@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strings"
 
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
-	repoid "invariant/internal/repository/identity"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	repoid "github.com/chuckjaz/invariant-go/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 // Assert that Server implements identity.Identity

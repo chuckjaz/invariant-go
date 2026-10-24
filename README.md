@@ -282,6 +282,12 @@ services:
       - distribute
 ```
 
+## Installing the CLI
+To compile and install the `invariant` CLI using the Go toolchain:
+```bash
+go install github.com/chuckjaz/invariant-go/cmd/invariant@latest
+```
+
 ## Building binaries
 To build all microservices into the `bin/` directory, use the supplied build script:
 ```bash

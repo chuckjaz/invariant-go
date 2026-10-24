@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"invariant/internal/config"
-	"invariant/internal/discovery"
-	"invariant/internal/finder"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func TestRunPrint_Slot(t *testing.T) {

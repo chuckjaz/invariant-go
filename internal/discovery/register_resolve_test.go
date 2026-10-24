@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
 func TestAdvertiseAndRegister(t *testing.T) {

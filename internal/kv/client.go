@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"invariant/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
 )
 
 // Client implements a client for the kv service.

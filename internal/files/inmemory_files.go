@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/filetree"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/filetree"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // InMemoryFiles represents the files service.

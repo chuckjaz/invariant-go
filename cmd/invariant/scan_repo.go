@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"invariant/internal/config"
-	"invariant/internal/gitscan"
-	"invariant/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/gitscan"
+	"github.com/chuckjaz/invariant-go/internal/kv"
 )
 
 func runScanRepo(globalCfg *config.InvariantConfig, args []string) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 func TestDistance(t *testing.T) {

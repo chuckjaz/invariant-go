@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/discovery/backup"
-	"invariant/internal/itp"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/discovery/backup"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func main() {

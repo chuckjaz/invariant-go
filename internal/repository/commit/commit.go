@@ -10,10 +10,10 @@ import (
 	"io"
 	"sort"
 
-	"invariant/internal/content"
-	"invariant/internal/repository/identity"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // Commit represents an immutable snapshot and history node in an Invariant repository.

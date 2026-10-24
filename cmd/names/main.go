@@ -8,12 +8,12 @@ import (
 	"os"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
-	"invariant/internal/itp"
-	"invariant/internal/names"
-	"invariant/internal/tags"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/itp"
+	"github.com/chuckjaz/invariant-go/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/tags"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 func main() {

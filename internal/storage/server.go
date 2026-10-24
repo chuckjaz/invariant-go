@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/identity"
-	"invariant/internal/trace"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
 type StorageServer struct {

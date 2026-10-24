@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
 // RegistrationOption configures optional fields in AdvertiseAndRegister.

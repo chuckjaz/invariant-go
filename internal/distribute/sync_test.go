@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"invariant/internal/discovery"
-	"invariant/internal/distribute"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/distribute"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 // mockDiscovery is a simple mock discovery service for testing

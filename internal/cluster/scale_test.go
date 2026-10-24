@@ -17,9 +17,9 @@ import (
 	"time"
 	"unsafe"
 
-	"invariant/internal/distribute"
-	"invariant/internal/finder"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/distribute"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 type LocalRoundTripper struct {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"invariant/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/kv"
 )
 
 // GitKVIndex provides bidirectional object mapping between Git SHA1 and Invariant SHA256 hashes.

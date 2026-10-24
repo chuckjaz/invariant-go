@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"invariant/internal/buildcache"
-	"invariant/internal/config"
-	"invariant/internal/content"
-	"invariant/internal/discovery"
-	"invariant/internal/finder"
-	"invariant/internal/kv"
-	"invariant/internal/slots"
-	"invariant/internal/storage"
+	"github.com/chuckjaz/invariant-go/internal/buildcache"
+	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
+	"github.com/chuckjaz/invariant-go/internal/finder"
+	"github.com/chuckjaz/invariant-go/internal/kv"
+	"github.com/chuckjaz/invariant-go/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/storage"
 )
 
 func main() {

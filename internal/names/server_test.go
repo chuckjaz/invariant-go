@@ -3,7 +3,7 @@ package names_test
 import (
 	"context"
 	"encoding/json"
-	"invariant/internal/names"
+	"github.com/chuckjaz/invariant-go/internal/names"
 	"net/http"
 	"net/http/httptest"
 	"testing"

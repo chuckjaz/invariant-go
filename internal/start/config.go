@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	invconfig "invariant/internal/config"
+	invconfig "github.com/chuckjaz/invariant-go/internal/config"
 )
 
 // Config represents the configuration in the YAML file.

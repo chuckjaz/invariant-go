@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"invariant/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/config"
 )
 
 func usage() {

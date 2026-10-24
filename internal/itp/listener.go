@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"github.com/tailscale/tailcat"
-	"invariant/internal/discovery"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )

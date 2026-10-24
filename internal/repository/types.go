@@ -3,10 +3,10 @@
 package repository
 
 import (
-	"invariant/internal/repository/commit"
-	"invariant/internal/repository/config"
-	"invariant/internal/repository/identity"
-	"invariant/internal/repository/review"
+	"github.com/chuckjaz/invariant-go/internal/repository/commit"
+	"github.com/chuckjaz/invariant-go/internal/repository/config"
+	"github.com/chuckjaz/invariant-go/internal/repository/identity"
+	"github.com/chuckjaz/invariant-go/internal/repository/review"
 )
 
 // Identity captures user identity and authorization credentials.

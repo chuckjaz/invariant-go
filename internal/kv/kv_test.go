@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"invariant/internal/content"
-	"invariant/internal/slots"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/slots"
 )
 
 func TestStore_BasicPutGet(t *testing.T) {

@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 
-	"invariant/internal/content"
-	"invariant/internal/httputil"
-	"invariant/internal/identity"
+	"github.com/chuckjaz/invariant-go/internal/content"
+	"github.com/chuckjaz/invariant-go/internal/httputil"
+	"github.com/chuckjaz/invariant-go/internal/identity"
 )
 
 // Assert that Client implements identity.Identity and Service
