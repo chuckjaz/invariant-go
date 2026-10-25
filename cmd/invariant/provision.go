@@ -32,6 +32,8 @@ func runProvision(globalCfg *config.InvariantConfig, args []string) {
 	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL override")
 	var binDir string
 	fs.StringVar(&binDir, "bin-dir", "", "Directory containing service binaries (defaults to directory of invariant executable)")
+	var installMissing bool
+	fs.BoolVar(&installMissing, "install", false, "Install missing service commands with 'go install' if 'go' is on PATH")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: invariant provision [options]\n\n")
@@ -52,19 +54,19 @@ func runProvision(globalCfg *config.InvariantConfig, args []string) {
 		binDir = filepath.Dir(exePath)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, discoveryURL); err != nil {
+	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, discoveryURL, installMissing); err != nil {
 		log.Fatalf("Provisioning failed: %v", err)
 	}
 	log.Println("All services in configuration have valid service tokens.")
 }
 
-func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, svcCfg *start.Config, binDir, discoveryURLOverride string) error {
+func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, svcCfg *start.Config, binDir, discoveryURLOverride string, installMissing bool) error {
 	var discoverySvc *start.ServiceConfig
 	for i := range svcCfg.Services {
-		if filepath.Base(svcCfg.Services[i].Command) == "discovery" {
+		if filepath.Base(svcCfg.Services[i].Command) == "inv-discovery" {
 			discoverySvc = &svcCfg.Services[i]
 			break
 		}
@@ -77,9 +79,9 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 	var discCmd *exec.Cmd
 	if discoverySvc != nil {
 		var err error
-		discCmd, detectedDiscURL, err = startDiscoveryForProvision(discCtx, *discoverySvc, binDir)
+		discCmd, detectedDiscURL, err = startDiscoveryForProvision(discCtx, *discoverySvc, binDir, installMissing)
 		if err != nil {
-			return fmt.Errorf("failed to start discovery service: %w", err)
+			return fmt.Errorf("failed to start inv-discovery service: %w", err)
 		}
 		defer func() {
 			stopDiscovery()
@@ -104,7 +106,7 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 	}
 	if discoveryURL == "" {
 		for _, sc := range svcCfg.Services {
-			if filepath.Base(sc.Command) != "discovery" && sc.Args["discovery"] != "" {
+			if filepath.Base(sc.Command) != "inv-discovery" && sc.Args["discovery"] != "" {
 				discoveryURL = sc.Args["discovery"]
 				break
 			}
@@ -137,7 +139,7 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 
 	for _, sc := range svcCfg.Services {
 		svcName := filepath.Base(sc.Command)
-		if svcName == "discovery" {
+		if svcName == "inv-discovery" {
 			continue
 		}
 
@@ -156,7 +158,7 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 		invCode := discovery.FormatInvitationCode(inv.Code, discoveryURL)
 		log.Printf("Created single-use service invitation %s for [%s]", inv.ID, svcName)
 
-		if err := runServiceWithProvisionFlag(ctx, sc, binDir, invCode); err != nil {
+		if err := runServiceWithProvisionFlag(ctx, sc, binDir, invCode, installMissing); err != nil {
 			return fmt.Errorf("failed to provision service [%s]: %w", svcName, err)
 		}
 
@@ -173,13 +175,72 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 	return nil
 }
 
-func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, binDir string) (*exec.Cmd, string, error) {
+func resolveOrInstallCommand(ctx context.Context, command, binDir string, install bool) (string, error) {
+	cmdName := filepath.Base(strings.TrimSpace(command))
+	if p := findExecutable(cmdName, binDir); p != "" {
+		return p, nil
+	}
+
+	if !install {
+		return "", fmt.Errorf("command %q not found in %s or PATH (use --install to install via 'go install')", cmdName, binDir)
+	}
+
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("command %q not found and 'go' executable not found in PATH: %w", cmdName, err)
+	}
+
+	pkg := fmt.Sprintf("github.com/chuckjaz/invariant-go/cmd/%s@latest", cmdName)
+	log.Printf("Command %q not found; installing latest version with: %s install %s", cmdName, goBin, pkg)
+	installCmd := exec.CommandContext(ctx, goBin, "install", pkg)
+	installCmd.Stdout = os.Stdout
+	installCmd.Stderr = os.Stderr
+	if err := installCmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to install %s via 'go install': %w", pkg, err)
+	}
+
+	if p := findExecutable(cmdName, binDir); p != "" {
+		return p, nil
+	}
+	return "", fmt.Errorf("installed %s, but binary %q could not be located in PATH or GOPATH/bin", pkg, cmdName)
+}
+
+func findExecutable(cmdName, binDir string) string {
+	if binDir != "" {
+		p := filepath.Join(binDir, cmdName)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	if p, err := exec.LookPath(cmdName); err == nil {
+		return p
+	}
+	if gobin := os.Getenv("GOBIN"); gobin != "" {
+		p := filepath.Join(gobin, cmdName)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		p := filepath.Join(home, "go", "bin", cmdName)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, binDir string, installMissing bool) (*exec.Cmd, string, error) {
+	cmdPath, err := resolveOrInstallCommand(ctx, sc.Command, binDir, installMissing)
+	if err != nil {
+		return nil, "", err
+	}
+
 	args := make([]string, 0, len(sc.Args)*2)
 	for k, v := range sc.Args {
 		args = append(args, fmt.Sprintf("--%s=%s", k, v))
 	}
 
-	cmdPath := filepath.Join(binDir, filepath.Base(sc.Command))
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
 	cmd.Dir = binDir
 	cmd.Env = os.Environ()
@@ -332,7 +393,7 @@ func ensureProvisionAdminToken(ctx context.Context, globalCfg *config.InvariantC
 func resolveServiceTokenForConfig(sc start.ServiceConfig) (string, string) {
 	svcName := filepath.Base(sc.Command)
 	dir := sc.Args["dir"]
-	if dir == "" && svcName == "kv" {
+	if dir == "" && svcName == "inv-kv" {
 		dir = "kv-journal"
 	}
 
@@ -357,7 +418,12 @@ func resolveServiceTokenForConfig(sc start.ServiceConfig) (string, string) {
 	return tokenPath, ""
 }
 
-func runServiceWithProvisionFlag(ctx context.Context, sc start.ServiceConfig, binDir, inviteCode string) error {
+func runServiceWithProvisionFlag(ctx context.Context, sc start.ServiceConfig, binDir, inviteCode string, installMissing bool) error {
+	cmdPath, err := resolveOrInstallCommand(ctx, sc.Command, binDir, installMissing)
+	if err != nil {
+		return err
+	}
+
 	args := make([]string, 0, len(sc.Args)*2+2)
 	for k, v := range sc.Args {
 		if k == "provision" {
@@ -367,7 +433,6 @@ func runServiceWithProvisionFlag(ctx context.Context, sc start.ServiceConfig, bi
 	}
 	args = append(args, fmt.Sprintf("--provision=%s", inviteCode))
 
-	cmdPath := filepath.Join(binDir, filepath.Base(sc.Command))
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
 	cmd.Dir = binDir
 	cmd.Env = os.Environ()

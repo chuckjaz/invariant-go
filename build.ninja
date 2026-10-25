@@ -14,68 +14,68 @@ rule gen_dyndep_test
   command = go run utils/build_dd.go -test $pkg $out
   description = GEN_DYNDEP_TEST $out
 
-build bin/dd/discovery.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/discovery
+build bin/dd/inv-discovery.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-discovery
 
-build bin/discovery: go_build cmd/discovery/main.go || bin/dd/discovery.dd
-  pkg = ./cmd/discovery
-  dyndep = bin/dd/discovery.dd
+build bin/inv-discovery: go_build cmd/inv-discovery/main.go || bin/dd/inv-discovery.dd
+  pkg = ./cmd/inv-discovery
+  dyndep = bin/dd/inv-discovery.dd
 
-build bin/dd/distribute.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/distribute
+build bin/dd/inv-distribute.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-distribute
 
-build bin/distribute: go_build cmd/distribute/main.go || bin/dd/distribute.dd
-  pkg = ./cmd/distribute
-  dyndep = bin/dd/distribute.dd
+build bin/inv-distribute: go_build cmd/inv-distribute/main.go || bin/dd/inv-distribute.dd
+  pkg = ./cmd/inv-distribute
+  dyndep = bin/dd/inv-distribute.dd
 
-build bin/dd/files.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/files
+build bin/dd/inv-files.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-files
 
-build bin/files: go_build cmd/files/main.go || bin/dd/files.dd
-  pkg = ./cmd/files
-  dyndep = bin/dd/files.dd
+build bin/inv-files: go_build cmd/inv-files/main.go || bin/dd/inv-files.dd
+  pkg = ./cmd/inv-files
+  dyndep = bin/dd/inv-files.dd
 
-build bin/dd/finder.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/finder
+build bin/dd/inv-finder.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-finder
 
-build bin/finder: go_build cmd/finder/main.go || bin/dd/finder.dd
-  pkg = ./cmd/finder
-  dyndep = bin/dd/finder.dd
+build bin/inv-finder: go_build cmd/inv-finder/main.go || bin/dd/inv-finder.dd
+  pkg = ./cmd/inv-finder
+  dyndep = bin/dd/inv-finder.dd
 
 build bin/dd/invariant.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/invariant
 
-build bin/invariant: go_build cmd/invariant/cache.go cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/repository.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go || bin/dd/invariant.dd
+build bin/invariant: go_build cmd/invariant/cache.go cmd/invariant/upload.go cmd/invariant/main.go cmd/invariant/repository.go cmd/invariant/scan_repo.go cmd/invariant/status.go cmd/invariant/slot.go cmd/invariant/batching_storage.go cmd/invariant/sys_darwin.go cmd/invariant/workspace_pull.go cmd/invariant/print.go cmd/invariant/start.go cmd/invariant/lookup.go cmd/invariant/name.go cmd/invariant/upload_progress.go cmd/invariant/commonmount.go cmd/invariant/systemd.go cmd/invariant/nfs.go cmd/invariant/workspace.go cmd/invariant/sys_other.go cmd/invariant/mount.go cmd/invariant/sys_linux.go cmd/invariant/login.go cmd/invariant/service_key.go cmd/invariant/network.go cmd/invariant/invite.go cmd/invariant/provision.go || bin/dd/invariant.dd
   pkg = ./cmd/invariant
   dyndep = bin/dd/invariant.dd
 
-build bin/dd/kv.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/kv
+build bin/dd/inv-kv.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-kv
 
-build bin/kv: go_build cmd/kv/main.go || bin/dd/kv.dd
-  pkg = ./cmd/kv
-  dyndep = bin/dd/kv.dd
+build bin/inv-kv: go_build cmd/inv-kv/main.go || bin/dd/inv-kv.dd
+  pkg = ./cmd/inv-kv
+  dyndep = bin/dd/inv-kv.dd
 
-build bin/dd/names.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/names
+build bin/dd/inv-names.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-names
 
-build bin/names: go_build cmd/names/main.go || bin/dd/names.dd
-  pkg = ./cmd/names
-  dyndep = bin/dd/names.dd
+build bin/inv-names: go_build cmd/inv-names/main.go || bin/dd/inv-names.dd
+  pkg = ./cmd/inv-names
+  dyndep = bin/dd/inv-names.dd
 
-build bin/dd/slots.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/slots
+build bin/dd/inv-slots.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-slots
 
-build bin/slots: go_build cmd/slots/main.go || bin/dd/slots.dd
-  pkg = ./cmd/slots
-  dyndep = bin/dd/slots.dd
+build bin/inv-slots: go_build cmd/inv-slots/main.go || bin/dd/inv-slots.dd
+  pkg = ./cmd/inv-slots
+  dyndep = bin/dd/inv-slots.dd
 
-build bin/dd/storage.dd: gen_dyndep | utils/build_dd.go
-  pkg = ./cmd/storage
+build bin/dd/inv-storage.dd: gen_dyndep | utils/build_dd.go
+  pkg = ./cmd/inv-storage
 
-build bin/storage: go_build cmd/storage/main.go || bin/dd/storage.dd
-  pkg = ./cmd/storage
-  dyndep = bin/dd/storage.dd
+build bin/inv-storage: go_build cmd/inv-storage/main.go || bin/dd/inv-storage.dd
+  pkg = ./cmd/inv-storage
+  dyndep = bin/dd/inv-storage.dd
 
 build bin/dd/inv-go-build-cache.dd: gen_dyndep | utils/build_dd.go
   pkg = ./cmd/inv-go-build-cache
@@ -225,7 +225,7 @@ build bin/dd/test_internal_tags.passed: go_test || bin/dd/test_internal_tags.dd
   pkg = ./internal/tags
   dyndep = bin/dd/test_internal_tags.dd
 
-default bin/discovery bin/distribute bin/files bin/finder bin/inv-go-build-cache bin/invariant bin/kv bin/names bin/slots bin/storage $
+default bin/inv-discovery bin/inv-distribute bin/inv-files bin/inv-finder bin/inv-go-build-cache bin/invariant bin/inv-kv bin/inv-names bin/inv-slots bin/inv-storage $
   bin/dd/test_cmd_invariant.passed bin/dd/test_internal_buildcache.passed bin/dd/test_internal_content.passed $
   bin/dd/test_internal_discovery.passed bin/dd/test_internal_distribute.passed bin/dd/test_internal_files.passed $
   bin/dd/test_internal_filetree.passed bin/dd/test_internal_finder.passed bin/dd/test_internal_fuse.passed $

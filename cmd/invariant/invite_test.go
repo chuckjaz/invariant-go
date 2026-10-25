@@ -88,7 +88,7 @@ func TestProvisionHelperProcess(t *testing.T) {
 	fs.BoolVar(&listenIP, "listen-ip", false, "")
 	_ = fs.Parse(args)
 
-	if svcType == "discovery" {
+	if svcType == "inv-discovery" {
 		fsd, err := discovery.NewFileSystemDiscovery(dir, time.Hour)
 		if err != nil {
 			os.Exit(1)
@@ -116,7 +116,7 @@ func TestProvisionHelperProcess(t *testing.T) {
 		os.Exit(0)
 	}
 
-	// Service helper (names / storage)
+	// Service helper (inv-names / inv-storage)
 	if provisionInvite != "" {
 		inviteCode = provisionInvite
 	}
@@ -155,7 +155,7 @@ func TestProvisionServicesCommand(t *testing.T) {
 		t.Fatalf("failed to create binDir: %v", err)
 	}
 
-	for _, svc := range []string{"discovery", "names", "storage"} {
+	for _, svc := range []string{"inv-discovery", "inv-names", "inv-storage"} {
 		script := fmt.Sprintf("#!/bin/sh\nexport GO_PROVISION_HELPER_SVC=%s\nexec %q -test.run=TestProvisionHelperProcess -- \"$@\"\n", svc, testExe)
 		scriptPath := filepath.Join(binDir, svc)
 		if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
@@ -178,17 +178,17 @@ func TestProvisionServicesCommand(t *testing.T) {
 
 	yamlContent := fmt.Sprintf(`
 services:
-  - command: discovery
+  - command: inv-discovery
     args:
       dir: "*/data/discovery"
       port: "%d"
       listen-ip: "true"
 
-  - command: names
+  - command: inv-names
     args:
       dir: "*/data/names"
 
-  - command: storage
+  - command: inv-storage
     args:
       dir: "*/data/storage"
 `, port)
@@ -207,7 +207,7 @@ services:
 	defer cancel()
 
 	globalCfg := &config.InvariantConfig{}
-	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, ""); err != nil {
+	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, "", false); err != nil {
 		t.Fatalf("provisionServices failed: %v", err)
 	}
 
@@ -227,7 +227,50 @@ services:
 	}
 
 	// Running provisionServices a second time should validate existing tokens and succeed idempotently
-	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, ""); err != nil {
+	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, "", false); err != nil {
 		t.Fatalf("second provisionServices run failed: %v", err)
+	}
+}
+
+func TestResolveOrInstallCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, "bin")
+	goBinDir := filepath.Join(tmpDir, "go", "bin")
+	fakePathDir := filepath.Join(tmpDir, "path")
+	for _, d := range []string{binDir, goBinDir, fakePathDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("GOBIN", goBinDir)
+	t.Setenv("PATH", fakePathDir+string(os.PathListSeparator)+goBinDir)
+
+	// Without --install, a missing command should return an error
+	if _, err := resolveOrInstallCommand(context.Background(), "inv-storage", binDir, false); err == nil {
+		t.Fatalf("expected error when command is missing and install=false")
+	}
+
+	// Create a fake 'go' binary in fakePathDir that writes the target binary into GOBIN on 'go install'
+	fakeGo := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "install" ] && [ "$2" = "github.com/chuckjaz/invariant-go/cmd/inv-storage@latest" ]; then
+  printf '#!/bin/sh\nexit 0\n' > %q/inv-storage
+  chmod 0755 %q/inv-storage
+  exit 0
+fi
+exit 1
+`, goBinDir, goBinDir)
+	if err := os.WriteFile(filepath.Join(fakePathDir, "go"), []byte(fakeGo), 0755); err != nil {
+		t.Fatalf("failed to write fake go binary: %v", err)
+	}
+
+	resolved, err := resolveOrInstallCommand(context.Background(), "inv-storage", binDir, true)
+	if err != nil {
+		t.Fatalf("resolveOrInstallCommand with installMissing=true failed: %v", err)
+	}
+	expectedPath := filepath.Join(goBinDir, "inv-storage")
+	if resolved != expectedPath {
+		t.Fatalf("expected resolved path %q, got %q", expectedPath, resolved)
 	}
 }

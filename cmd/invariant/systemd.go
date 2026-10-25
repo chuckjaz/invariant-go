@@ -361,7 +361,7 @@ func buildDependencies(sc start.ServiceConfig) (string, string) {
 		r = append(r, "invariant-discovery.service")
 	}
 
-	if _, ok := sc.Args["name"]; ok && sc.Command != "names" {
+	if _, ok := sc.Args["name"]; ok && sc.Command != "inv-names" {
 		w = append(w, "invariant-names.service")
 	}
 

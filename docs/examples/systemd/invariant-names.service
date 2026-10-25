@@ -8,7 +8,7 @@ Type=simple
 User=invariant
 Group=invariant
 Environment="DISCOVERY_URL=http://localhost:3003"
-ExecStart=/usr/local/bin/names -port 3005 -dir /var/lib/invariant/names -discovery ${DISCOVERY_URL}
+ExecStart=/usr/local/bin/inv-names -port 3005 -dir /var/lib/invariant/names -discovery ${DISCOVERY_URL}
 Restart=on-failure
 RestartSec=5
 

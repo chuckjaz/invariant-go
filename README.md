@@ -27,16 +27,16 @@ When storing files locally, either on the same machine, or via a connected stora
 
 The file system and key-value are built on microservices. Here is a list of the services and their descriptions.
 
-| Service | Description |
-|---------|-----|
-| Storage | The storage service is the primary service that is used to store and retrieve data. It is a content addressed storage system that is built on top of a distributed storage system that can be scaled arbitrarily. |
-| Finder | The finder service is responsible for finding data among multiple storage devices. |
-| Distribute | The distribute service is responsible for distributing data among multiple storage devices. |
-| Discovery | The discovery service allows service detection, service registration, and service delegation. |
-| Slots | The slots service is responsible for allocating and managing slots. Slots are updateable addresses that maintain the current address of the root of a file system or the key-value store journal. |
-| Names | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs. Examples of mappings are a device ID to a human readable name, or a slot ID to a service name. |
-| Files | A file services that is the backing service for the FUSE file system and the NFS service. |
-| KeyValue | A key-value store service that allows storing and retrieving values for a given key. |
+| Service | Command | Description |
+|---------|---------|-----|
+| Storage | `inv-storage` | The storage service is the primary service that is used to store and retrieve data. It is a content addressed storage system that is built on top of a distributed storage system that can be scaled arbitrarily. |
+| Finder | `inv-finder` | The finder service is responsible for finding data among multiple storage devices. |
+| Distribute | `inv-distribute` | The distribute service is responsible for distributing data among multiple storage devices. |
+| Discovery | `inv-discovery` | The discovery service allows service detection, service registration, and service delegation. |
+| Slots | `inv-slots` | The slots service is responsible for allocating and managing slots. Slots are updateable addresses that maintain the current address of the root of a file system or the key-value store journal. |
+| Names | `inv-names` | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs. Examples of mappings are a device ID to a human readable name, or a slot ID to a service name. |
+| Files | `inv-files` | A file services that is the backing service for the FUSE file system and the NFS service. |
+| KeyValue | `inv-kv` | A key-value store service that allows storing and retrieving values for a given key. |
 
 Both the File and KeyValue service are privleged services as both services initized with the root content-link for all the data reachable by the service. If the data is encrypted, for example, they have access to the root link key, transitviely, all the other keys for the data. The Files service should only be run on the system that mounts the file system or the NFS export. The other services are unprivileged. They do not have access to the unecrypted data.
 
@@ -44,77 +44,82 @@ Both the File and KeyValue service are privleged services as both services initi
 
 Many of the services support dynamic port binding if you omit the `-port` flag or provide `-port 0`. This is useful for avoiding port conflicts when running multiple instances.
 
-### Discovery Service
+### Discovery Service (`inv-discovery`)
 To run the discovery server ([protocol description](docs/Discovery.md)), which defaults to port `3003`:
 ```bash
 # Run with in-memory discovery storage
-go run ./cmd/discovery -port 3003
+go run ./cmd/inv-discovery -port 3003
 
 # Run with upstream delegation to another discovery service
-go run ./cmd/discovery -port 3003 -upstream http://upstream:3003
+go run ./cmd/inv-discovery -port 3003 -upstream http://upstream:3003
 ```
 
-### Names Service
+### Names Service (`inv-names`)
 The names service ([protocol description](docs/Names.md)) provides a mechanism to bind logical string names to 64-character IDs. It can be run in memory or backed by the file system.
 ```bash
 # Run with in-memory names storage
-go run ./cmd/names -port 3005 -discovery http://localhost:3003
+go run ./cmd/inv-names -port 3005 -discovery http://localhost:3003
 
 # Run with persistent snapshot/journal names storage
-go run ./cmd/names -port 3005 -dir /tmp/names -discovery http://localhost:3003
+go run ./cmd/inv-names -port 3005 -dir /tmp/names -discovery http://localhost:3003
 
 # Run with upstream delegation to another name service
-go run ./cmd/names -port 3005 -upstream http://upstream:3005 -discovery http://localhost:3003
+go run ./cmd/inv-names -port 3005 -upstream http://upstream:3005 -discovery http://localhost:3003
 ```
 
-### Storage Service
+### Storage Service (`inv-storage`)
 The storage service ([protocol description](docs/Storage.md)) is responsible for storing and retrieving blobs of data.
 ```bash
 # Run with in-memory storage naitvely
-go run ./cmd/storage -port 3000
+go run ./cmd/inv-storage -port 3000
 
 # Run with AWS S3 backend
-go run ./cmd/storage -port 3000 -s3-bucket my-bucket -s3-prefix invariant-blocks/
+go run ./cmd/inv-storage -port 3000 -s3-bucket my-bucket -s3-prefix invariant-blocks/
 
 # Run with persistent nested file system blocks and register with discovery & distribute services
-go run ./cmd/storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify notify-service-id
+go run ./cmd/inv-storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify notify-service-id
 ```
 *(Note: The `-notify` flag points to IDs implementing the Notify protocol.)*
 
-### Distribute Service
+### Distribute Service (`inv-distribute`)
 The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication logic. It can pull available names/IDs from the discovery service.
 ```bash
 # Run with default in-memory distribution logic
-go run ./cmd/distribute -port 3001
+go run ./cmd/inv-distribute -port 3001
 
 # Run with a specific replication factor and connect to discovery
-go run ./cmd/distribute -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
+go run ./cmd/inv-distribute -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
 
 # Run with a backup destination (resolved automatically via discovery) and rate limit (MB/hour)
 # The destination is excluded from standard replication
-go run ./cmd/distribute -port 3001 -destination backup-storage-id -backup-rate 100
+go run ./cmd/inv-distribute -port 3001 -destination backup-storage-id -backup-rate 100
 ```
 
-### Finder Service
+### Finder Service (`inv-finder`)
 The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing logic, interacting via the Peer protocol.
 ```bash
 # Start a standalone finder
-go run ./cmd/finder -port 3002
+go run ./cmd/inv-finder -port 3002
 
 # Connect the finder to the discovery service
-go run ./cmd/finder -port 3002 -discovery http://localhost:3003
+go run ./cmd/inv-finder -port 3002 -discovery http://localhost:3003
 ```
 
-### Slots Service
+### Slots Service (`inv-slots`)
 A service to allocate and manage mutable slots. It can also notify other services.
 ```bash
-go run ./cmd/slots -port 3004 -discovery http://localhost:3003 -notify notify-service-id
+go run ./cmd/inv-slots -port 3004 -discovery http://localhost:3003 -notify notify-service-id
 ```
 
 ### Invariant CLI Utility
 The `invariant` utility is the main client and orchestrator for the system. It reads global configuration from `~/.invariant/config.yaml` and provides subcommands for cluster interaction:
 
+- `provision`: Bootstrap the control plane and provision service tokens (`service.token`) and discovery addresses (`discovery.url`) for all services defined in a YAML configuration file.
+  - Supports `--install` to automatically install the latest versions of any missing service commands via `go install` if `go` is available on `PATH`.
 - `start`: Start services locally defined in a YAML configuration file.
+- `invite`: Create, list, or revoke control-plane invitation codes (`create --role <user|service|admin>`, `list`, `revoke <id>`).
+- `token`: List or revoke active control-plane access tokens (`list`, `revoke <id>`).
+- `login`: Authenticate with the control plane using OAuth2 or an invitation code (`--invite <inv_invite_...@itp://...>`).
 - `slot`: Allocate a new slot from the slots service.
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.
@@ -184,7 +189,8 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 - `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe. Subpath traversal is also supported (e.g., `invariant print <content-link>/path/to/file`). Supports `-s` to treat the target hash code or name as a mutable slot.
 
 ```bash
-# Start services defined in services.yaml
+# Provision service tokens and start services defined in services.yaml
+go run ./cmd/invariant provision --install services.yaml
 go run ./cmd/invariant start services.yaml
 ```
 
@@ -198,27 +204,27 @@ common:
     distribute: "distribute-1"
 
 services:
-  - command: discovery
+  - command: inv-discovery
     args:
         port: 3003
 
-  - command: names
+  - command: inv-names
     use: [discovery]
     args:
         dir: "*/names"
 
-  - command: distribute
+  - command: inv-distribute
     use: [discovery]
     args:
         name: "distribute-1"
 
-  - command: storage
+  - command: inv-storage
     use: [discovery, distribute]
     args:
         dir: "*/storage-1"
         notify: "distribute-1"
 
-  - command: storage
+  - command: inv-storage
     use: [discovery, distribute]
     args:
         dir: "*/storage-2"
@@ -241,13 +247,13 @@ x-discovery-args: &discovery-args
 services:
   discovery:
     build: .
-    command: ["./bin/discovery", "-port", "3003"]
+    command: ["./bin/inv-discovery", "-port", "3003"]
     ports:
       - "3003:3003"
 
   names:
     build: .
-    command: ["./bin/names", "-port", "3005", "-dir", "/data/names"]
+    command: ["./bin/inv-names", "-port", "3005", "-dir", "/data/names"]
     volumes:
       - ./data/names:/data/names
     depends_on:
@@ -255,17 +261,17 @@ services:
     environment:
       # Inject discovery args via command override conceptually, or rely on internal entrypoint scripts
       # For simplicity, assumed inline here
-    command: ["./bin/names", "-port", "3005", "-dir", "/data/names", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
+    command: ["./bin/inv-names", "-port", "3005", "-dir", "/data/names", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
 
   distribute:
     build: .
-    command: ["./bin/distribute", "-port", "3001", "-name", "distribute-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
+    command: ["./bin/inv-distribute", "-port", "3001", "-name", "distribute-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
     depends_on:
       - discovery
 
   storage-1:
     build: .
-    command: ["./bin/storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
+    command: ["./bin/inv-storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
       - ./data/storage-1:/data/storage-1
     depends_on:
@@ -274,7 +280,7 @@ services:
 
   storage-2:
     build: .
-    command: ["./bin/storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
+    command: ["./bin/inv-storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
       - ./data/storage-2:/data/storage-2
     depends_on:
@@ -282,11 +288,25 @@ services:
       - distribute
 ```
 
-## Installing the CLI
-To compile and install the `invariant` CLI using the Go toolchain:
+## Installing the CLI and Services
+To compile and install the `invariant` CLI and microservice commands (`inv-discovery`, `inv-names`, `inv-slots`, `inv-storage`, `inv-finder`, `inv-distribute`, `inv-kv`, `inv-files`) using the Go toolchain:
 ```bash
+# Install the CLI and all microservices at once
+go install github.com/chuckjaz/invariant-go/cmd/...@latest
+
+# Or install individual commands
 go install github.com/chuckjaz/invariant-go/cmd/invariant@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-discovery@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-names@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-slots@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-storage@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-finder@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-distribute@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-kv@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-files@latest
 ```
+
+Ensure your Go binary directory (`$(go env GOPATH)/bin` or `$GOBIN`) is on your `PATH`. You can also pass `--install` to `invariant provision` (e.g., `invariant provision --install services.yaml`) to automatically install any missing service commands referenced in `services.yaml` using `go install`.
 
 ## Building binaries
 To build all microservices into the `bin/` directory, use the supplied build script:

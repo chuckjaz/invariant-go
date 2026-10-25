@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=invariant
 Group=invariant
-ExecStart=/usr/local/bin/discovery -port 3003
+ExecStart=/usr/local/bin/inv-discovery -port 3003
 Restart=on-failure
 RestartSec=5
 
