@@ -72,7 +72,7 @@ func main() {
 		runWorkspace(cfg, os.Args[2:])
 	case "scan-repo":
 		runScanRepo(cfg, os.Args[2:])
-	case "repository", "repo":
+	case "repository":
 		runRepository(cfg, os.Args[2:])
 	case "login":
 		runLogin(cfg, os.Args[2:])

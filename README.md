@@ -141,7 +141,7 @@ The `invariant` utility is the main client and orchestrator for the system. It r
   - `mount <directory>`: Parses the `.invariant-workspace` and mounts the virtual composite layered file system locally via FUSE natively inheriting standard disk caching (`~/.cache/invariant`) and offline overflow. Runs as a background daemon by default, or supports `-foreground`.
   - `unmount <directory>`: Unmounts the current layered workspace.
   - `pull [directory]`: Parses the workspace and caches all required source layer blocks directly into the local disk storage natively utilizing concurrency limits and `~/.cache/invariant/overflow` validation fallbacks.
-- `repository` (or `repo`): Manage Invariant version control repositories ([detailed documentation](docs/Repository.md)).
+- `repository`: Manage Invariant version control repositories ([detailed documentation](docs/Repository.md)).
   - **Primary workflow**:
     - `change <name>`: Create a writable change branch workspace branched from upstream (supports `-private`, `-upstream`, and `-tag`).
     - `status`: Show working tree file modifications, additions, and deletions relative to the current `HEAD` commit.

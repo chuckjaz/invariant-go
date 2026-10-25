@@ -30,7 +30,7 @@ func runInvite(cfg *config.InvariantConfig, args []string) {
 		runInviteCreate(cfg, args[1:])
 	case "redeem":
 		runInviteRedeem(cfg, args[1:])
-	case "list", "ls":
+	case "list":
 		runInviteList(cfg, args[1:])
 	case "revoke":
 		runInviteRevoke(cfg, args[1:])
@@ -50,9 +50,9 @@ func runToken(cfg *config.InvariantConfig, args []string) {
 	}
 
 	switch args[0] {
-	case "list", "ls":
+	case "list":
 		runTokenList(cfg, args[1:])
-	case "revoke", "rm", "delete":
+	case "revoke":
 		runTokenRevoke(cfg, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown subcommand %q\n", args[0])

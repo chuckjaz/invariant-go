@@ -25,9 +25,9 @@ func runServiceKey(cfg *config.InvariantConfig, args []string) {
 	switch args[0] {
 	case "create":
 		runServiceKeyCreate(cfg, args[1:])
-	case "list", "ls":
+	case "list":
 		runServiceKeyList(cfg, args[1:])
-	case "revoke", "rm", "delete":
+	case "revoke":
 		runServiceKeyRevoke(cfg, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown subcommand %q\n", args[0])
