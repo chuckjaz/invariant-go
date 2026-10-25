@@ -95,7 +95,6 @@ const (
 	defaultGoogleClientSecret = "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"
 	defaultGoogleAuthURL      = "https://accounts.google.com/o/oauth2/v2/auth"
 	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
-	defaultGoogleDeviceURL    = "https://oauth2.googleapis.com/device/code"
 	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
 )
 
@@ -104,10 +103,8 @@ type oauthLoginOptions struct {
 	clientSecret string
 	authURL      string
 	tokenURL     string
-	deviceURL    string
 	userInfoURL  string
 	manualToken  string
-	deviceFlow   bool
 	httpClient   *http.Client
 }
 
@@ -134,12 +131,6 @@ func resolveOAuthOptions(opts oauthLoginOptions) oauthLoginOptions {
 		opts.tokenURL = os.Getenv("INVARIANT_OAUTH_TOKEN_URL")
 		if opts.tokenURL == "" {
 			opts.tokenURL = defaultGoogleTokenURL
-		}
-	}
-	if opts.deviceURL == "" {
-		opts.deviceURL = os.Getenv("INVARIANT_OAUTH_DEVICE_URL")
-		if opts.deviceURL == "" {
-			opts.deviceURL = defaultGoogleDeviceURL
 		}
 	}
 	if opts.userInfoURL == "" {
@@ -194,20 +185,11 @@ func performOAuthLogin(ctx context.Context, opts oauthLoginOptions) (*OAuthToken
 		return tf, ident, nil
 	}
 
-	// 2. Obtain fresh OAuth token via device or browser flow
-	var tf OAuthTokenFile
-	var err error
-	if opts.deviceFlow {
-		if opts.deviceURL == "" || opts.tokenURL == "" {
-			return nil, nil, fmt.Errorf("--device-url and --token-url are required for device flow (or set INVARIANT_OAUTH_DEVICE_URL)")
-		}
-		tf, err = obtainDeviceOAuthToken(opts.clientID, opts.clientSecret, opts.deviceURL, opts.tokenURL)
-	} else {
-		if opts.authURL == "" || opts.tokenURL == "" {
-			return nil, nil, fmt.Errorf("no OAuth authorization server configured (--auth-url / INVARIANT_OAUTH_AUTH_URL)")
-		}
-		tf, err = obtainBrowserOAuthToken(opts.clientID, opts.clientSecret, opts.authURL, opts.tokenURL)
+	// 2. Obtain fresh OAuth token via browser flow
+	if opts.authURL == "" || opts.tokenURL == "" {
+		return nil, nil, fmt.Errorf("no OAuth authorization server configured (--auth-url / INVARIANT_OAUTH_AUTH_URL)")
 	}
+	tf, err := obtainBrowserOAuthToken(opts.clientID, opts.clientSecret, opts.authURL, opts.tokenURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -288,8 +270,6 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	var manualToken string
 	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth access token")
-	var deviceFlow bool
-	fs.BoolVar(&deviceFlow, "device", false, "Use OAuth 2.0 Device Authorization Grant (for headless environments)")
 	var clientID string
 	fs.StringVar(&clientID, "client-id", "", "OAuth Client ID")
 	var clientSecret string
@@ -298,8 +278,6 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs.StringVar(&authURL, "auth-url", "", "OAuth Authorization URL")
 	var tokenURL string
 	fs.StringVar(&tokenURL, "token-url", "", "OAuth Token URL")
-	var deviceURL string
-	fs.StringVar(&deviceURL, "device-url", "", "OAuth Device Authorization URL")
 	var userInfoURL string
 	fs.StringVar(&userInfoURL, "userinfo-url", "", "OAuth UserInfo URL")
 
@@ -310,10 +288,8 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 		clientSecret: clientSecret,
 		authURL:      authURL,
 		tokenURL:     tokenURL,
-		deviceURL:    deviceURL,
 		userInfoURL:  userInfoURL,
 		manualToken:  manualToken,
-		deviceFlow:   deviceFlow,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -452,87 +428,4 @@ func obtainBrowserOAuthToken(clientID, clientSecret, authURL, tokenURL string) (
 	}
 
 	return tokenResp.toTokenFile(), nil
-}
-
-func obtainDeviceOAuthToken(clientID, clientSecret, deviceURL, tokenURL string) (OAuthTokenFile, error) {
-	data := url.Values{
-		"client_id": {clientID},
-		"scope":     {"openid profile email"},
-	}
-
-	resp, err := http.PostForm(deviceURL, data)
-	if err != nil {
-		return OAuthTokenFile{}, fmt.Errorf("device authorization failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return OAuthTokenFile{}, fmt.Errorf("device authorization failed (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-
-	var deviceResp struct {
-		DeviceCode              string `json:"device_code"`
-		UserCode                string `json:"user_code"`
-		VerificationURI         string `json:"verification_uri"`
-		VerificationURIComplete string `json:"verification_uri_complete"`
-		ExpiresIn               int    `json:"expires_in"`
-		Interval                int    `json:"interval"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&deviceResp); err != nil {
-		return OAuthTokenFile{}, fmt.Errorf("failed to decode device response: %w", err)
-	}
-
-	urlToOpen := deviceResp.VerificationURIComplete
-	if urlToOpen == "" {
-		urlToOpen = deviceResp.VerificationURI
-	}
-
-	fmt.Printf("\nTo log in, please visit: %s\nand enter the code: %s\n\nWaiting for authorization...\n",
-		urlToOpen, deviceResp.UserCode)
-
-	interval := max(time.Duration(deviceResp.Interval)*time.Second, 5*time.Second)
-	expires := time.Now().Add(time.Duration(deviceResp.ExpiresIn) * time.Second)
-
-	for time.Now().Before(expires) {
-		time.Sleep(interval)
-
-		pollData := url.Values{
-			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-			"device_code": {deviceResp.DeviceCode},
-			"client_id":   {clientID},
-		}
-		if clientSecret != "" {
-			pollData.Set("client_secret", clientSecret)
-		}
-
-		pollResp, err := http.PostForm(tokenURL, pollData)
-		if err != nil {
-			continue
-		}
-
-		if pollResp.StatusCode == http.StatusOK {
-			var tokenResp oauthTokenResponse
-			_ = json.NewDecoder(pollResp.Body).Decode(&tokenResp)
-			pollResp.Body.Close()
-			return tokenResp.toTokenFile(), nil
-		}
-
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		_ = json.NewDecoder(pollResp.Body).Decode(&errResp)
-		pollResp.Body.Close()
-
-		if errResp.Error == "authorization_pending" {
-			continue
-		} else if errResp.Error == "slow_down" {
-			interval += 5 * time.Second
-		} else {
-			return OAuthTokenFile{}, fmt.Errorf("authentication error: %s", errResp.Error)
-		}
-	}
-
-	return OAuthTokenFile{}, fmt.Errorf("device authorization timed out")
 }
