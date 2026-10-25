@@ -1,19 +1,19 @@
 # The invariant project
 
-A content addressing storage system that can be used to store abitrary data. Data can be uploaded to the storage system and retrieved using a content link. The storage system is built on top of a distributed storage system that can be scaled arbitrarily.
+A content addressing storage system that can be used to store arbitrary data. Data can be uploaded to the storage system and retrieved using a content link. The storage system is built on top of a distributed storage system that can be scaled arbitrarily.
 
 The system is made up of multiple micro-services that can be run independently or together and replaced or updated arbitrarily.
 
 ### File System
-A directory can be uploaded to the storage system and then mounted locally via FUSE or exported natively as an NFS server. The directory can then be interacted with as a regular file system. The file system can be mounted on mutliple machines and will automatically sync from one machine to another.
+A directory can be uploaded to the storage system and then mounted locally via FUSE or exported natively as an NFS server. The directory can then be interacted with as a regular file system. The file system can be mounted on multiple machines and will automatically sync from one machine to another.
 
-The file system can be layered, which allows for files in a dirctory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
+The file system can be layered, which allows for files in a directory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
 
 ### Key-Value store
-A key-value store is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data. The key-value store is backed by an immutable journal, an immutable B-Tree index, and an in-memory cache. 
+A key-value store is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data. The key-value store is backed by an immutable journal, an immutable B-Tree index, and an in-memory cache.
 
 ### Version Control Repository
-A distributed version control and code review system ([protocol and command description](docs/Repository.md)) is built natively on top of Invariant's content-addressable storage, mutable slots, names service, and layered FUSE workspaces. Commits, file trees, and blobs are stored directly in CAS rather than a local `.git` directory, and branches and change sets are mounted as isolated workspaces. It supports branching, 3-way merges and rebasing, integrated code reviews, and bidirectional synchronization with Git repositories.
+A distributed version control and code review system ([protocol and command description](docs/Repository.md)) is built on top of Invariant's content-addressable storage, mutable slots, names service, and layered FUSE workspaces. Commits, file trees, and blobs are stored directly in CAS rather than a local `.git` directory, and branches and change sets are mounted as isolated workspaces. It supports branching, 3-way merges and rebasing, integrated code reviews, and bidirectional synchronization with Git repositories.
 
 ### Automatic backup and recovery
 The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encyrpted copies of the files at rest.
@@ -21,7 +21,7 @@ The system can be configured to automatically upload the file system to cloud st
 If the local storage device fails, the system can be configured to automatically recover from the cloud storage provider incrementally. The files are then cached locally as they are read from the cloud storage provider.
 
 ### Replication
-When storing files locally, either on the same machine, or via a connected storage device, the data can be distributed amoung multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor. If the data is backed up to the cloud, the data will not be lost if the local storage device fails. The data will be read from the cloud storage provider not cached locally.
+When storing files locally, either on the same machine, or via a connected storage device, the data can be distributed among multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor. If the data is backed up to the cloud, the data will not be lost if the local storage device fails. The data will be read from the cloud storage provider not cached locally.
 
 ## Microservices
 
@@ -33,12 +33,12 @@ The file system and key-value are built on microservices. Here is a list of the 
 | Finder | `inv-finder` | The finder service is responsible for finding data among multiple storage devices. |
 | Distribute | `inv-distribute` | The distribute service is responsible for distributing data among multiple storage devices. |
 | Discovery | `inv-discovery` | The discovery service allows service detection, service registration, and service delegation. |
-| Slots | `inv-slots` | The slots service is responsible for allocating and managing slots. Slots are updateable addresses that maintain the current address of the root of a file system or the key-value store journal. |
+| Slots | `inv-slots` | The slots service is responsible for allocating and managing slots. Slots are updatable addresses that maintain the current address of the root of a file system or the key-value store journal. |
 | Names | `inv-names` | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs. Examples of mappings are a device ID to a human readable name, or a slot ID to a service name. |
 | Files | `inv-files` | A file services that is the backing service for the FUSE file system and the NFS service. |
 | KeyValue | `inv-kv` | A key-value store service that allows storing and retrieving values for a given key. |
 
-Both the File and KeyValue service are privleged services as both services initized with the root content-link for all the data reachable by the service. If the data is encrypted, for example, they have access to the root link key, transitviely, all the other keys for the data. The Files service should only be run on the system that mounts the file system or the NFS export. The other services are unprivileged. They do not have access to the unecrypted data.
+Both the File and KeyValue service are privileged services as both services initialed with the root content-link for all the data reachable by the service. If the data is encrypted, for example, they have access to the root link key, transitively, all the other keys for the data. The Files service should only be run on the system that mounts the file system or the NFS export. The other services are unprivileged. They do not have access to the unencrypted data.
 
 ## Executing services
 
@@ -234,7 +234,7 @@ services:
 The `services.yaml` configuration also supports an `environment` map. Keys will overwrite container-local or service environment variables. When a value is prefixed with `$key:`, it safely substitutes the content of the secure key file (`~/.invariant/keys/<filename>`) preventing the secret from appearing inside the config format itself.
 
 ### Docker Compose
-For a more robust and industrial-strength deployment, you can use Docker and Docker Compose. This is the recommended alternative for running these services in production-like environments or cross-platform setups. 
+For a more robust and industrial-strength deployment, you can use Docker and Docker Compose. This is the recommended alternative for running these services in production-like environments or cross-platform setups.
 
 **Example `docker-compose.yml`** (equivalent to the `services.yaml` above):
 ```yaml
