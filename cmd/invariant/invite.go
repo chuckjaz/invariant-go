@@ -134,7 +134,7 @@ func runInviteCreate(cfg *config.InvariantConfig, args []string) {
 	if inv.Role == discovery.RoleService {
 		fmt.Printf("\nProvision the service with:\n  --provision %s\n", invCode)
 	} else {
-		fmt.Printf("\nRedeem with:\n  invariant login --invite %s\n", invCode)
+		fmt.Printf("\nRedeem with:\n  invariant login\n  invariant invite redeem %s\n", invCode)
 	}
 }
 
@@ -151,26 +151,29 @@ func runInviteRedeem(cfg *config.InvariantConfig, args []string) {
 	_ = fs.Parse(args)
 
 	rem := fs.Args()
-	if len(rem) < 1 {
+	var inviteTarget string
+	if len(rem) > 0 {
+		inviteTarget = rem[0]
+	} else {
+		inviteTarget = strings.TrimSpace(os.Getenv("INVARIANT_INVITE"))
+	}
+	if inviteTarget == "" {
 		fmt.Fprintf(os.Stderr, "Usage: invariant invite redeem [--discovery <url>] [--name <name>] <code-or-file>\n")
 		os.Exit(1)
 	}
 
-	runInviteRedeemFlowWithOAuth(cfg, rem[0], discoveryURL, nodeName, oauthLoginOptions{
+	runInviteRedeemFlowWithOAuth(cfg, inviteTarget, discoveryURL, nodeName, oauthLoginOptions{
 		manualToken: manualToken,
 		userInfoURL: userInfoURL,
-		reuseSaved:  true,
 	})
 }
 
 func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string) {
-	runInviteRedeemFlowWithOAuth(cfg, inviteCodeOrFile, discoveryURL, nodeName, oauthLoginOptions{
-		reuseSaved: true,
-	})
+	runInviteRedeemFlowWithOAuth(cfg, inviteCodeOrFile, discoveryURL, nodeName, oauthLoginOptions{})
 }
 
 func runInviteRedeemFlowWithOAuth(cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string, oauthOpts oauthLoginOptions) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	rec, tokenPath, err := redeemInvitationWithOAuth(ctx, cfg, inviteCodeOrFile, discoveryURL, nodeName, oauthOpts)
@@ -201,8 +204,8 @@ func redeemInvitationWithOAuth(ctx context.Context, cfg *config.InvariantConfig,
 		return nil, "", fmt.Errorf("invitation code is empty")
 	}
 
-	// Validate OAuth credentials first so we have a verified user email before redeeming the invitation
-	tf, ident, err := ensureValidatedOAuth(ctx, oauthOpts)
+	// Require existing OAuth credentials from a prior 'invariant login'
+	tf, ident, err := requireLoggedInOAuth(ctx, oauthOpts)
 	if err != nil {
 		return nil, "", fmt.Errorf("OAuth authentication required to redeem invitation: %w", err)
 	}

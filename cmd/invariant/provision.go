@@ -362,7 +362,7 @@ func ensureProvisionAdminToken(ctx context.Context, globalCfg *config.InvariantC
 		}
 	}
 	if bootstrapCode == "" {
-		return "", fmt.Errorf("no valid admin token or bootstrap.invite file found; run 'invariant login --invite <code-or-file>' first")
+		return "", fmt.Errorf("no valid admin token or bootstrap.invite file found; run 'invariant login' and 'invariant invite redeem <code-or-file>' first")
 	}
 
 	userName := os.Getenv("USER")

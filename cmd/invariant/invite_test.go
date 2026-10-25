@@ -59,19 +59,35 @@ func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
 		Discovery: ts.URL,
 	}
 
-	// 1. Invalid OAuth credentials must fail
+	// 1. Redeeming without logging in first must fail
 	_, _, err = redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err == nil {
+		t.Fatalf("expected redeemInvitationWithOAuth without prior login to fail")
+	}
+
+	// 2. Logging in with invalid OAuth credentials must fail
+	_, _, err = performOAuthLogin(ctx, oauthLoginOptions{
 		manualToken: "invalid-oauth-token",
 		userInfoURL: userInfoSrv.URL,
 		httpClient:  userInfoSrv.Client(),
 	})
 	if err == nil {
-		t.Fatalf("expected redeemInvitationWithOAuth with invalid OAuth token to fail")
+		t.Fatalf("expected performOAuthLogin with invalid OAuth token to fail")
 	}
 
-	// 2. Valid OAuth credentials with mismatched email (bob@example.com vs alice@example.com) must fail
-	_, _, err = redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+	// 3. Logging in as bob@example.com succeeds, but redeeming Alice's invitation must fail due to email mismatch
+	_, _, err = performOAuthLogin(ctx, oauthLoginOptions{
 		manualToken: "valid-bob-oauth-token",
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("performOAuthLogin for bob failed: %v", err)
+	}
+	_, _, err = redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
 		userInfoURL: userInfoSrv.URL,
 		httpClient:  userInfoSrv.Client(),
 	})
@@ -79,9 +95,16 @@ func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
 		t.Fatalf("expected redeemInvitationWithOAuth with mismatched OAuth email to fail")
 	}
 
-	// 3. Valid OAuth credentials with matching email (alice@example.com) must succeed
-	rec, _, err := redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+	// 4. Logging in as alice@example.com and then redeeming the invitation via saved OAuth credentials must succeed
+	_, _, err = performOAuthLogin(ctx, oauthLoginOptions{
 		manualToken: "valid-alice-oauth-token",
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("performOAuthLogin for alice failed: %v", err)
+	}
+	rec, _, err := redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
 		userInfoURL: userInfoSrv.URL,
 		httpClient:  userInfoSrv.Client(),
 	})

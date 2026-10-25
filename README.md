@@ -117,9 +117,9 @@ The `invariant` utility is the main client and orchestrator for the system. It r
 - `provision`: Bootstrap the control plane and provision service tokens (`service.token`) and discovery addresses (`discovery.url`) for all services defined in a YAML configuration file.
   - Supports `--install` to automatically install the latest versions of any missing service commands via `go install` if `go` is available on `PATH`.
 - `start`: Start services locally defined in a YAML configuration file.
-- `invite`: Create, list, or revoke control-plane invitation codes (`create --role <user|service|admin>`, `list`, `revoke <id>`).
+- `invite`: Create, redeem, list, or revoke control-plane invitation codes (`create --role <user|service|admin>`, `redeem <inv_invite_...@itp://...>`, `list`, `revoke <id>`).
 - `token`: List or revoke active control-plane access tokens (`list`, `revoke <id>`).
-- `login`: Authenticate with the control plane using OAuth2 or an invitation code (`--invite <inv_invite_...@itp://...>`).
+- `login`: Authenticate with the OAuth2 provider to obtain user credentials (`~/.invariant/oauth_token.json`).
 - `slot`: Allocate a new slot from the slots service.
   - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
 - `name`: Register a logical name to a slot.

@@ -108,7 +108,6 @@ type oauthLoginOptions struct {
 	userInfoURL  string
 	manualToken  string
 	deviceFlow   bool
-	reuseSaved   bool
 	httpClient   *http.Client
 }
 
@@ -174,7 +173,7 @@ func validateOAuthCredentials(ctx context.Context, accessToken, userInfoURL stri
 	return ident, nil
 }
 
-func ensureValidatedOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTokenFile, *discovery.NodeIdentity, error) {
+func performOAuthLogin(ctx context.Context, opts oauthLoginOptions) (*OAuthTokenFile, *discovery.NodeIdentity, error) {
 	opts = resolveOAuthOptions(opts)
 
 	// 1. Explicit manual token
@@ -195,25 +194,7 @@ func ensureValidatedOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTo
 		return tf, ident, nil
 	}
 
-	// 2. Reuse saved OAuth token if valid (when redeeming an invitation without forcing a new flow)
-	if opts.reuseSaved && !opts.deviceFlow {
-		if tf, err := LoadOAuthTokenFile(); err == nil && tf != nil {
-			tok := strings.TrimSpace(tf.AccessToken)
-			notExpired := tf.Expiry.IsZero() || time.Now().Before(tf.Expiry)
-			if tok != "" && !strings.HasPrefix(tok, "inv_at_") && notExpired {
-				if ident, err := validateOAuthCredentials(ctx, tok, opts.userInfoURL, opts.httpClient); err == nil {
-					tf.Email = ident.Email
-					if tf.Name == "" {
-						tf.Name = ident.Name
-					}
-					_ = SaveOAuthToken(tf)
-					return tf, ident, nil
-				}
-			}
-		}
-	}
-
-	// 3. Obtain fresh OAuth token via device or browser flow
+	// 2. Obtain fresh OAuth token via device or browser flow
 	var tf OAuthTokenFile
 	var err error
 	if opts.deviceFlow {
@@ -245,6 +226,48 @@ func ensureValidatedOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTo
 	return &tf, ident, nil
 }
 
+func requireLoggedInOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTokenFile, *discovery.NodeIdentity, error) {
+	opts = resolveOAuthOptions(opts)
+
+	if strings.TrimSpace(opts.manualToken) != "" {
+		ident, err := validateOAuthCredentials(ctx, opts.manualToken, opts.userInfoURL, opts.httpClient)
+		if err != nil {
+			return nil, nil, err
+		}
+		tf := &OAuthTokenFile{
+			AccessToken: strings.TrimSpace(opts.manualToken),
+			TokenType:   "Bearer",
+			Name:        ident.Name,
+			Email:       ident.Email,
+		}
+		return tf, ident, nil
+	}
+
+	tf, err := LoadOAuthTokenFile()
+	if err != nil || tf == nil || strings.TrimSpace(tf.AccessToken) == "" {
+		return nil, nil, fmt.Errorf("not logged in: run 'invariant login' first to obtain OAuth credentials")
+	}
+
+	tok := strings.TrimSpace(tf.AccessToken)
+	if strings.HasPrefix(tok, "inv_at_") {
+		return nil, nil, fmt.Errorf("not logged in with OAuth: run 'invariant login' first")
+	}
+	if !tf.Expiry.IsZero() && time.Now().After(tf.Expiry) {
+		return nil, nil, fmt.Errorf("OAuth credentials have expired: run 'invariant login' first")
+	}
+
+	ident, err := validateOAuthCredentials(ctx, tok, opts.userInfoURL, opts.httpClient)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to validate saved OAuth credentials (run 'invariant login' again): %w", err)
+	}
+	tf.Email = ident.Email
+	if tf.Name == "" {
+		tf.Name = ident.Name
+	}
+	_ = SaveOAuthToken(tf)
+	return tf, ident, nil
+}
+
 // openBrowser launches the default system browser for the given URL.
 func openBrowser(targetURL string) error {
 	var err error
@@ -263,14 +286,8 @@ func openBrowser(targetURL string) error {
 
 func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
-	var invite string
-	fs.StringVar(&invite, "invite", "", "Redeem an invitation code or file from the Discovery service")
-	var discoveryURL string
-	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL (used with --invite)")
-	var nodeName string
-	fs.StringVar(&nodeName, "name", "", "Node/user name when redeeming an invitation")
 	var manualToken string
-	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth or access token")
+	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth access token")
 	var deviceFlow bool
 	fs.BoolVar(&deviceFlow, "device", false, "Use OAuth 2.0 Device Authorization Grant (for headless environments)")
 	var clientID string
@@ -299,19 +316,10 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 		deviceFlow:   deviceFlow,
 	}
 
-	if invite == "" {
-		invite = os.Getenv("INVARIANT_INVITE")
-	}
-	if invite != "" {
-		oauthOpts.reuseSaved = true
-		runInviteRedeemFlowWithOAuth(cfg, invite, discoveryURL, nodeName, oauthOpts)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	tf, ident, err := ensureValidatedOAuth(ctx, oauthOpts)
+	tf, ident, err := performOAuthLogin(ctx, oauthOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		os.Exit(1)
