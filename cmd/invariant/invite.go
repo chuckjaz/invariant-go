@@ -32,7 +32,7 @@ func runInvite(cfg *config.InvariantConfig, args []string) {
 		runInviteRedeem(cfg, args[1:])
 	case "list", "ls":
 		runInviteList(cfg, args[1:])
-	case "revoke", "rm", "delete":
+	case "revoke":
 		runInviteRevoke(cfg, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown subcommand %q\n", args[0])
