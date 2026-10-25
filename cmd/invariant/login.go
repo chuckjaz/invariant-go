@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/config"
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 // OAuthTokenFile stores credentials saved to ~/.invariant/oauth_token.json.
@@ -55,22 +56,35 @@ func SaveOAuthToken(t *OAuthTokenFile) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-// LoadOAuthToken reads the OAuth access token from ~/.invariant/oauth_token.json,
-// or INVARIANT_OAUTH_TOKEN environment variable.
-func LoadOAuthToken() (string, error) {
-	if env := os.Getenv("INVARIANT_OAUTH_TOKEN"); env != "" {
-		return env, nil
+// LoadOAuthTokenFile reads the full OAuthTokenFile from ~/.invariant/oauth_token.json
+// or the INVARIANT_OAUTH_TOKEN environment variable.
+func LoadOAuthTokenFile() (*OAuthTokenFile, error) {
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_OAUTH_TOKEN")); env != "" {
+		return &OAuthTokenFile{
+			AccessToken: env,
+			TokenType:   "Bearer",
+		}, nil
 	}
 	path, err := OAuthTokenPath()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var t OAuthTokenFile
 	if err := json.Unmarshal(data, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// LoadOAuthToken reads the OAuth access token from ~/.invariant/oauth_token.json,
+// or INVARIANT_OAUTH_TOKEN environment variable.
+func LoadOAuthToken() (string, error) {
+	t, err := LoadOAuthTokenFile()
+	if err != nil {
 		return "", err
 	}
 	return t.AccessToken, nil
@@ -82,7 +96,154 @@ const (
 	defaultGoogleAuthURL      = "https://accounts.google.com/o/oauth2/v2/auth"
 	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
 	defaultGoogleDeviceURL    = "https://oauth2.googleapis.com/device/code"
+	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
 )
+
+type oauthLoginOptions struct {
+	clientID     string
+	clientSecret string
+	authURL      string
+	tokenURL     string
+	deviceURL    string
+	userInfoURL  string
+	manualToken  string
+	deviceFlow   bool
+	reuseSaved   bool
+	httpClient   *http.Client
+}
+
+func resolveOAuthOptions(opts oauthLoginOptions) oauthLoginOptions {
+	if opts.clientID == "" {
+		opts.clientID = os.Getenv("INVARIANT_OAUTH_CLIENT_ID")
+		if opts.clientID == "" {
+			opts.clientID = defaultGoogleClientID
+		}
+	}
+	if opts.clientSecret == "" {
+		opts.clientSecret = os.Getenv("INVARIANT_OAUTH_CLIENT_SECRET")
+		if opts.clientSecret == "" {
+			opts.clientSecret = defaultGoogleClientSecret
+		}
+	}
+	if opts.authURL == "" {
+		opts.authURL = os.Getenv("INVARIANT_OAUTH_AUTH_URL")
+		if opts.authURL == "" {
+			opts.authURL = defaultGoogleAuthURL
+		}
+	}
+	if opts.tokenURL == "" {
+		opts.tokenURL = os.Getenv("INVARIANT_OAUTH_TOKEN_URL")
+		if opts.tokenURL == "" {
+			opts.tokenURL = defaultGoogleTokenURL
+		}
+	}
+	if opts.deviceURL == "" {
+		opts.deviceURL = os.Getenv("INVARIANT_OAUTH_DEVICE_URL")
+		if opts.deviceURL == "" {
+			opts.deviceURL = defaultGoogleDeviceURL
+		}
+	}
+	if opts.userInfoURL == "" {
+		opts.userInfoURL = os.Getenv("INVARIANT_OAUTH_USERINFO_URL")
+		if opts.userInfoURL == "" {
+			opts.userInfoURL = defaultGoogleUserInfoURL
+		}
+	}
+	return opts
+}
+
+func validateOAuthCredentials(ctx context.Context, accessToken, userInfoURL string, httpClient *http.Client) (*discovery.NodeIdentity, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, fmt.Errorf("empty OAuth access token")
+	}
+	if userInfoURL == "" {
+		userInfoURL = os.Getenv("INVARIANT_OAUTH_USERINFO_URL")
+		if userInfoURL == "" {
+			userInfoURL = defaultGoogleUserInfoURL
+		}
+	}
+	auth := discovery.NewUserInfoAuthenticator(userInfoURL, httpClient, 5*time.Minute)
+	ident, err := auth.Authenticate(ctx, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("OAuth credential validation failed: %w", err)
+	}
+	if ident == nil || strings.TrimSpace(ident.Email) == "" {
+		return nil, fmt.Errorf("OAuth provider did not return a verified email address")
+	}
+	return ident, nil
+}
+
+func ensureValidatedOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTokenFile, *discovery.NodeIdentity, error) {
+	opts = resolveOAuthOptions(opts)
+
+	// 1. Explicit manual token
+	if strings.TrimSpace(opts.manualToken) != "" {
+		ident, err := validateOAuthCredentials(ctx, opts.manualToken, opts.userInfoURL, opts.httpClient)
+		if err != nil {
+			return nil, nil, err
+		}
+		tf := &OAuthTokenFile{
+			AccessToken: strings.TrimSpace(opts.manualToken),
+			TokenType:   "Bearer",
+			Name:        ident.Name,
+			Email:       ident.Email,
+		}
+		if err := SaveOAuthToken(tf); err != nil {
+			return nil, nil, fmt.Errorf("error saving OAuth token: %w", err)
+		}
+		return tf, ident, nil
+	}
+
+	// 2. Reuse saved OAuth token if valid (when redeeming an invitation without forcing a new flow)
+	if opts.reuseSaved && !opts.deviceFlow {
+		if tf, err := LoadOAuthTokenFile(); err == nil && tf != nil {
+			tok := strings.TrimSpace(tf.AccessToken)
+			notExpired := tf.Expiry.IsZero() || time.Now().Before(tf.Expiry)
+			if tok != "" && !strings.HasPrefix(tok, "inv_at_") && notExpired {
+				if ident, err := validateOAuthCredentials(ctx, tok, opts.userInfoURL, opts.httpClient); err == nil {
+					tf.Email = ident.Email
+					if tf.Name == "" {
+						tf.Name = ident.Name
+					}
+					_ = SaveOAuthToken(tf)
+					return tf, ident, nil
+				}
+			}
+		}
+	}
+
+	// 3. Obtain fresh OAuth token via device or browser flow
+	var tf OAuthTokenFile
+	var err error
+	if opts.deviceFlow {
+		if opts.deviceURL == "" || opts.tokenURL == "" {
+			return nil, nil, fmt.Errorf("--device-url and --token-url are required for device flow (or set INVARIANT_OAUTH_DEVICE_URL)")
+		}
+		tf, err = obtainDeviceOAuthToken(opts.clientID, opts.clientSecret, opts.deviceURL, opts.tokenURL)
+	} else {
+		if opts.authURL == "" || opts.tokenURL == "" {
+			return nil, nil, fmt.Errorf("no OAuth authorization server configured (--auth-url / INVARIANT_OAUTH_AUTH_URL)")
+		}
+		tf, err = obtainBrowserOAuthToken(opts.clientID, opts.clientSecret, opts.authURL, opts.tokenURL)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ident, err := validateOAuthCredentials(ctx, tf.AccessToken, opts.userInfoURL, opts.httpClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	tf.Email = ident.Email
+	if tf.Name == "" {
+		tf.Name = ident.Name
+	}
+	if err := SaveOAuthToken(&tf); err != nil {
+		return nil, nil, fmt.Errorf("error saving OAuth token: %w", err)
+	}
+	return &tf, ident, nil
+}
 
 // openBrowser launches the default system browser for the given URL.
 func openBrowser(targetURL string) error {
@@ -122,99 +283,42 @@ func runLogin(cfg *config.InvariantConfig, args []string) {
 	fs.StringVar(&tokenURL, "token-url", "", "OAuth Token URL")
 	var deviceURL string
 	fs.StringVar(&deviceURL, "device-url", "", "OAuth Device Authorization URL")
+	var userInfoURL string
+	fs.StringVar(&userInfoURL, "userinfo-url", "", "OAuth UserInfo URL")
 
 	_ = fs.Parse(args)
+
+	oauthOpts := oauthLoginOptions{
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		authURL:      authURL,
+		tokenURL:     tokenURL,
+		deviceURL:    deviceURL,
+		userInfoURL:  userInfoURL,
+		manualToken:  manualToken,
+		deviceFlow:   deviceFlow,
+	}
 
 	if invite == "" {
 		invite = os.Getenv("INVARIANT_INVITE")
 	}
 	if invite != "" {
-		runInviteRedeemFlow(cfg, invite, discoveryURL, nodeName)
+		oauthOpts.reuseSaved = true
+		runInviteRedeemFlowWithOAuth(cfg, invite, discoveryURL, nodeName, oauthOpts)
 		return
 	}
 
-	if clientID == "" {
-		clientID = os.Getenv("INVARIANT_OAUTH_CLIENT_ID")
-		if clientID == "" {
-			clientID = defaultGoogleClientID
-		}
-	}
-	if clientSecret == "" {
-		clientSecret = os.Getenv("INVARIANT_OAUTH_CLIENT_SECRET")
-		if clientSecret == "" {
-			clientSecret = defaultGoogleClientSecret
-		}
-	}
-	if authURL == "" {
-		authURL = os.Getenv("INVARIANT_OAUTH_AUTH_URL")
-		if authURL == "" {
-			authURL = defaultGoogleAuthURL
-		}
-	}
-	if tokenURL == "" {
-		tokenURL = os.Getenv("INVARIANT_OAUTH_TOKEN_URL")
-		if tokenURL == "" {
-			tokenURL = defaultGoogleTokenURL
-		}
-	}
-	if deviceURL == "" {
-		deviceURL = os.Getenv("INVARIANT_OAUTH_DEVICE_URL")
-		if deviceURL == "" {
-			deviceURL = defaultGoogleDeviceURL
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	tf, ident, err := ensureValidatedOAuth(ctx, oauthOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
 	}
 
-	// 1. Manual token specification
-	if manualToken != "" {
-		tokenData := &OAuthTokenFile{
-			AccessToken: manualToken,
-			TokenType:   "Bearer",
-		}
-		if err := SaveOAuthToken(tokenData); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving token: %v\n", err)
-			os.Exit(1)
-		}
-		path, _ := OAuthTokenPath()
-		fmt.Printf("Successfully saved user token to %s\n", path)
-		return
-	}
-
-	// 2. Device authorization flow
-	if deviceFlow {
-		if deviceURL == "" || tokenURL == "" {
-			fmt.Fprintf(os.Stderr, "Error: --device-url and --token-url are required for device flow (or set INVARIANT_OAUTH_DEVICE_URL)\n")
-			os.Exit(1)
-		}
-		runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL)
-		return
-	}
-
-	// 3. Interactive browser flow
-	if authURL == "" || tokenURL == "" {
-		// If OAuth server not specified, prompt for manual token input
-		fmt.Printf("No OAuth authorization server configured (--auth-url / INVARIANT_OAUTH_AUTH_URL).\n")
-		fmt.Printf("Enter your OAuth access token directly: ")
-		var inputToken string
-		fmt.Scanln(&inputToken)
-		inputToken = strings.TrimSpace(inputToken)
-		if inputToken == "" {
-			fmt.Fprintf(os.Stderr, "No token provided.\n")
-			os.Exit(1)
-		}
-		tokenData := &OAuthTokenFile{
-			AccessToken: inputToken,
-			TokenType:   "Bearer",
-		}
-		if err := SaveOAuthToken(tokenData); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving token: %v\n", err)
-			os.Exit(1)
-		}
-		path, _ := OAuthTokenPath()
-		fmt.Printf("Successfully saved user token to %s\n", path)
-		return
-	}
-
-	runBrowserLogin(clientID, clientSecret, authURL, tokenURL)
+	path, _ := OAuthTokenPath()
+	fmt.Printf("\nLogin successful! Verified OAuth user %s (%s). Credentials saved to %s\n", ident.Name, tf.Email, path)
 }
 
 type oauthTokenResponse struct {
@@ -230,7 +334,7 @@ func (r *oauthTokenResponse) toTokenFile() OAuthTokenFile {
 	return tf
 }
 
-func runBrowserLogin(clientID, clientSecret, authURL, tokenURL string) {
+func obtainBrowserOAuthToken(clientID, clientSecret, authURL, tokenURL string) (OAuthTokenFile, error) {
 	// PKCE
 	verifierBytes := make([]byte, 32)
 	rand.Read(verifierBytes)
@@ -245,8 +349,7 @@ func runBrowserLogin(clientID, clientSecret, authURL, tokenURL string) {
 	// Listen on dynamic localhost port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start local listener: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("failed to start local listener: %w", err)
 	}
 	defer listener.Close()
 
@@ -307,11 +410,9 @@ func runBrowserLogin(clientID, clientSecret, authURL, tokenURL string) {
 	select {
 	case code = <-codeCh:
 	case err := <-errCh:
-		fmt.Fprintf(os.Stderr, "Authentication failed: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("authentication failed: %w", err)
 	case <-time.After(3 * time.Minute):
-		fmt.Fprintf(os.Stderr, "Login timed out after 3 minutes.\n")
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("login timed out after 3 minutes")
 	}
 
 	// Exchange code for token
@@ -328,34 +429,24 @@ func runBrowserLogin(clientID, clientSecret, authURL, tokenURL string) {
 
 	resp, err := http.PostForm(tokenURL, data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Token exchange failed: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("token exchange failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "Token exchange returned HTTP %d: %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("token exchange returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var tokenResp oauthTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to decode token response: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("failed to decode token response: %w", err)
 	}
 
-	tokenFile := tokenResp.toTokenFile()
-	if err := SaveOAuthToken(&tokenFile); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving token: %v\n", err)
-		os.Exit(1)
-	}
-
-	path, _ := OAuthTokenPath()
-	fmt.Printf("\nLogin successful! Credentials saved to %s\n", path)
+	return tokenResp.toTokenFile(), nil
 }
 
-func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
+func obtainDeviceOAuthToken(clientID, clientSecret, deviceURL, tokenURL string) (OAuthTokenFile, error) {
 	data := url.Values{
 		"client_id": {clientID},
 		"scope":     {"openid profile email"},
@@ -363,15 +454,13 @@ func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
 
 	resp, err := http.PostForm(deviceURL, data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Device authorization failed: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("device authorization failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "Device authorization failed (HTTP %d): %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("device authorization failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
 	var deviceResp struct {
@@ -384,8 +473,7 @@ func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&deviceResp); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to decode device response: %v\n", err)
-		os.Exit(1)
+		return OAuthTokenFile{}, fmt.Errorf("failed to decode device response: %w", err)
 	}
 
 	urlToOpen := deviceResp.VerificationURIComplete
@@ -420,11 +508,7 @@ func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
 			var tokenResp oauthTokenResponse
 			_ = json.NewDecoder(pollResp.Body).Decode(&tokenResp)
 			pollResp.Body.Close()
-			tokenFile := tokenResp.toTokenFile()
-			_ = SaveOAuthToken(&tokenFile)
-			path, _ := OAuthTokenPath()
-			fmt.Printf("\nLogin successful! Credentials saved to %s\n", path)
-			return
+			return tokenResp.toTokenFile(), nil
 		}
 
 		var errResp struct {
@@ -438,11 +522,9 @@ func runDeviceLogin(clientID, clientSecret, deviceURL, tokenURL string) {
 		} else if errResp.Error == "slow_down" {
 			interval += 5 * time.Second
 		} else {
-			fmt.Fprintf(os.Stderr, "Authentication error: %s\n", errResp.Error)
-			os.Exit(1)
+			return OAuthTokenFile{}, fmt.Errorf("authentication error: %s", errResp.Error)
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Device authorization timed out.\n")
-	os.Exit(1)
+	return OAuthTokenFile{}, fmt.Errorf("device authorization timed out")
 }

@@ -636,15 +636,17 @@ func (s *DiscoveryServer) handleVerifyServiceKey(w http.ResponseWriter, r *http.
 }
 
 type createInvitationRequest struct {
-	Name string    `json:"name"`
-	Role TokenRole `json:"role,omitempty"`
-	TTL  string    `json:"ttl,omitempty"`
+	Name  string    `json:"name"`
+	Email string    `json:"email,omitempty"`
+	Role  TokenRole `json:"role,omitempty"`
+	TTL   string    `json:"ttl,omitempty"`
 }
 
 type redeemInvitationRequest struct {
-	Code      string       `json:"code"`
-	PublicKey string       `json:"public_key,omitempty"`
-	Identity  NodeIdentity `json:"identity"`
+	Code       string       `json:"code"`
+	PublicKey  string       `json:"public_key,omitempty"`
+	OAuthToken string       `json:"oauth_token,omitempty"`
+	Identity   NodeIdentity `json:"identity"`
 }
 
 func (s *DiscoveryServer) peerRateLimitKey(r *http.Request) string {
@@ -705,6 +707,9 @@ func (s *DiscoveryServer) handleCreateInvitation(w http.ResponseWriter, r *http.
 	}
 	defer r.Body.Close()
 
+	if strings.TrimSpace(req.Name) == "" && strings.TrimSpace(req.Email) != "" {
+		req.Name = strings.TrimSpace(req.Email)
+	}
 	if strings.TrimSpace(req.Name) == "" {
 		http.Error(w, "Missing invitation name", http.StatusBadRequest)
 		return
@@ -734,7 +739,7 @@ func (s *DiscoveryServer) handleCreateInvitation(w http.ResponseWriter, r *http.
 		creator.Name = "admin"
 	}
 
-	inv, err := s.invitations.CreateInvitation(r.Context(), req.Name, role, creator, ttl)
+	inv, err := s.invitations.CreateInvitation(r.Context(), req.Name, role, creator, ttl, req.Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -788,13 +793,39 @@ func (s *DiscoveryServer) handleRedeemInvitation(w http.ResponseWriter, r *http.
 		}
 	}
 
+	// If an OAuth Authenticator is configured or an OAuth Bearer token is supplied, validate OAuth credentials
+	oauthToken := strings.TrimSpace(req.OAuthToken)
+	if oauthToken == "" {
+		authHeader := r.Header.Get("Authorization")
+		oauthToken = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	}
+	if s.oauthAuth != nil {
+		if oauthToken != "" {
+			ident, err := s.oauthAuth.Authenticate(r.Context(), oauthToken)
+			if err != nil || ident == nil {
+				s.recordFailedRedemption(peerRLKey)
+				http.Error(w, "Unauthorized: invalid OAuth credentials", http.StatusUnauthorized)
+				return
+			}
+			req.Identity.Email = ident.Email
+			if req.Identity.Name == "" {
+				req.Identity.Name = ident.Name
+			}
+		} else {
+			// Do not trust unverified client-supplied email when an OAuth authenticator is configured
+			req.Identity.Email = ""
+		}
+	}
+
 	tokRec, err := s.invitations.RedeemInvitation(r.Context(), req.Code, req.PublicKey, req.Identity)
 	if err != nil {
 		s.recordFailedRedemption(peerRLKey)
 		switch {
 		case errors.Is(err, ErrInvitationNotFound):
 			http.Error(w, err.Error(), http.StatusNotFound)
-		case errors.Is(err, ErrInvitationUsed), errors.Is(err, ErrInvitationExpired), errors.Is(err, ErrInvitationRevoked):
+		case errors.Is(err, ErrInvitationOAuthRequired):
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+		case errors.Is(err, ErrInvitationUsed), errors.Is(err, ErrInvitationExpired), errors.Is(err, ErrInvitationRevoked), errors.Is(err, ErrInvitationEmailMismatch):
 			http.Error(w, err.Error(), http.StatusForbidden)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)

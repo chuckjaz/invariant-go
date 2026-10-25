@@ -381,11 +381,6 @@ func ensureProvisionAdminToken(ctx context.Context, globalCfg *config.InvariantC
 		return "", fmt.Errorf("failed to save admin access token to %s: %w", tokenPath, err)
 	}
 	_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), discoveryURL)
-	_ = SaveOAuthToken(&OAuthTokenFile{
-		AccessToken: rec.Token,
-		TokenType:   "Bearer",
-		Name:        rec.Name,
-	})
 	log.Printf("Redeemed bootstrap admin invitation and saved admin token to %s", tokenPath)
 	return rec.Token, nil
 }

@@ -514,8 +514,8 @@ func (d *FileSystemDiscovery) RestoreServiceKey(ctx context.Context, rec Service
 	return d.keyStore.Put(rec.Key, rec, nil)
 }
 
-func (d *FileSystemDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
-	inv, err := GenerateInvitation(name, role, creator, ttl)
+func (d *FileSystemDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration, email ...string) (*InvitationRecord, error) {
+	inv, err := GenerateInvitation(name, role, creator, ttl, email...)
 	if err != nil {
 		return nil, err
 	}
@@ -569,6 +569,20 @@ func (d *FileSystemDiscovery) RedeemInvitation(ctx context.Context, code string,
 	}
 	if time.Now().After(inv.ExpiresAt) {
 		return nil, ErrInvitationExpired
+	}
+
+	identEmail := strings.TrimSpace(identity.Email)
+	invEmail := strings.TrimSpace(inv.Email)
+	if inv.Role == RoleUser && identEmail == "" {
+		return nil, ErrInvitationOAuthRequired
+	}
+	if invEmail != "" {
+		if identEmail == "" {
+			return nil, ErrInvitationOAuthRequired
+		}
+		if !strings.EqualFold(invEmail, identEmail) {
+			return nil, ErrInvitationEmailMismatch
+		}
 	}
 
 	name := inv.Name

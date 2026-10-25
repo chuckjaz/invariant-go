@@ -401,8 +401,8 @@ func (d *InMemoryDiscovery) RestoreServiceKey(ctx context.Context, rec ServiceKe
 	return nil
 }
 
-func (d *InMemoryDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
-	inv, err := GenerateInvitation(name, role, creator, ttl)
+func (d *InMemoryDiscovery) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration, email ...string) (*InvitationRecord, error) {
+	inv, err := GenerateInvitation(name, role, creator, ttl, email...)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +453,23 @@ func (d *InMemoryDiscovery) RedeemInvitation(ctx context.Context, code string, p
 	if time.Now().After(inv.ExpiresAt) {
 		d.mu.Unlock()
 		return nil, ErrInvitationExpired
+	}
+
+	identEmail := strings.TrimSpace(identity.Email)
+	invEmail := strings.TrimSpace(inv.Email)
+	if inv.Role == RoleUser && identEmail == "" {
+		d.mu.Unlock()
+		return nil, ErrInvitationOAuthRequired
+	}
+	if invEmail != "" {
+		if identEmail == "" {
+			d.mu.Unlock()
+			return nil, ErrInvitationOAuthRequired
+		}
+		if !strings.EqualFold(invEmail, identEmail) {
+			d.mu.Unlock()
+			return nil, ErrInvitationEmailMismatch
+		}
 	}
 
 	name := inv.Name

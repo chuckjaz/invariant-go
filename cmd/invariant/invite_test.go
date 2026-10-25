@@ -24,38 +24,86 @@ func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
 	t.Setenv("INVARIANT_ACCESS_TOKEN", "")
 	t.Setenv("INVARIANT_OAUTH_TOKEN", "")
 
+	// Mock OAuth2 UserInfo endpoint
+	userInfoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		switch auth {
+		case "Bearer valid-alice-oauth-token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sub":"123","name":"Alice","email":"alice@example.com"}`)
+		case "Bearer valid-bob-oauth-token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sub":"456","name":"Bob","email":"bob@example.com"}`)
+		default:
+			http.Error(w, "invalid oauth token", http.StatusUnauthorized)
+		}
+	}))
+	defer userInfoSrv.Close()
+
 	d := discovery.NewInMemoryDiscovery()
-	srv := discovery.NewDiscoveryServer(d).WithRequireAuth(true)
+	srv := discovery.NewDiscoveryServer(d).
+		WithRequireAuth(true).
+		WithOAuthAuthenticator(discovery.NewUserInfoAuthenticator(userInfoSrv.URL, userInfoSrv.Client(), time.Minute))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
+	d.WithControlPlaneURL(ts.URL)
+	srv.WithControlPlaneURL(ts.URL)
 
 	ctx := context.Background()
-	bootstrapPath := filepath.Join(tmpHome, "bootstrap.invite")
-	inv, _, err := discovery.EnsureBootstrapInvitation(ctx, d, 15*time.Minute, bootstrapPath)
+	inv, err := d.CreateInvitation(ctx, "alice", discovery.RoleUser, discovery.NodeIdentity{Name: "admin"}, 15*time.Minute, "alice@example.com")
 	if err != nil || inv == nil {
-		t.Fatalf("EnsureBootstrapInvitation failed: %v", err)
+		t.Fatalf("CreateInvitation failed: %v", err)
 	}
 
 	cfg := &config.InvariantConfig{
 		Discovery: ts.URL,
 	}
 
-	// Redeem bootstrap invitation via CLI helper using local HTTP client
-	pk := getClientKey()
-	unauthClient := discovery.NewClient(ts.URL, ts.Client())
-	rec, err := unauthClient.RedeemInvitation(ctx, inv.Code, pk.Private.Public().String(), discovery.NodeIdentity{Name: "cli-test"})
-	if err != nil {
-		t.Fatalf("RedeemInvitation failed: %v", err)
+	// 1. Invalid OAuth credentials must fail
+	_, _, err = redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+		manualToken: "invalid-oauth-token",
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err == nil {
+		t.Fatalf("expected redeemInvitationWithOAuth with invalid OAuth token to fail")
 	}
 
-	tokenPath := itp.DefaultTokenPath("client")
-	if err := itp.SaveAccessToken(tokenPath, rec.Token); err != nil {
-		t.Fatalf("SaveAccessToken failed: %v", err)
+	// 2. Valid OAuth credentials with mismatched email (bob@example.com vs alice@example.com) must fail
+	_, _, err = redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+		manualToken: "valid-bob-oauth-token",
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err == nil {
+		t.Fatalf("expected redeemInvitationWithOAuth with mismatched OAuth email to fail")
+	}
+
+	// 3. Valid OAuth credentials with matching email (alice@example.com) must succeed
+	rec, _, err := redeemInvitationWithOAuth(ctx, cfg, inv.Code, ts.URL, "", oauthLoginOptions{
+		manualToken: "valid-alice-oauth-token",
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("redeemInvitationWithOAuth with matching OAuth email failed: %v", err)
+	}
+	if rec.Email != "alice@example.com" {
+		t.Fatalf("expected redeemed token email 'alice@example.com', got %q", rec.Email)
 	}
 
 	resolved := resolveUserToken(cfg)
 	if resolved != rec.Token {
 		t.Fatalf("expected resolveUserToken to return %q, got %q", rec.Token, resolved)
+	}
+
+	// Verify ~/.invariant/oauth_token.json retains the OAuth token and verified email
+	savedOAuth, err := LoadOAuthTokenFile()
+	if err != nil {
+		t.Fatalf("LoadOAuthTokenFile failed: %v", err)
+	}
+	if savedOAuth.AccessToken != "valid-alice-oauth-token" || savedOAuth.Email != "alice@example.com" {
+		t.Fatalf("unexpected saved OAuthTokenFile: %+v", savedOAuth)
 	}
 }
 

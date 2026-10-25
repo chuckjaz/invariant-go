@@ -170,9 +170,12 @@ func TestServerRolesPinningAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin CreateInvitation (service) failed: %v", err)
 	}
-	usrInvite, err := adminClient.CreateInvitation(ctx, "alice", RoleUser, NodeIdentity{}, 10*time.Minute)
+	usrInvite, err := adminClient.CreateInvitation(ctx, "alice", RoleUser, NodeIdentity{}, 10*time.Minute, "alice@example.com")
 	if err != nil {
 		t.Fatalf("admin CreateInvitation (user) failed: %v", err)
+	}
+	if usrInvite.Email != "alice@example.com" {
+		t.Fatalf("expected user invitation email to be 'alice@example.com', got %q", usrInvite.Email)
 	}
 
 	// 7. Service redeems service invitation
@@ -211,9 +214,18 @@ func TestServerRolesPinningAndRevocation(t *testing.T) {
 		t.Fatalf("expected service role to be forbidden from creating invitations")
 	}
 
-	// 8. User redeems user invitation
+	// 8. User redeems user invitation:
+	// 8a. Without OAuth email -> rejected (401)
 	peerResolver.SetPeer(userKey, true)
-	usrTokRec, err := unauthClient.RedeemInvitation(ctx, usrInvite.Code, userKey, NodeIdentity{Name: "alice"})
+	if _, err := unauthClient.RedeemInvitation(ctx, usrInvite.Code, userKey, NodeIdentity{Name: "alice"}); err == nil {
+		t.Fatalf("expected user RedeemInvitation without OAuth email to fail")
+	}
+	// 8b. With mismatched OAuth email -> rejected (403) and does not consume invitation
+	if _, err := unauthClient.RedeemInvitation(ctx, usrInvite.Code, userKey, NodeIdentity{Name: "bob", Email: "bob@example.com"}); err == nil {
+		t.Fatalf("expected user RedeemInvitation with mismatched OAuth email to fail")
+	}
+	// 8c. With matching OAuth email -> succeeds
+	usrTokRec, err := unauthClient.RedeemInvitation(ctx, usrInvite.Code, userKey, NodeIdentity{Name: "alice", Email: "alice@example.com"})
 	if err != nil {
 		t.Fatalf("user RedeemInvitation failed: %v", err)
 	}

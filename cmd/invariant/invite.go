@@ -64,22 +64,41 @@ func runInviteCreate(cfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("invite create", flag.ExitOnError)
 	var roleStr string
 	fs.StringVar(&roleStr, "role", "user", "Role to grant upon redemption: user, service, or admin")
+	var nameFlag string
+	fs.StringVar(&nameFlag, "name", "", "Name for the invited user or service")
+	var emailFlag string
+	fs.StringVar(&emailFlag, "email", "", "Email address for user invitations (must match OAuth2 email on login)")
 	var ttl time.Duration
 	fs.DurationVar(&ttl, "ttl", discovery.DefaultInvitationTTL, "Invitation expiration duration (e.g. 15m, 1h)")
 	var discoveryURL string
 	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL")
 	_ = fs.Parse(args)
 
+	name := strings.TrimSpace(nameFlag)
+	email := strings.TrimSpace(emailFlag)
 	nameArgs := fs.Args()
-	if len(nameArgs) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: invariant invite create [--role user|service|admin] [--ttl 15m] <name>\n")
+	if name == "" && len(nameArgs) > 0 {
+		name = strings.TrimSpace(nameArgs[0])
+	}
+	if name == "" && email != "" {
+		name = email
+	}
+	if name == "" {
+		fmt.Fprintf(os.Stderr, "Usage: invariant invite create [--role user|service|admin] [--name <name>] [--email <email>] [--ttl 15m] [<name>]\n")
 		os.Exit(1)
 	}
-	name := nameArgs[0]
 
 	role := discovery.TokenRole(strings.ToLower(strings.TrimSpace(roleStr)))
 	if !discovery.ValidRole(role) {
 		fmt.Fprintf(os.Stderr, "Invalid role %q: must be user, service, or admin\n", roleStr)
+		os.Exit(1)
+	}
+
+	if email == "" && role != discovery.RoleService && strings.Contains(name, "@") {
+		email = name
+	}
+	if role == discovery.RoleUser && email == "" {
+		fmt.Fprintf(os.Stderr, "Error: --email is required when creating a user invitation\n")
 		os.Exit(1)
 	}
 
@@ -92,7 +111,7 @@ func runInviteCreate(cfg *config.InvariantConfig, args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	inv, err := client.CreateInvitation(ctx, name, role, discovery.NodeIdentity{}, ttl)
+	inv, err := client.CreateInvitation(ctx, name, role, discovery.NodeIdentity{}, ttl, email)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create invitation: %v\n", err)
 		os.Exit(1)
@@ -102,6 +121,9 @@ func runInviteCreate(cfg *config.InvariantConfig, args []string) {
 	fmt.Println("Created single-use invitation successfully!")
 	fmt.Printf("  ID:            %s\n", inv.ID)
 	fmt.Printf("  Name:          %s\n", inv.Name)
+	if inv.Email != "" {
+		fmt.Printf("  Email:         %s\n", inv.Email)
+	}
 	fmt.Printf("  Role:          %s\n", inv.Role)
 	if inv.ControlPlaneURL != "" {
 		fmt.Printf("  Control Plane: %s\n", inv.ControlPlaneURL)
@@ -122,6 +144,10 @@ func runInviteRedeem(cfg *config.InvariantConfig, args []string) {
 	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL")
 	var nodeName string
 	fs.StringVar(&nodeName, "name", "", "Node/user name")
+	var manualToken string
+	fs.StringVar(&manualToken, "token", "", "Manually specify an OAuth access token")
+	var userInfoURL string
+	fs.StringVar(&userInfoURL, "userinfo-url", "", "OAuth UserInfo URL")
 	_ = fs.Parse(args)
 
 	rem := fs.Args()
@@ -130,10 +156,41 @@ func runInviteRedeem(cfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	runInviteRedeemFlow(cfg, rem[0], discoveryURL, nodeName)
+	runInviteRedeemFlowWithOAuth(cfg, rem[0], discoveryURL, nodeName, oauthLoginOptions{
+		manualToken: manualToken,
+		userInfoURL: userInfoURL,
+		reuseSaved:  true,
+	})
 }
 
 func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string) {
+	runInviteRedeemFlowWithOAuth(cfg, inviteCodeOrFile, discoveryURL, nodeName, oauthLoginOptions{
+		reuseSaved: true,
+	})
+}
+
+func runInviteRedeemFlowWithOAuth(cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string, oauthOpts oauthLoginOptions) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	rec, tokenPath, err := redeemInvitationWithOAuth(ctx, cfg, inviteCodeOrFile, discoveryURL, nodeName, oauthOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to redeem invitation: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Invitation redeemed successfully!")
+	fmt.Printf("  Token ID:   %s\n", rec.ID)
+	fmt.Printf("  Name:       %s\n", rec.Name)
+	if rec.Email != "" {
+		fmt.Printf("  Email:      %s\n", rec.Email)
+	}
+	fmt.Printf("  Role:       %s\n", rec.Role)
+	fmt.Printf("  Public Key: %s\n", rec.PublicKey)
+	fmt.Printf("  Saved To:   %s\n", tokenPath)
+}
+
+func redeemInvitationWithOAuth(ctx context.Context, cfg *config.InvariantConfig, inviteCodeOrFile, discoveryURL, nodeName string, oauthOpts oauthLoginOptions) (*discovery.AccessTokenRecord, string, error) {
 	code := strings.TrimSpace(inviteCodeOrFile)
 	if !strings.HasPrefix(code, "inv_invite_") {
 		if data, err := os.ReadFile(code); err == nil {
@@ -141,8 +198,13 @@ func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discover
 		}
 	}
 	if code == "" {
-		fmt.Fprintf(os.Stderr, "Error: invitation code is empty\n")
-		os.Exit(1)
+		return nil, "", fmt.Errorf("invitation code is empty")
+	}
+
+	// Validate OAuth credentials first so we have a verified user email before redeeming the invitation
+	tf, ident, err := ensureValidatedOAuth(ctx, oauthOpts)
+	if err != nil {
+		return nil, "", fmt.Errorf("OAuth authentication required to redeem invitation: %w", err)
 	}
 
 	_, embeddedURL := discovery.ParseInvitationCode(code)
@@ -157,6 +219,9 @@ func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discover
 	}
 
 	if nodeName == "" {
+		nodeName = ident.Name
+	}
+	if nodeName == "" {
 		nodeName = os.Getenv("USER")
 		if nodeName == "" {
 			nodeName = "cli"
@@ -168,22 +233,27 @@ func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discover
 	if cfg != nil {
 		derpMapURL = cfg.DERPMapURL
 	}
-	httpClient := itp.NewHTTPClient(pk.Private, "", itp.WithDERPMapURL(derpMapURL))
-	client := discovery.NewClient(discoveryURL, httpClient)
+	httpClient := itp.NewHTTPClient(pk.Private, tf.AccessToken, itp.WithDERPMapURL(derpMapURL))
+	client := discovery.NewClient(discoveryURL, httpClient).WithUserToken(tf.AccessToken)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	redeemCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	rec, err := client.RedeemInvitation(ctx, code, pk.Private.Public().String(), discovery.NodeIdentity{Name: nodeName})
+	rec, err := client.RedeemInvitation(redeemCtx, code, pk.Private.Public().String(), discovery.NodeIdentity{
+		Name:  nodeName,
+		Email: ident.Email,
+	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to redeem invitation: %v\n", err)
-		os.Exit(1)
+		return nil, "", err
+	}
+
+	if rec.Email != "" && !strings.EqualFold(strings.TrimSpace(rec.Email), strings.TrimSpace(ident.Email)) {
+		return nil, "", fmt.Errorf("%w: invitation email %q does not match OAuth email %q", discovery.ErrInvitationEmailMismatch, rec.Email, ident.Email)
 	}
 
 	tokenPath := itp.DefaultTokenPath("client")
 	if err := itp.SaveAccessToken(tokenPath, rec.Token); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving access token to %s: %v\n", tokenPath, err)
-		os.Exit(1)
+		return nil, "", fmt.Errorf("error saving access token to %s: %w", tokenPath, err)
 	}
 	cpURL := rec.ControlPlaneURL
 	if cpURL == "" {
@@ -193,23 +263,7 @@ func runInviteRedeemFlow(cfg *config.InvariantConfig, inviteCodeOrFile, discover
 		_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), cpURL)
 	}
 
-	var expiry time.Time
-	if rec.ExpiresAt != nil {
-		expiry = *rec.ExpiresAt
-	}
-	_ = SaveOAuthToken(&OAuthTokenFile{
-		AccessToken: rec.Token,
-		TokenType:   "Bearer",
-		Expiry:      expiry,
-		Name:        rec.Name,
-	})
-
-	fmt.Println("Invitation redeemed successfully!")
-	fmt.Printf("  Token ID:   %s\n", rec.ID)
-	fmt.Printf("  Name:       %s\n", rec.Name)
-	fmt.Printf("  Role:       %s\n", rec.Role)
-	fmt.Printf("  Public Key: %s\n", rec.PublicKey)
-	fmt.Printf("  Saved To:   %s\n", tokenPath)
+	return rec, tokenPath, nil
 }
 
 func runInviteList(cfg *config.InvariantConfig, args []string) {

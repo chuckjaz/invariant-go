@@ -15,14 +15,16 @@ import (
 )
 
 var (
-	ErrInvitationNotFound  = errors.New("invitation not found")
-	ErrInvitationUsed      = errors.New("invitation has already been used")
-	ErrInvitationExpired   = errors.New("invitation has expired")
-	ErrInvitationRevoked   = errors.New("invitation has been revoked")
-	ErrAccessTokenNotFound = errors.New("access token not found")
-	ErrAccessTokenRevoked  = errors.New("access token has been revoked")
-	ErrAccessTokenExpired  = errors.New("access token has expired")
-	ErrInvalidRole         = errors.New("invalid role: must be user, service, or admin")
+	ErrInvitationNotFound      = errors.New("invitation not found")
+	ErrInvitationUsed          = errors.New("invitation has already been used")
+	ErrInvitationExpired       = errors.New("invitation has expired")
+	ErrInvitationRevoked       = errors.New("invitation has been revoked")
+	ErrInvitationOAuthRequired = errors.New("user invitation requires OAuth2 authentication with a verified email")
+	ErrInvitationEmailMismatch = errors.New("authenticated OAuth email does not match invitation email")
+	ErrAccessTokenNotFound     = errors.New("access token not found")
+	ErrAccessTokenRevoked      = errors.New("access token has been revoked")
+	ErrAccessTokenExpired      = errors.New("access token has expired")
+	ErrInvalidRole             = errors.New("invalid role: must be user, service, or admin")
 )
 
 // TokenRole specifies the authorization scope of an invitation and its resulting access token.
@@ -155,7 +157,7 @@ func (r AccessTokenRecord) Masked() AccessTokenRecord {
 }
 
 // GenerateInvitation creates a new high-entropy (256-bit) single-use InvitationRecord.
-func GenerateInvitation(name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
+func GenerateInvitation(name string, role TokenRole, creator NodeIdentity, ttl time.Duration, email ...string) (*InvitationRecord, error) {
 	if role == "" {
 		role = RoleUser
 	}
@@ -164,6 +166,14 @@ func GenerateInvitation(name string, role TokenRole, creator NodeIdentity, ttl t
 	}
 	if ttl <= 0 {
 		ttl = DefaultInvitationTTL
+	}
+
+	invEmail := ""
+	if len(email) > 0 {
+		invEmail = strings.TrimSpace(email[0])
+	}
+	if invEmail == "" && role != RoleService && strings.Contains(name, "@") {
+		invEmail = strings.TrimSpace(name)
 	}
 
 	codeBytes := make([]byte, 32) // 256 bits of CSPRNG entropy
@@ -183,6 +193,7 @@ func GenerateInvitation(name string, role TokenRole, creator NodeIdentity, ttl t
 		ID:        id,
 		Code:      code,
 		Name:      name,
+		Email:     invEmail,
 		Role:      role,
 		CreatedBy: creator,
 		CreatedAt: now,
@@ -227,7 +238,7 @@ func GenerateAccessToken(name, email string, role TokenRole, publicKey, invitati
 
 // InvitationManager manages creation, redemption, listing, and revocation of invitations and access tokens.
 type InvitationManager interface {
-	CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error)
+	CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration, email ...string) (*InvitationRecord, error)
 	RedeemInvitation(ctx context.Context, code string, publicKey string, identity NodeIdentity) (*AccessTokenRecord, error)
 	ListInvitations(ctx context.Context) ([]InvitationRecord, error)
 	RevokeInvitation(ctx context.Context, codeOrID string, revoker NodeIdentity) error

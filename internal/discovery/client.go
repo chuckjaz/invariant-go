@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -302,10 +303,13 @@ func (c *Client) RevokeServiceKey(ctx context.Context, keyOrID string, revoker N
 }
 
 // CreateInvitation creates a new invitation code on Discovery.
-func (c *Client) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration) (*InvitationRecord, error) {
+func (c *Client) CreateInvitation(ctx context.Context, name string, role TokenRole, creator NodeIdentity, ttl time.Duration, email ...string) (*InvitationRecord, error) {
 	reqBody := createInvitationRequest{
 		Name: name,
 		Role: role,
+	}
+	if len(email) > 0 {
+		reqBody.Email = strings.TrimSpace(email[0])
 	}
 	if ttl > 0 {
 		reqBody.TTL = ttl.String()
@@ -356,6 +360,9 @@ func (c *Client) RedeemInvitation(ctx context.Context, code string, publicKey st
 		PublicKey: publicKey,
 		Identity:  identity,
 	}
+	if c.token != "" {
+		reqBody.OAuthToken = c.token
+	}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
@@ -366,6 +373,9 @@ func (c *Client) RedeemInvitation(ctx context.Context, code string, publicKey st
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
