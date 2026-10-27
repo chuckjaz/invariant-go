@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -18,11 +19,19 @@ import (
 )
 
 func runStatus(globalCfg *config.InvariantConfig, args []string) {
-	if globalCfg.Discovery == "" {
-		log.Fatalf("Discovery service address is not configured in ~/.invariant/config.yaml")
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	var discoveryURL string
+	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL")
+	_ = fs.Parse(args)
+
+	if discoveryURL == "" && globalCfg != nil {
+		discoveryURL = globalCfg.Discovery
+	}
+	if discoveryURL == "" {
+		log.Fatalf("Discovery service address is not configured")
 	}
 
-	client := newDiscoveryClient(globalCfg.Discovery, globalCfg)
+	client := newDiscoveryClient(discoveryURL, globalCfg)
 	httpClient := newHTTPClient(globalCfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

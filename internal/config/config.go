@@ -92,24 +92,24 @@ func Load() (*InvariantConfig, error) {
 		}
 	}
 
-	if cfg.Discovery == "" {
-		cfg.Discovery = os.Getenv("INVARIANT_DISCOVERY")
-	}
-	if cfg.Discovery == "" {
-		if keysDir, err := KeysDir(); err == nil {
-			if discBytes, err := os.ReadFile(filepath.Join(keysDir, "client.discovery")); err == nil {
-				cfg.Discovery = strings.TrimSpace(string(discBytes))
+	if keysDir, err := KeysDir(); err == nil {
+		if discBytes, err := os.ReadFile(filepath.Join(keysDir, "client.discovery")); err == nil {
+			if disc := strings.TrimSpace(string(discBytes)); disc != "" {
+				cfg.Discovery = disc
 			}
 		}
 	}
-	if cfg.AccessToken == "" {
-		cfg.AccessToken = os.Getenv("INVARIANT_ACCESS_TOKEN")
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_DISCOVERY")); env != "" {
+		cfg.Discovery = env
 	}
-	if cfg.ServiceKey == "" {
-		cfg.ServiceKey = os.Getenv("INVARIANT_SERVICE_KEY")
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_ACCESS_TOKEN")); env != "" {
+		cfg.AccessToken = env
 	}
-	if cfg.OAuthToken == "" {
-		cfg.OAuthToken = os.Getenv("INVARIANT_OAUTH_TOKEN")
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_SERVICE_KEY")); env != "" {
+		cfg.ServiceKey = env
+	}
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_OAUTH_TOKEN")); env != "" {
+		cfg.OAuthToken = env
 	}
 
 	return &cfg, nil

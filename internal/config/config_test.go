@@ -102,3 +102,48 @@ func TestLoad_InvalidYAML(t *testing.T) {
 		t.Errorf("Expected error loading invalid YAML, got nil")
 	}
 }
+
+func TestLoad_DiscoveryPrecedence(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("INVARIANT_DISCOVERY", "")
+
+	configDir, err := ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir failed: %v", err)
+	}
+	keysDir, err := KeysDir()
+	if err != nil {
+		t.Fatalf("KeysDir failed: %v", err)
+	}
+
+	yamlContent := "discovery: http://yaml-discovery:3003\n"
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write config.yaml: %v", err)
+	}
+
+	// 1. Redeemed client.discovery overrides config.yaml
+	redeemedURL := "itp://redeemed-discovery"
+	if err := os.WriteFile(filepath.Join(keysDir, "client.discovery"), []byte(redeemedURL+"\n"), 0600); err != nil {
+		t.Fatalf("Failed to write client.discovery: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Discovery != redeemedURL {
+		t.Errorf("Expected redeemed discovery URL %q to override config.yaml, got %q", redeemedURL, cfg.Discovery)
+	}
+
+	// 2. INVARIANT_DISCOVERY environment variable overrides both
+	envURL := "http://env-discovery:3003"
+	t.Setenv("INVARIANT_DISCOVERY", envURL)
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Discovery != envURL {
+		t.Errorf("Expected INVARIANT_DISCOVERY %q to override client.discovery, got %q", envURL, cfg.Discovery)
+	}
+}

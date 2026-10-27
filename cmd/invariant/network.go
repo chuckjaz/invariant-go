@@ -37,11 +37,11 @@ func resolveUserToken(cfg *config.InvariantConfig) string {
 	if tok := os.Getenv("INVARIANT_ACCESS_TOKEN"); tok != "" {
 		return tok
 	}
-	if cfg != nil && cfg.AccessToken != "" {
-		return cfg.AccessToken
-	}
 	if tok, err := itp.LoadAccessToken(itp.DefaultTokenPath("client")); err == nil && tok != "" {
 		return tok
+	}
+	if cfg != nil && cfg.AccessToken != "" {
+		return cfg.AccessToken
 	}
 	if tok, err := LoadOAuthToken(); err == nil && tok != "" {
 		return tok
