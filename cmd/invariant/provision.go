@@ -236,9 +236,12 @@ func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, bin
 		return nil, "", err
 	}
 
-	args := make([]string, 0, len(sc.Args)*2)
+	args := make([]string, 0, len(sc.Args)*2+1)
 	for k, v := range sc.Args {
 		args = append(args, fmt.Sprintf("--%s=%s", k, v))
+	}
+	if _, hasLog := sc.Args["log"]; !hasLog {
+		args = append(args, "--log")
 	}
 
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
@@ -249,8 +252,8 @@ func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, bin
 	}
 
 	pr, pw := io.Pipe()
-	cmd.Stdout = io.MultiWriter(os.Stdout, pw)
-	cmd.Stderr = io.MultiWriter(os.Stderr, pw)
+	cmd.Stdout = io.MultiWriter(log.Writer(), pw)
+	cmd.Stderr = io.MultiWriter(log.Writer(), pw)
 
 	urlCh := make(chan string, 1)
 	var once sync.Once

@@ -2,6 +2,8 @@ package itp
 
 import (
 	"context"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/tailscale/tailcat"
 	"tailscale.com/types/key"
+	"tailscale.com/types/logger"
 )
 
 // Transport is an http.RoundTripper that handles itp:// and tailcat:// URLs
@@ -78,9 +81,15 @@ func (t *Transport) getOrCreateClient(tcAddr tailcat.Addr) *tailcat.Client {
 		return c
 	}
 
+	logf := logger.Logf(log.Printf)
+	if log.Writer() == io.Discard {
+		logf = logger.Discard
+	}
+
 	c := &tailcat.Client{
 		Server:     tcAddr,
 		Key:        t.ClientKey,
+		Logf:       logf,
 		DERPMapURL: t.DERPMapURL,
 	}
 	t.clients[tcAddr] = c

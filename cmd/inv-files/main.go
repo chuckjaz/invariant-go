@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -45,7 +46,13 @@ func main() {
 	flag.StringVar(&derpMapURL, "derp-map", "", "URL to fetch custom DERP map from for ITP")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
+	var enableLog bool
+	flag.BoolVar(&enableLog, "log", false, "Enable logging output")
 	flag.Parse()
+
+	if !enableLog {
+		log.SetOutput(io.Discard)
+	}
 
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")

@@ -2,13 +2,43 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"strings"
 
 	"github.com/chuckjaz/invariant-go/internal/config"
 )
 
+func extractLogFlag(args []string) (filtered []string, logVal bool, logSet bool) {
+	filtered = make([]string, 0, len(args))
+	for i, arg := range args {
+		if arg == "--" {
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		if arg == "-log" || arg == "--log" {
+			logVal = true
+			logSet = true
+			continue
+		}
+		if after, ok := strings.CutPrefix(arg, "-log="); ok {
+			logVal = after == "1" || strings.EqualFold(after, "true")
+			logSet = true
+			continue
+		}
+		if after, ok := strings.CutPrefix(arg, "--log="); ok {
+			logVal = after == "1" || strings.EqualFold(after, "true")
+			logSet = true
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered, logVal, logSet
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: invariant <command> [options]\n\n")
+	fmt.Fprintf(os.Stderr, "Usage: invariant [-log] <command> [options]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  provision   Provision discovery and service tokens for a services.yaml configuration\n")
 	fmt.Fprintf(os.Stderr, "  start       Start invariant services from configuration\n")
@@ -33,7 +63,8 @@ func usage() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	args, logFlag, logSet := extractLogFlag(os.Args[1:])
+	if len(args) < 1 {
 		usage()
 	}
 
@@ -42,48 +73,54 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 		os.Exit(1)
 	}
+	if logSet {
+		cfg.Log = logFlag
+	}
+	if !cfg.Log {
+		log.SetOutput(io.Discard)
+	}
 
-	switch os.Args[1] {
+	switch args[0] {
 	case "provision":
-		runProvision(cfg, os.Args[2:])
+		runProvision(cfg, args[1:])
 	case "start":
-		runStart(cfg, os.Args[2:])
+		runStart(cfg, args[1:])
 	case "slot":
-		runSlot(cfg, os.Args[2:])
+		runSlot(cfg, args[1:])
 	case "name":
-		runName(cfg, os.Args[2:])
+		runName(cfg, args[1:])
 	case "lookup":
-		runLookup(cfg, os.Args[2:])
+		runLookup(cfg, args[1:])
 	case "mount":
-		runMount(cfg, os.Args[2:])
+		runMount(cfg, args[1:])
 	case "cache":
-		runCache(cfg, os.Args[2:])
+		runCache(cfg, args[1:])
 	case "nfs":
-		runNfs(cfg, os.Args[2:])
+		runNfs(cfg, args[1:])
 	case "upload":
-		runUpload(cfg, os.Args[2:])
+		runUpload(cfg, args[1:])
 	case "print":
-		runPrint(cfg, os.Args[2:])
+		runPrint(cfg, args[1:])
 	case "systemd":
-		runSystemd(cfg, os.Args[2:])
+		runSystemd(cfg, args[1:])
 	case "status":
-		runStatus(cfg, os.Args[2:])
+		runStatus(cfg, args[1:])
 	case "workspace":
-		runWorkspace(cfg, os.Args[2:])
+		runWorkspace(cfg, args[1:])
 	case "scan-repo":
-		runScanRepo(cfg, os.Args[2:])
+		runScanRepo(cfg, args[1:])
 	case "repository":
-		runRepository(cfg, os.Args[2:])
+		runRepository(cfg, args[1:])
 	case "login":
-		runLogin(cfg, os.Args[2:])
+		runLogin(cfg, args[1:])
 	case "invite":
-		runInvite(cfg, os.Args[2:])
+		runInvite(cfg, args[1:])
 	case "token":
-		runToken(cfg, os.Args[2:])
+		runToken(cfg, args[1:])
 	case "service-key":
-		runServiceKey(cfg, os.Args[2:])
+		runServiceKey(cfg, args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown command %q\n", args[0])
 		usage()
 	}
 }

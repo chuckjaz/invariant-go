@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -60,7 +61,13 @@ func main() {
 	flag.StringVar(&name, "name", "", "Name to register with the names service")
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
+	var enableLog bool
+	flag.BoolVar(&enableLog, "log", false, "Enable logging output")
 	flag.Parse()
+
+	if !enableLog {
+		log.SetOutput(io.Discard)
+	}
 
 	if serviceKey == "" {
 		serviceKey = os.Getenv("INVARIANT_SERVICE_KEY")

@@ -3,6 +3,8 @@ package itp
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
+	"tailscale.com/types/logger"
 )
 
 // ListenOptions configures an ITP or IP listener.
@@ -140,9 +143,15 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 		}
 	}
 
+	logf := logger.Logf(log.Printf)
+	if log.Writer() == io.Discard {
+		logf = logger.Discard
+	}
+
 	srv := &tailcat.Server{
 		Key:            pk.Private,
 		PresharedKey:   pk.Public.PresharedKey,
+		Logf:           logf,
 		Region:         opts.DERPRegion,
 		DERPMapURL:     opts.DERPMapURL,
 		AllowedClients: allowed,

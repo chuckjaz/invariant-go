@@ -20,6 +20,7 @@ type InvariantConfig struct {
 	OAuthToken  string                  `yaml:"oauth_token,omitempty"`
 	ServiceKey  string                  `yaml:"service_key,omitempty"`
 	ListenIP    bool                    `yaml:"listen_ip,omitempty"`
+	Log         bool                    `yaml:"log,omitempty"`
 	DERPMapURL  string                  `yaml:"derp_map_url,omitempty"`
 	Repository  *RepositoryGlobalConfig `yaml:"repository,omitempty"`
 	WriteTag    string                  `yaml:"write_tag,omitempty"`
@@ -110,6 +111,9 @@ func Load() (*InvariantConfig, error) {
 	}
 	if env := strings.TrimSpace(os.Getenv("INVARIANT_OAUTH_TOKEN")); env != "" {
 		cfg.OAuthToken = env
+	}
+	if env := strings.TrimSpace(os.Getenv("INVARIANT_LOG")); env != "" {
+		cfg.Log = env == "1" || strings.EqualFold(env, "true")
 	}
 
 	return &cfg, nil

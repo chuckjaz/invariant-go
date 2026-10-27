@@ -148,7 +148,7 @@ func TestProvisionHelperProcess(t *testing.T) {
 	fs := flag.NewFlagSet(svcType, flag.ExitOnError)
 	var dir, discoveryURL, provisionInvite, inviteCode, tokenFile, keyFile string
 	var port int
-	var listenIP bool
+	var listenIP, enableLog bool
 	fs.StringVar(&dir, "dir", "", "")
 	fs.StringVar(&discoveryURL, "discovery", "", "")
 	fs.StringVar(&provisionInvite, "provision", "", "")
@@ -157,6 +157,7 @@ func TestProvisionHelperProcess(t *testing.T) {
 	fs.StringVar(&keyFile, "key-file", "", "")
 	fs.IntVar(&port, "port", 3003, "")
 	fs.BoolVar(&listenIP, "listen-ip", false, "")
+	fs.BoolVar(&enableLog, "log", false, "")
 	_ = fs.Parse(args)
 
 	if svcType == "inv-discovery" {
