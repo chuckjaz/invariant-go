@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"slices"
 	"strings"
@@ -28,7 +27,7 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 		discoveryURL = globalCfg.Discovery
 	}
 	if discoveryURL == "" {
-		log.Fatalf("Discovery service address is not configured")
+		fatalf("Discovery service address is not configured")
 	}
 
 	client := newDiscoveryClient(discoveryURL, globalCfg)
@@ -40,7 +39,7 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	// protocol="" and tag="" retrieves all services
 	descs, err := client.Find(ctx, "", "", 10000)
 	if err != nil {
-		log.Fatalf("Failed to query discovery service: %v", err)
+		fatalf("Failed to query discovery service: %v", err)
 	}
 
 	if len(descs) == 0 {

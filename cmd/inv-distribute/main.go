@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/discovery"
@@ -23,6 +25,19 @@ func generateID() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
 }
 
 func main() {
@@ -99,7 +114,7 @@ func main() {
 	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to load or generate ITP key: %v", err)
+		fatalf("Failed to load or generate ITP key: %v", err)
 	}
 	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 
@@ -115,7 +130,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+		fatalf("Failed to authenticate with discovery service: %v", err)
 	}
 	if provisionInvite != "" {
 		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, keyID, tokenFile))
@@ -137,12 +152,12 @@ func main() {
 
 	if destination != "" {
 		if disc == nil {
-			log.Fatalf("Discovery service required to resolve destination %q", destination)
+			fatalf("Discovery service required to resolve destination %q", destination)
 		}
 		var err error
 		destination, err = discovery.ResolveName(context.Background(), disc, destination)
 		if err != nil {
-			log.Fatalf("Failed to resolve destination name %q: %v", destination, err)
+			fatalf("Failed to resolve destination name %q: %v", destination, err)
 		}
 	}
 
@@ -164,7 +179,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -191,7 +206,7 @@ func main() {
 			discovery.WithIdentity(nodeIdent),
 		)
 		if err != nil {
-			log.Fatalf("Failed to register with discovery service: %v", err)
+			fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, server.ID())
 	}
@@ -214,5 +229,5 @@ func main() {
 	}
 	log.Printf("Using In-Memory distribute storage")
 
-	log.Fatal(http.Serve(listener, server))
+	fatal(http.Serve(listener, server))
 }

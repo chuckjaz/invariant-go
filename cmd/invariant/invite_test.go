@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,5 +346,39 @@ exit 1
 	expectedPath := filepath.Join(goBinDir, "inv-storage")
 	if resolved != expectedPath {
 		t.Fatalf("expected resolved path %q, got %q", expectedPath, resolved)
+	}
+}
+
+func TestCLIErrorDisplayedWhenLoggingDisabled(t *testing.T) {
+	if os.Getenv("GO_TEST_CLI_MAIN") == "1" {
+		for i, a := range os.Args {
+			if a == "--" {
+				os.Args = append([]string{os.Args[0]}, os.Args[i+1:]...)
+				break
+			}
+		}
+		main()
+		return
+	}
+
+	testExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("failed to get test executable: %v", err)
+	}
+
+	tmpHome := t.TempDir()
+	cmd := exec.Command(testExe, "-test.run=TestCLIErrorDisplayedWhenLoggingDisabled", "--", "status")
+	cmd.Env = append(os.Environ(),
+		"GO_TEST_CLI_MAIN=1",
+		"HOME="+tmpHome,
+		"INVARIANT_DISCOVERY=",
+		"INVARIANT_LOG=",
+	)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected command to exit with error, but succeeded with output: %s", out)
+	}
+	if !strings.Contains(string(out), "Discovery service address is not configured") {
+		t.Fatalf("expected error message on stderr when logging is disabled, got: %q", string(out))
 	}
 }

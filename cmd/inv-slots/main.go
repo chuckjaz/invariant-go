@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -25,6 +26,19 @@ func generateID() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
 }
 
 func main() {
@@ -89,7 +103,7 @@ func main() {
 	if dir != "" {
 		fss, err := slots.NewFileSystemSlots(dir, snapshotInterval)
 		if err != nil {
-			log.Fatalf("Failed to initialize file system slots: %v", err)
+			fatalf("Failed to initialize file system slots: %v", err)
 		}
 		defer fss.Close()
 		s = fss
@@ -104,7 +118,7 @@ func main() {
 	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to load or generate ITP key: %v", err)
+		fatalf("Failed to load or generate ITP key: %v", err)
 	}
 	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 
@@ -120,7 +134,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+		fatalf("Failed to authenticate with discovery service: %v", err)
 	}
 	if provisionInvite != "" {
 		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, keyID, tokenFile))
@@ -148,7 +162,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -175,7 +189,7 @@ func main() {
 			discovery.WithIdentity(nodeIdent),
 		)
 		if err != nil {
-			log.Fatalf("Failed to register with discovery service: %v", err)
+			fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, s.ID())
 
@@ -190,7 +204,7 @@ func main() {
 			}()
 		}
 	} else if name != "" {
-		log.Fatalf("Cannot register name without a valid discovery service")
+		fatalf("Cannot register name without a valid discovery service")
 	}
 
 	server := slots.NewServer(s)
@@ -208,20 +222,20 @@ func main() {
 
 			resolvedID, err := discovery.ResolveName(context.Background(), dClient, nid)
 			if err != nil {
-				log.Fatalf("Could not resolve notify name/id %s: %v", nid, err)
+				fatalf("Could not resolve notify name/id %s: %v", nid, err)
 				continue
 			}
 
 			desc, ok := dClient.Get(context.Background(), resolvedID)
 			if !ok {
-				log.Fatalf("Could not find address for Notify service %s", resolvedID)
+				fatalf("Could not find address for Notify service %s", resolvedID)
 				continue
 			}
 
 			notifyClients = append(notifyClients, notify.NewClient(desc.Address, httpClient))
 		}
 	} else if notifyIDs != "" {
-		log.Fatalf("a discovery service is required to use the -notify flag")
+		fatalf("a discovery service is required to use the -notify flag")
 	}
 
 	if len(notifyClients) > 0 {
@@ -239,5 +253,5 @@ func main() {
 		log.Printf("Using In-Memory Slots storage")
 	}
 
-	log.Fatal(http.Serve(listener, server))
+	fatal(http.Serve(listener, server))
 }

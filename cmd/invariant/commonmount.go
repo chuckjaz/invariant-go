@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,13 +60,13 @@ func SetupCacheStorage(f *CommonMountFlags, baseStorage storage.Storage) (storag
 		if f.CacheDir == "" {
 			cacheDir, err := config.CacheDir()
 			if err != nil {
-				log.Fatalf("Failed to get cache directory: %v", err)
+				fatalf("Failed to get cache directory: %v", err)
 			}
 			f.CacheDir = cacheDir
 		}
 
 		if err := os.MkdirAll(f.CacheDir, 0700); err != nil {
-			log.Fatalf("Failed to create cache directory: %v", err)
+			fatalf("Failed to create cache directory: %v", err)
 		}
 
 		l2Store := storage.NewFileSystemStorage(f.CacheDir)
@@ -102,12 +102,12 @@ func SetupCacheStorage(f *CommonMountFlags, baseStorage storage.Storage) (storag
 		if f.OverflowDir == "" {
 			cacheDir, err := config.CacheDir()
 			if err != nil {
-				log.Fatalf("Failed to get cache directory for overflow: %v", err)
+				fatalf("Failed to get cache directory for overflow: %v", err)
 			}
 			f.OverflowDir = filepath.Join(cacheDir, "overflow")
 		}
 		if err := os.MkdirAll(f.OverflowDir, 0700); err != nil {
-			log.Fatalf("Failed to create overflow directory: %v", err)
+			fatalf("Failed to create overflow directory: %v", err)
 		}
 		overflowStore := storage.NewFileSystemStorage(f.OverflowDir)
 		directWrapper.SetOverflow(overflowStore)
@@ -121,28 +121,28 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		f.DiscoveryURL = globalCfg.Discovery
 	}
 	if f.DiscoveryURL == "" {
-		log.Fatalf("Discovery URL is required")
+		fatalf("Discovery URL is required")
 	}
 
 	dClient := newDiscoveryClient(f.DiscoveryURL, globalCfg)
 	httpClient := newHTTPClient(globalCfg)
 
 	if f.RootAddr == "" && f.Slot == "" {
-		log.Fatalf("Either --root or --slot is required")
+		fatalf("Either --root or --slot is required")
 	}
 
 	rootIsSlot := false
 	if f.Slot != "" {
 		resolved, err := discovery.ResolveName(context.Background(), dClient, f.Slot)
 		if err != nil {
-			log.Fatalf("Could not resolve slot name: %v", err)
+			fatalf("Could not resolve slot name: %v", err)
 		}
 		f.RootAddr = resolved
 		rootIsSlot = true
 	} else {
 		resolved, err := discovery.ResolveName(context.Background(), dClient, f.RootAddr)
 		if err != nil {
-			log.Fatalf("Could not resolve root name: %v", err)
+			fatalf("Could not resolve root name: %v", err)
 		}
 		f.RootAddr = resolved
 	}
@@ -150,10 +150,10 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 	findService := func(kind string) string {
 		id, err := dClient.Find(context.Background(), kind, "", 1)
 		if err != nil {
-			log.Fatalf("Could not find %s service: %v", kind, err)
+			fatalf("Could not find %s service: %v", kind, err)
 		}
 		if len(id) == 0 {
-			log.Fatalf("Could not find %s service", kind)
+			fatalf("Could not find %s service", kind)
 		}
 		return id[0].Address
 	}
@@ -183,19 +183,19 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 		case "SuppliedAllKey":
 			writerOpts.KeyPolicy = content.SuppliedAllKey
 			if f.KeyStr == "" {
-				log.Fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
+				fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
 			}
 
 			importHex, err := hex.DecodeString(f.KeyStr)
 			if err != nil {
-				log.Fatalf("Error parsing --key: %v", err)
+				fatalf("Error parsing --key: %v", err)
 			}
 			if len(importHex) != 32 {
-				log.Fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
+				fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
 			}
 			writerOpts.SuppliedKey = importHex
 		default:
-			log.Fatalf("Error: unsupported key-policy '%s'", f.KeyPolicyStr)
+			fatalf("Error: unsupported key-policy '%s'", f.KeyPolicyStr)
 		}
 	}
 	writerOpts.Splitters = []content.Splitter{
@@ -232,16 +232,16 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 
 	rc, err := content.Read(opts.RootLink, finalStorage, slotsClient)
 	if err != nil {
-		log.Fatalf("Failed to resolve and read root directory: %v", err)
+		fatalf("Failed to resolve and read root directory: %v", err)
 	}
 	data, err := io.ReadAll(rc)
 	rc.Close()
 	if err != nil {
-		log.Fatalf("Failed to read root directory content: %v", err)
+		fatalf("Failed to read root directory content: %v", err)
 	}
 	var dir filetree.Directory
 	if err := json.Unmarshal(data, &dir); err != nil {
-		log.Fatalf("Root directory content is not a valid directory format: %v", err)
+		fatalf("Root directory content is not a valid directory format: %v", err)
 	}
 
 	var layers []files.Layer
@@ -254,7 +254,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 					lrc.Close()
 					if err == nil {
 						if err := json.Unmarshal(ldata, &layers); err != nil {
-							log.Printf("Warning: failed to parse .invariant-layer: %v", err)
+							fmt.Fprintf(os.Stderr, "Warning: failed to parse .invariant-layer: %v\n", err)
 						}
 					}
 				}
@@ -271,7 +271,7 @@ func SetupFileSystem(globalCfg *config.InvariantConfig, f *CommonMountFlags) *fi
 
 	filesrv, err := files.NewInMemoryFiles(opts)
 	if err != nil {
-		log.Fatalf("Failed to initialize files service: %v", err)
+		fatalf("Failed to initialize files service: %v", err)
 	}
 
 	return filesrv

@@ -117,10 +117,10 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		if err == nil && len(resolved) > 0 {
 			hash = resolved
 		} else {
-			log.Fatalf("failed to resolve content: %s", contentArg)
+			fatalf("failed to resolve content: %s", contentArg)
 		}
 	} else {
-		log.Fatalf("Invalid content provided: %s", contentArg)
+		fatalf("Invalid content provided: %s", contentArg)
 	}
 
 	// Try to GET it to see if it's an existing slot, otherwise we assume it's a block
@@ -135,19 +135,19 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 			fmt.Println("Generating protected slot using Ed25519 (256-bit elliptic curve)...")
 			pub, priv, err := ed25519.GenerateKey(nil)
 			if err != nil {
-				log.Fatalf("Failed to generate key pair: %v", err)
+				fatalf("Failed to generate key pair: %v", err)
 			}
 			slotID = hex.EncodeToString(pub)
 			policy = "ecc"
 
 			keysDir, err := config.KeysDir()
 			if err != nil {
-				log.Fatalf("Fatal error: Failed to locate keys directory: %v", err)
+				fatalf("Fatal error: Failed to locate keys directory: %v", err)
 			}
 
 			keyPath := filepath.Join(keysDir, fmt.Sprintf("%s.key", slotID))
 			if err := os.WriteFile(keyPath, priv, 0600); err != nil {
-				log.Fatalf("Fatal error: Failed to save private key to %s: %v", keyPath, err)
+				fatalf("Fatal error: Failed to save private key to %s: %v", keyPath, err)
 			}
 			fmt.Printf("Private key securely saved to: %s\n", keyPath)
 		} else {
@@ -158,7 +158,7 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		}
 
 		if err := slotsClient.Create(context.Background(), slotID, hash, policy); err != nil {
-			log.Fatalf("failed to create workspace tracking slot: %v", err)
+			fatalf("failed to create workspace tracking slot: %v", err)
 		}
 		log.Printf("Created slot %s to track workspace changes\n", slotID)
 		targetLink = content.ContentLink{Address: slotID, Slot: true}
@@ -167,7 +167,7 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 	// Create Workspace directory
 	err := os.MkdirAll(directory, 0755)
 	if err != nil {
-		log.Fatalf("failed to create directory: %v", err)
+		fatalf("failed to create directory: %v", err)
 	}
 
 	wsLink, err := workspace.CreateWorkspace(
@@ -179,7 +179,7 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 		layersList,
 	)
 	if err != nil {
-		log.Fatalf("failed to create workspace layers: %v", err)
+		fatalf("failed to create workspace layers: %v", err)
 	}
 
 	// Create .invariant-workspace file inside
@@ -190,12 +190,12 @@ func runWorkspaceCreate(globalCfg *config.InvariantConfig, args []string) {
 
 	wsFile, err := os.Create(wsPath)
 	if err != nil {
-		log.Fatalf("failed to create .invariant-workspace: %v", err)
+		fatalf("failed to create .invariant-workspace: %v", err)
 	}
 	defer wsFile.Close()
 
 	if err := json.NewEncoder(wsFile).Encode(wsInfo); err != nil {
-		log.Fatalf("failed to write .invariant-workspace: %v", err)
+		fatalf("failed to write .invariant-workspace: %v", err)
 	}
 
 	if !*createOnly {
@@ -227,18 +227,18 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	directory := mountFlags.Arg(0)
 	absDir, err := filepath.Abs(directory)
 	if err != nil {
-		log.Fatalf("invalid directory path: %v", err)
+		fatalf("invalid directory path: %v", err)
 	}
 
 	if *systemd {
-		log.Fatalf("-systemd not fully implemented here yet")
+		fatalf("-systemd not fully implemented here yet")
 		// would create systemctl service unit
 	}
 
 	if !*foreground {
 		exe, err := os.Executable()
 		if err != nil {
-			log.Fatalf("Failed to get executable: %v", err)
+			fatalf("Failed to get executable: %v", err)
 		}
 
 		var newArgs []string
@@ -254,7 +254,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		logPath := "/tmp/invariant-debug.log"
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			log.Fatalf("Failed to open mount log buffer map natively for path %s: %v", logPath, err)
+			fatalf("Failed to open mount log buffer map natively for path %s: %v", logPath, err)
 		}
 		cmd := exec.Command(exe, newArgs...)
 		cmd.Dir = absDir
@@ -264,13 +264,13 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 		r, w, err := os.Pipe()
 		if err != nil {
-			log.Fatalf("Failed to create readiness pipe: %v", err)
+			fatalf("Failed to create readiness pipe: %v", err)
 		}
 		cmd.ExtraFiles = []*os.File{w}
 		cmd.Env = append(os.Environ(), "INVARIANT_READY_FD=3")
 
 		if err := cmd.Start(); err != nil {
-			log.Fatalf("Failed to start background mount: %v", err)
+			fatalf("Failed to start background mount: %v", err)
 		}
 
 		w.Close() // Parent no longer needs the write end
@@ -291,7 +291,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		if success {
 			fmt.Printf("Workspace mounted in background (PID: %d)\n", cmd.Process.Pid)
 		} else {
-			log.Fatalf("Background mount failed or exited unexpectedly (see %s)", logPath)
+			fatalf("Background mount failed or exited unexpectedly (see %s)", logPath)
 		}
 
 		r.Close()
@@ -311,7 +311,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
-		log.Printf("Warning: failed to write pid file: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to write pid file: %v\n", err)
 	}
 	defer os.Remove(pidPath)
 
@@ -319,12 +319,12 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	wsPath := filepath.Join(absDir, ".invariant-workspace")
 	data, err := os.ReadFile(wsPath)
 	if err != nil {
-		log.Fatalf("Failed to read %s: %v", wsPath, err)
+		fatalf("Failed to read %s: %v", wsPath, err)
 	}
 
 	var wsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(data, &wsInfo); err != nil {
-		log.Fatalf("Invalid workspace file %s: %v", wsPath, err)
+		fatalf("Invalid workspace file %s: %v", wsPath, err)
 	}
 
 	dClient, _, storageClient, slotsClient := initClients(globalCfg)
@@ -332,7 +332,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 	// we have the wsInfo.Content point to .invariant-layer structure
 	layers, err := workspace.ResolveLayers(context.Background(), slotsClient, storageClient, wsInfo.Content)
 	if err != nil {
-		log.Fatalf("Failed to resolve layers: %v", err)
+		fatalf("Failed to resolve layers: %v", err)
 	}
 
 	// Setup our file system with the resolved layers. But wait, filesrv setup via
@@ -378,7 +378,7 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 
 	filesrv, err := files.NewInMemoryFiles(filesOpts)
 	if err != nil {
-		log.Fatalf("Failed to start file system: %v", err)
+		fatalf("Failed to start file system: %v", err)
 	}
 
 	rootNode := fuse.NewNode(filesrv, 1)
@@ -405,13 +405,13 @@ func runWorkspaceMount(globalCfg *config.InvariantConfig, args []string) {
 		GID:             gid,
 	})
 	if err != nil {
-		log.Fatalf("Mount fail: %v\n", err)
+		fatalf("Mount fail: %v\n", err)
 	}
 
 	defer func() {
 		log.Println("Syncing workspace before shutdown...")
 		if err := filesrv.Sync(context.Background(), 1, true); err != nil {
-			log.Printf("Warning: failed to sync workspace cleanly: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to sync workspace cleanly: %v\n", err)
 		}
 		filesrv.Close()
 	}()
@@ -453,7 +453,7 @@ func runWorkspaceUnmount(globalCfg *config.InvariantConfig, args []string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to unmount: %v", err)
+		fatalf("Failed to unmount: %v", err)
 	}
 
 	absDir, err := filepath.Abs(directory)
@@ -518,7 +518,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 			sAddr, _ = discovery.ResolveName(context.Background(), dClient, "storage-v1")
 		}
 		if sAddr == "" {
-			log.Fatalf("Could not find storage-v1 service")
+			fatalf("Could not find storage-v1 service")
 		}
 		storageClient = storage.NewClient(sAddr, httpClient)
 	}
@@ -528,7 +528,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 		slotsAddr, _ = discovery.ResolveName(context.Background(), dClient, "slots-v1")
 	}
 	if slotsAddr == "" {
-		log.Fatalf("Could not find slots-v1 service")
+		fatalf("Could not find slots-v1 service")
 	}
 	slotsClient := slots.NewClient(slotsAddr, httpClient)
 
@@ -558,35 +558,35 @@ func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
 
 	parentAbsDir, err := filepath.Abs(parentDir)
 	if err != nil {
-		log.Fatalf("invalid parent directory path: %v", err)
+		fatalf("invalid parent directory path: %v", err)
 	}
 
 	parentWsPath := filepath.Join(parentAbsDir, ".invariant-workspace")
 	parentData, err := os.ReadFile(parentWsPath)
 	if err != nil {
-		log.Fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
+		fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
 	}
 
 	var parentWsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(parentData, &parentWsInfo); err != nil {
-		log.Fatalf("invalid parent workspace file: %v", err)
+		fatalf("invalid parent workspace file: %v", err)
 	}
 
 	_, _, storageClient, slotsClient := initClients(globalCfg)
 
 	parentLayers, err := workspace.ResolveLayers(context.Background(), slotsClient, storageClient, parentWsInfo.Content)
 	if err != nil {
-		log.Fatalf("failed to resolve parent layers: %v", err)
+		fatalf("failed to resolve parent layers: %v", err)
 	}
 
 	parentSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, parentWsInfo)
 	if err != nil {
-		log.Fatalf("failed to get parent workspace slot ID: %v", err)
+		fatalf("failed to get parent workspace slot ID: %v", err)
 	}
 
 	parentSnapshotHash, err := slotsClient.Get(context.Background(), parentSlotID)
 	if err != nil {
-		log.Fatalf("failed to resolve parent slot address: %v", err)
+		fatalf("failed to resolve parent slot address: %v", err)
 	}
 
 	// Generate a new standard slot for the branch
@@ -595,7 +595,7 @@ func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
 	branchSlotID := hex.EncodeToString(b)
 
 	if err := slotsClient.Create(context.Background(), branchSlotID, parentSnapshotHash, ""); err != nil {
-		log.Fatalf("failed to create branch tracking slot: %v", err)
+		fatalf("failed to create branch tracking slot: %v", err)
 	}
 
 	// Build the branch layers pointing to branchSlotID instead of parentSlotID
@@ -609,12 +609,12 @@ func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
 
 	branchWsLink, err := workspace.CreateWorkspaceFromLayers(context.Background(), storageClient, slotsClient, branchLayers)
 	if err != nil {
-		log.Fatalf("failed to create branch workspace layers: %v", err)
+		fatalf("failed to create branch workspace layers: %v", err)
 	}
 
 	err = os.MkdirAll(branchDir, 0755)
 	if err != nil {
-		log.Fatalf("failed to create branch directory: %v", err)
+		fatalf("failed to create branch directory: %v", err)
 	}
 
 	branchWsPath := filepath.Join(branchDir, ".invariant-workspace")
@@ -626,12 +626,12 @@ func runWorkspaceBranch(globalCfg *config.InvariantConfig, args []string) {
 
 	branchWsFile, err := os.Create(branchWsPath)
 	if err != nil {
-		log.Fatalf("failed to create branch .invariant-workspace: %v", err)
+		fatalf("failed to create branch .invariant-workspace: %v", err)
 	}
 	defer branchWsFile.Close()
 
 	if err := json.NewEncoder(branchWsFile).Encode(branchWsInfo); err != nil {
-		log.Fatalf("failed to write branch .invariant-workspace: %v", err)
+		fatalf("failed to write branch .invariant-workspace: %v", err)
 	}
 
 	log.Printf("Workspace branch created successfully in %s (slot: %s)\n", branchDir, branchSlotID)
@@ -655,63 +655,63 @@ func runWorkspaceMerge(globalCfg *config.InvariantConfig, args []string) {
 
 	parentAbsDir, err := filepath.Abs(parentDir)
 	if err != nil {
-		log.Fatalf("invalid parent directory path: %v", err)
+		fatalf("invalid parent directory path: %v", err)
 	}
 	branchAbsDir, err := filepath.Abs(branchDir)
 	if err != nil {
-		log.Fatalf("invalid branch directory path: %v", err)
+		fatalf("invalid branch directory path: %v", err)
 	}
 
 	parentWsPath := filepath.Join(parentAbsDir, ".invariant-workspace")
 	parentData, err := os.ReadFile(parentWsPath)
 	if err != nil {
-		log.Fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
+		fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
 	}
 
 	var parentWsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(parentData, &parentWsInfo); err != nil {
-		log.Fatalf("invalid parent workspace file: %v", err)
+		fatalf("invalid parent workspace file: %v", err)
 	}
 
 	branchWsPath := filepath.Join(branchAbsDir, ".invariant-workspace")
 	branchData, err := os.ReadFile(branchWsPath)
 	if err != nil {
-		log.Fatalf("branch directory is not a valid workspace: failed to read %s: %v", branchWsPath, err)
+		fatalf("branch directory is not a valid workspace: failed to read %s: %v", branchWsPath, err)
 	}
 
 	var branchWsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(branchData, &branchWsInfo); err != nil {
-		log.Fatalf("invalid branch workspace file: %v", err)
+		fatalf("invalid branch workspace file: %v", err)
 	}
 
 	if branchWsInfo.ParentSlot == "" || branchWsInfo.ParentSnapshot == "" {
-		log.Fatalf("workspace %s is not a branch (missing parent tracking metadata)", branchDir)
+		fatalf("workspace %s is not a branch (missing parent tracking metadata)", branchDir)
 	}
 
 	_, _, storageClient, slotsClient := initClients(globalCfg)
 
 	parentSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, parentWsInfo)
 	if err != nil {
-		log.Fatalf("failed to get parent workspace slot ID: %v", err)
+		fatalf("failed to get parent workspace slot ID: %v", err)
 	}
 
 	branchSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, branchWsInfo)
 	if err != nil {
-		log.Fatalf("failed to get branch workspace slot ID: %v", err)
+		fatalf("failed to get branch workspace slot ID: %v", err)
 	}
 
 	if parentSlotID != branchWsInfo.ParentSlot {
-		log.Fatalf("conflict: branch parent slot %s does not match destination parent slot %s", branchWsInfo.ParentSlot, parentSlotID)
+		fatalf("conflict: branch parent slot %s does not match destination parent slot %s", branchWsInfo.ParentSlot, parentSlotID)
 	}
 
 	parentCurrentAddress, err := slotsClient.Get(context.Background(), parentSlotID)
 	if err != nil {
-		log.Fatalf("failed to get parent workspace slot address: %v", err)
+		fatalf("failed to get parent workspace slot address: %v", err)
 	}
 
 	branchCurrentAddress, err := slotsClient.Get(context.Background(), branchSlotID)
 	if err != nil {
-		log.Fatalf("failed to get branch workspace slot address: %v", err)
+		fatalf("failed to get branch workspace slot address: %v", err)
 	}
 
 	ancestorAddress := branchWsInfo.ParentSnapshot
@@ -730,7 +730,7 @@ func runWorkspaceMerge(globalCfg *config.InvariantConfig, args []string) {
 		slotsClient,
 	)
 	if err != nil {
-		log.Fatalf("failed to perform tree merge: %v", err)
+		fatalf("failed to perform tree merge: %v", err)
 	}
 
 	if len(conflicts) > 0 {
@@ -743,7 +743,7 @@ func runWorkspaceMerge(globalCfg *config.InvariantConfig, args []string) {
 
 	err = slotsClient.Update(context.Background(), parentSlotID, mergedRootAddress, parentCurrentAddress, nil)
 	if err != nil {
-		log.Fatalf("failed to update parent slot: %v", err)
+		fatalf("failed to update parent slot: %v", err)
 	}
 
 	log.Printf("Successfully merged branch into parent! Parent slot updated to %s\n", mergedRootAddress)
@@ -763,63 +763,63 @@ func runWorkspaceRebase(globalCfg *config.InvariantConfig, args []string) {
 
 	parentAbsDir, err := filepath.Abs(parentDir)
 	if err != nil {
-		log.Fatalf("invalid parent directory path: %v", err)
+		fatalf("invalid parent directory path: %v", err)
 	}
 	branchAbsDir, err := filepath.Abs(branchDir)
 	if err != nil {
-		log.Fatalf("invalid branch directory path: %v", err)
+		fatalf("invalid branch directory path: %v", err)
 	}
 
 	parentWsPath := filepath.Join(parentAbsDir, ".invariant-workspace")
 	parentData, err := os.ReadFile(parentWsPath)
 	if err != nil {
-		log.Fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
+		fatalf("parent directory is not a valid workspace: failed to read %s: %v", parentWsPath, err)
 	}
 
 	var parentWsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(parentData, &parentWsInfo); err != nil {
-		log.Fatalf("invalid parent workspace file: %v", err)
+		fatalf("invalid parent workspace file: %v", err)
 	}
 
 	branchWsPath := filepath.Join(branchAbsDir, ".invariant-workspace")
 	branchData, err := os.ReadFile(branchWsPath)
 	if err != nil {
-		log.Fatalf("branch directory is not a valid workspace: failed to read %s: %v", branchWsPath, err)
+		fatalf("branch directory is not a valid workspace: failed to read %s: %v", branchWsPath, err)
 	}
 
 	var branchWsInfo workspace.WorkspaceInfo
 	if err := json.Unmarshal(branchData, &branchWsInfo); err != nil {
-		log.Fatalf("invalid branch workspace file: %v", err)
+		fatalf("invalid branch workspace file: %v", err)
 	}
 
 	if branchWsInfo.ParentSlot == "" || branchWsInfo.ParentSnapshot == "" {
-		log.Fatalf("workspace %s is not a branch (missing parent tracking metadata)", branchDir)
+		fatalf("workspace %s is not a branch (missing parent tracking metadata)", branchDir)
 	}
 
 	_, _, storageClient, slotsClient := initClients(globalCfg)
 
 	parentSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, parentWsInfo)
 	if err != nil {
-		log.Fatalf("failed to get parent workspace slot ID: %v", err)
+		fatalf("failed to get parent workspace slot ID: %v", err)
 	}
 
 	branchSlotID, err := workspace.GetWorkspaceSlotID(context.Background(), slotsClient, storageClient, branchWsInfo)
 	if err != nil {
-		log.Fatalf("failed to get branch workspace slot ID: %v", err)
+		fatalf("failed to get branch workspace slot ID: %v", err)
 	}
 
 	if parentSlotID != branchWsInfo.ParentSlot {
-		log.Fatalf("conflict: branch parent slot %s does not match specified parent slot %s", branchWsInfo.ParentSlot, parentSlotID)
+		fatalf("conflict: branch parent slot %s does not match specified parent slot %s", branchWsInfo.ParentSlot, parentSlotID)
 	}
 
 	parentCurrentAddress, err := slotsClient.Get(context.Background(), parentSlotID)
 	if err != nil {
-		log.Fatalf("failed to get parent workspace slot address: %v", err)
+		fatalf("failed to get parent workspace slot address: %v", err)
 	}
 
 	branchCurrentAddress, err := slotsClient.Get(context.Background(), branchSlotID)
 	if err != nil {
-		log.Fatalf("failed to get branch workspace slot address: %v", err)
+		fatalf("failed to get branch workspace slot address: %v", err)
 	}
 
 	ancestorAddress := branchWsInfo.ParentSnapshot
@@ -838,7 +838,7 @@ func runWorkspaceRebase(globalCfg *config.InvariantConfig, args []string) {
 		slotsClient,
 	)
 	if err != nil {
-		log.Fatalf("failed to perform tree merge for rebase: %v", err)
+		fatalf("failed to perform tree merge for rebase: %v", err)
 	}
 
 	if len(conflicts) > 0 {
@@ -851,7 +851,7 @@ func runWorkspaceRebase(globalCfg *config.InvariantConfig, args []string) {
 
 	err = slotsClient.Update(context.Background(), branchSlotID, mergedRootAddress, branchCurrentAddress, nil)
 	if err != nil {
-		log.Fatalf("failed to update branch slot: %v", err)
+		fatalf("failed to update branch slot: %v", err)
 	}
 
 	// Update branchWsInfo ParentSnapshot to parentCurrentAddress
@@ -860,12 +860,12 @@ func runWorkspaceRebase(globalCfg *config.InvariantConfig, args []string) {
 	// Write branchWsInfo back to .invariant-workspace file
 	branchWsFile, err := os.Create(branchWsPath)
 	if err != nil {
-		log.Fatalf("failed to create branch .invariant-workspace: %v", err)
+		fatalf("failed to create branch .invariant-workspace: %v", err)
 	}
 	defer branchWsFile.Close()
 
 	if err := json.NewEncoder(branchWsFile).Encode(branchWsInfo); err != nil {
-		log.Fatalf("failed to write branch .invariant-workspace: %v", err)
+		fatalf("failed to write branch .invariant-workspace: %v", err)
 	}
 
 	log.Printf("Successfully rebased branch! Branch slot updated to %s, parent snapshot advanced to %s\n", mergedRootAddress, parentCurrentAddress)

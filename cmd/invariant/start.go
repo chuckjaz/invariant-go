@@ -31,7 +31,7 @@ func runStart(globalCfg *config.InvariantConfig, args []string) {
 
 	cfg, err := start.LoadConfig(configPath, "")
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		fatalf("Failed to load configuration: %v", err)
 	}
 
 	rc := start.RunnerConfig{
@@ -42,7 +42,7 @@ func runStart(globalCfg *config.InvariantConfig, args []string) {
 
 	runner, err := start.NewRunner(rc)
 	if err != nil {
-		log.Fatalf("Failed to initialize runner: %v", err)
+		fatalf("Failed to initialize runner: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

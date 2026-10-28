@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/content"
@@ -18,6 +20,19 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/storage"
 	"github.com/chuckjaz/invariant-go/internal/trace"
 )
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
+}
 
 func main() {
 	var discoveryURL string
@@ -63,13 +78,13 @@ func main() {
 
 	discoveryURL = itp.ResolveDiscoveryURL(dir, "files", discoveryURL, inviteCode)
 	if discoveryURL == "" {
-		log.Fatalf("Discovery URL is required")
+		fatalf("Discovery URL is required")
 	}
 
 	keyFile = itp.ServiceKeyPath(dir, "files", keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to load or generate ITP key: %v", err)
+		fatalf("Failed to load or generate ITP key: %v", err)
 	}
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
@@ -84,7 +99,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+		fatalf("Failed to authenticate with discovery service: %v", err)
 	}
 	if provisionInvite != "" {
 		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, "files", tokenFile))
@@ -108,10 +123,10 @@ func main() {
 	findService := func(kind string) string {
 		id, err := dClient.Find(context.Background(), kind, "", 1)
 		if err != nil {
-			log.Fatalf("Could not find %s service: %v", kind, err)
+			fatalf("Could not find %s service: %v", kind, err)
 		}
 		if len(id) == 0 {
-			log.Fatalf("Could not find %s service", kind)
+			fatalf("Could not find %s service", kind)
 		}
 		return id[0].Address
 	}
@@ -135,7 +150,7 @@ func main() {
 
 	f, err := files.NewInMemoryFiles(opts)
 	if err != nil {
-		log.Fatalf("Failed to initialize files service: %v", err)
+		fatalf("Failed to initialize files service: %v", err)
 	}
 	defer f.Close()
 
@@ -152,7 +167,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -161,5 +176,5 @@ func main() {
 	} else {
 		log.Printf("Files service listening on %s (ITP Address: %s, Public Key: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
 	}
-	log.Fatal(http.Serve(listener, server.Handler()))
+	fatal(http.Serve(listener, server.Handler()))
 }

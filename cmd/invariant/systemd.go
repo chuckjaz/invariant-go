@@ -50,7 +50,7 @@ type serviceData struct {
 
 func runSystemd(globalCfg *config.InvariantConfig, args []string) {
 	if len(args) < 1 {
-		log.Fatalf("systemd requires a subcommand: install, update, uninstall, log, start, stop, files")
+		fatalf("systemd requires a subcommand: install, update, uninstall, log, start, stop, files")
 	}
 
 	subCmd := args[0]
@@ -92,43 +92,43 @@ func runSystemd(globalCfg *config.InvariantConfig, args []string) {
 	case "files":
 		generateFiles(configPath, keysDir, runUser, runGroup, outDir)
 	default:
-		log.Fatalf("Unknown systemd subcommand %q", subCmd)
+		fatalf("Unknown systemd subcommand %q", subCmd)
 	}
 }
 
 func installServices(configPath, keysDir, runUser, runGroup string, startServices bool) {
 	// Create user/group if needed
 	if err := ensureUserGroup(runUser, runGroup); err != nil {
-		log.Fatalf("Failed to ensure user/group: %v", err)
+		fatalf("Failed to ensure user/group: %v", err)
 	}
 
 	u, err := user.Lookup(runUser)
 	if err != nil {
-		log.Fatalf("Failed to lookup user %s: %v", runUser, err)
+		fatalf("Failed to lookup user %s: %v", runUser, err)
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 
 	binDir := filepath.Join(u.HomeDir, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
-		log.Fatalf("Failed to create bin dir: %v", err)
+		fatalf("Failed to create bin dir: %v", err)
 	}
 	os.Chown(binDir, uid, gid)
 
 	cfg, err := start.LoadConfig(configPath, keysDir)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("Failed to load config: %v", err)
 	}
 
 	exePath, err := os.Executable()
 	if err != nil {
-		log.Fatalf("Failed to get executable path: %v", err)
+		fatalf("Failed to get executable path: %v", err)
 	}
 	cmdBaseDir := filepath.Dir(exePath)
 
 	tmpl, err := template.New("service").Parse(serviceTemplate)
 	if err != nil {
-		log.Fatalf("Failed to parse template: %v", err)
+		fatalf("Failed to parse template: %v", err)
 	}
 
 	counts := make(map[string]int)
@@ -142,7 +142,7 @@ func installServices(configPath, keysDir, runUser, runGroup string, startService
 		dstBin := filepath.Join(binDir, filepath.Base(sc.Command))
 
 		if err := copyBinary(srcBin, dstBin, uid, gid); err != nil {
-			log.Fatalf("Failed to copy binary %s -> %s: %v", srcBin, dstBin, err)
+			fatalf("Failed to copy binary %s -> %s: %v", srcBin, dstBin, err)
 		}
 
 		req, wants := buildDependencies(sc)
@@ -165,13 +165,13 @@ func installServices(configPath, keysDir, runUser, runGroup string, startService
 
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, data); err != nil {
-			log.Fatalf("Failed to template service %s: %v", name, err)
+			fatalf("Failed to template service %s: %v", name, err)
 		}
 
 		unitPath := filepath.Join("/etc/systemd/system", serviceUnitName)
 		log.Printf("Writing systemd unit: %s", unitPath)
 		if err := os.WriteFile(unitPath, buf.Bytes(), 0644); err != nil {
-			log.Fatalf("Failed to write unit file %s: %v. Are you running as root?", unitPath, err)
+			fatalf("Failed to write unit file %s: %v. Are you running as root?", unitPath, err)
 		}
 
 		generatedServices = append(generatedServices, serviceUnitName)
@@ -190,7 +190,7 @@ func installServices(configPath, keysDir, runUser, runGroup string, startService
 func uninstallServices(configPath, keysDir, runUser, runGroup string) {
 	cfg, err := start.LoadConfig(configPath, keysDir)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("Failed to load config: %v", err)
 	}
 
 	counts := make(map[string]int)
@@ -204,7 +204,7 @@ func uninstallServices(configPath, keysDir, runUser, runGroup string) {
 
 		unitPath := filepath.Join("/etc/systemd/system", serviceUnitName)
 		if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
-			log.Printf("Warning: failed to remove %s: %v", unitPath, err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove %s: %v\n", unitPath, err)
 		}
 	}
 
@@ -220,7 +220,7 @@ func uninstallServices(configPath, keysDir, runUser, runGroup string) {
 func logServices(configPath, keysDir string, args []string) {
 	cfg, err := start.LoadConfig(configPath, keysDir)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("Failed to load config: %v", err)
 	}
 
 	var targetName string
@@ -240,13 +240,13 @@ func logServices(configPath, keysDir string, args []string) {
 			return
 		}
 	}
-	log.Fatalf("Service not found in configuration.")
+	fatalf("Service not found in configuration.")
 }
 
 func controlServices(action string, configPath string, keysDir string, args []string) {
 	cfg, err := start.LoadConfig(configPath, keysDir)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("Failed to load config: %v", err)
 	}
 
 	var targetName string
@@ -264,7 +264,7 @@ func controlServices(action string, configPath string, keysDir string, args []st
 	}
 
 	if len(units) == 0 {
-		log.Fatalf("No matching services found to %s.", action)
+		fatalf("No matching services found to %s.", action)
 	}
 
 	log.Printf("%s-ing %d services...", action, len(units))
@@ -273,17 +273,17 @@ func controlServices(action string, configPath string, keysDir string, args []st
 
 func generateFiles(configPath, keysDir, runUser, runGroup, outDir string) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		log.Fatalf("Failed to create out dir: %v", err)
+		fatalf("Failed to create out dir: %v", err)
 	}
 
 	cfg, err := start.LoadConfig(configPath, keysDir)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("Failed to load config: %v", err)
 	}
 
 	tmpl, err := template.New("service").Parse(serviceTemplate)
 	if err != nil {
-		log.Fatalf("Failed to parse template: %v", err)
+		fatalf("Failed to parse template: %v", err)
 	}
 
 	binDir := fmt.Sprintf("/home/%s/bin", runUser)
@@ -322,13 +322,13 @@ func generateFiles(configPath, keysDir, runUser, runGroup, outDir string) {
 
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, data); err != nil {
-			log.Fatalf("Failed to template service %s: %v", name, err)
+			fatalf("Failed to template service %s: %v", name, err)
 		}
 
 		unitPath := filepath.Join(outDir, serviceUnitName)
 		log.Printf("Writing systemd unit: %s", unitPath)
 		if err := os.WriteFile(unitPath, buf.Bytes(), 0644); err != nil {
-			log.Fatalf("Failed to write unit file %s: %v", unitPath, err)
+			fatalf("Failed to write unit file %s: %v", unitPath, err)
 		}
 	}
 }

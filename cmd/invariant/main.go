@@ -37,6 +37,14 @@ func extractLogFlag(args []string) (filtered []string, logVal bool, logSet bool)
 	return filtered, logVal, logSet
 }
 
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: invariant [-log] <command> [options]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")

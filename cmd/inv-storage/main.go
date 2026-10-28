@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -35,6 +36,19 @@ func resolveWithRetry(dClient *discovery.Client, name string, retries int, delay
 		}
 	}
 	return "", err
+}
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
 }
 
 func main() {
@@ -111,7 +125,7 @@ func main() {
 		keyFile = itp.ServiceKeyPath(dir, id, keyFile)
 		privKey, err := itp.LoadOrGenerateKey(keyFile)
 		if err != nil {
-			log.Fatalf("Failed to load or generate ITP key: %v", err)
+			fatalf("Failed to load or generate ITP key: %v", err)
 		}
 		discoveryURL = itp.ResolveDiscoveryURL(dir, id, discoveryURL, inviteCode)
 		_, err = itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
@@ -126,7 +140,7 @@ func main() {
 			DERPMapURL:   derpMapURL,
 		})
 		if err != nil {
-			log.Fatalf("Failed to provision service token: %v", err)
+			fatalf("Failed to provision service token: %v", err)
 		}
 		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, id, tokenFile))
 		return
@@ -162,13 +176,13 @@ func main() {
 			ScanConcurrency: gitScanConcurrency,
 		})
 		if err != nil {
-			log.Fatalf("Failed to initialize Git storage: %v", err)
+			fatalf("Failed to initialize Git storage: %v", err)
 		}
 	} else if s3Bucket != "" {
 		var err error
 		s, err = storage.NewS3Storage(context.Background(), s3Bucket, s3Prefix)
 		if err != nil {
-			log.Fatalf("Failed to initialize S3 storage: %v", err)
+			fatalf("Failed to initialize S3 storage: %v", err)
 		}
 	} else if dir != "" {
 		s = storage.NewFileSystemStorage(dir)
@@ -186,7 +200,7 @@ func main() {
 	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to load or generate ITP key: %v", err)
+		fatalf("Failed to load or generate ITP key: %v", err)
 	}
 	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 
@@ -202,7 +216,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+		fatalf("Failed to authenticate with discovery service: %v", err)
 	}
 	serviceKey = resolvedToken
 
@@ -226,7 +240,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -256,7 +270,7 @@ func main() {
 			discovery.WithIdentity(nodeIdent),
 		)
 		if err != nil {
-			log.Fatalf("Failed to register with discovery service: %v", err)
+			fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
 
@@ -271,7 +285,7 @@ func main() {
 			}()
 		}
 	} else if name != "" {
-		log.Fatalf("a discovery service with a registered names service is required for the service to be named.")
+		fatalf("a discovery service with a registered names service is required for the service to be named.")
 	}
 
 	var notifyClients []storage.NotifyClient
@@ -284,13 +298,13 @@ func main() {
 
 			hid, err = resolveWithRetry(dClient, hid, 5, 2*time.Second)
 			if err != nil {
-				log.Fatalf("Could not resolve notify name/id %s: %v", hid, err)
+				fatalf("Could not resolve notify name/id %s: %v", hid, err)
 				continue
 			}
 
 			desc, ok := dClient.Get(context.Background(), hid)
 			if !ok {
-				log.Fatalf("Could not find address for Notify service ID %s", hid)
+				fatalf("Could not find address for Notify service ID %s", hid)
 				continue
 			}
 
@@ -300,23 +314,23 @@ func main() {
 
 	if distributeArg != "" {
 		if discoveryURL == "" {
-			log.Fatalf("Discovery service is required to use the -distribute flag")
+			fatalf("Discovery service is required to use the -distribute flag")
 		}
 
 		// If it's a 64-character hex string, it's an ID. Otherwise, resolve it via names service.
 		distID, err := resolveWithRetry(dClient, distributeArg, 5, 2*time.Second)
 		if err != nil {
-			log.Fatalf("Warning: Could not resolve distribute name %v", err)
+			fatalf("Warning: Could not resolve distribute name %v", err)
 		}
 
 		desc, ok := dClient.Get(context.Background(), distID)
 		if !ok {
-			log.Fatalf("Could not find distribute service %s in discovery", distID)
+			fatalf("Could not find distribute service %s in discovery", distID)
 		}
 
 		distClient := distribute.NewClient(desc.Address, httpClient)
 		if err := distClient.Register(id); err != nil {
-			log.Fatalf("Failed to register with distribute service %s: %v", distID, err)
+			fatalf("Failed to register with distribute service %s: %v", distID, err)
 		}
 		log.Printf("Registered with distribute service %s at %s", distID, desc.Address)
 
@@ -343,5 +357,5 @@ func main() {
 	} else {
 		log.Printf("Using In-Memory storage")
 	}
-	log.Fatal(http.Serve(listener, server))
+	fatal(http.Serve(listener, server))
 }

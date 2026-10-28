@@ -35,7 +35,7 @@ func runNfs(globalCfg *config.InvariantConfig, args []string) {
 
 	server, err := nfs.Start(ctx, listenAddr, filesrv, 1) // 1 is root
 	if err != nil {
-		log.Fatalf("Failed to start NFS server: %v", err)
+		fatalf("Failed to start NFS server: %v", err)
 	}
 	defer server.Close()
 

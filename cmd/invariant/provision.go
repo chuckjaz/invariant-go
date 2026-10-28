@@ -43,13 +43,13 @@ func runProvision(globalCfg *config.InvariantConfig, args []string) {
 
 	svcCfg, err := start.LoadConfig(configPath, "")
 	if err != nil {
-		log.Fatalf("Failed to load configuration %s: %v", configPath, err)
+		fatalf("Failed to load configuration %s: %v", configPath, err)
 	}
 
 	if binDir == "" {
 		exePath, err := os.Executable()
 		if err != nil {
-			log.Fatalf("Failed to get executable path: %v", err)
+			fatalf("Failed to get executable path: %v", err)
 		}
 		binDir = filepath.Dir(exePath)
 	}
@@ -58,7 +58,7 @@ func runProvision(globalCfg *config.InvariantConfig, args []string) {
 	defer cancel()
 
 	if err := provisionServices(ctx, globalCfg, svcCfg, binDir, discoveryURL, installMissing); err != nil {
-		log.Fatalf("Provisioning failed: %v", err)
+		fatalf("Provisioning failed: %v", err)
 	}
 	log.Println("All services in configuration have valid service tokens.")
 }

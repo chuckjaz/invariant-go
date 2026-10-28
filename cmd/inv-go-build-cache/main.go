@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -19,6 +20,14 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/slots"
 	"github.com/chuckjaz/invariant-go/internal/storage"
 )
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
 
 func main() {
 	var cacheDir string
@@ -59,7 +68,7 @@ func main() {
 
 	invCfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Error loading invariant configuration: %v", err)
+		fatalf("Error loading invariant configuration: %v", err)
 	}
 
 	discURL := discoveryURL
@@ -139,18 +148,18 @@ func main() {
 		case "SuppliedAllKey":
 			writerOpts.KeyPolicy = content.SuppliedAllKey
 			if keyStr == "" {
-				log.Fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
+				fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
 			}
 			importHex, err := hex.DecodeString(keyStr)
 			if err != nil {
-				log.Fatalf("Error parsing --key: %v", err)
+				fatalf("Error parsing --key: %v", err)
 			}
 			if len(importHex) != 32 {
-				log.Fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
+				fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
 			}
 			writerOpts.SuppliedKey = importHex
 		default:
-			log.Fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
+			fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
 		}
 	}
 
@@ -165,10 +174,10 @@ func main() {
 
 	handler, err := buildcache.NewHandler(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize build cache handler: %v", err)
+		fatalf("Failed to initialize build cache handler: %v", err)
 	}
 
 	if err := handler.Start(os.Stdin, os.Stdout); err != nil {
-		log.Fatalf("Build cache handler exited with error: %v", err)
+		fatalf("Build cache handler exited with error: %v", err)
 	}
 }

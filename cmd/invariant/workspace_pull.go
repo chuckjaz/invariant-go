@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +37,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 
 	absDir, err := filepath.Abs(directory)
 	if err != nil {
-		log.Fatalf("invalid directory path: %v", err)
+		fatalf("invalid directory path: %v", err)
 	}
 
 	wsRoot := absDir
@@ -54,7 +53,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 		}
 		parent := filepath.Dir(wsRoot)
 		if parent == wsRoot {
-			log.Fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s or any parent directory", absDir)
+			fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s or any parent directory", absDir)
 		}
 		wsRoot = parent
 	}
@@ -69,11 +68,11 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 	if err == nil {
 		var wsInfo workspace.WorkspaceInfo
 		if err := json.Unmarshal(data, &wsInfo); err != nil {
-			log.Fatalf("Invalid workspace file %s: %v", wsPath, err)
+			fatalf("Invalid workspace file %s: %v", wsPath, err)
 		}
 		layers, err = workspace.ResolveLayers(context.Background(), slotsClient, finalStorage, wsInfo.Content)
 		if err != nil {
-			log.Fatalf("Failed to resolve layers: %v", err)
+			fatalf("Failed to resolve layers: %v", err)
 		}
 	} else {
 		layerData, layerErr := os.ReadFile(filepath.Join(wsRoot, ".invariant-layers"))
@@ -81,10 +80,10 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 			layerData, layerErr = os.ReadFile(filepath.Join(wsRoot, ".invariant-layer"))
 		}
 		if layerErr != nil {
-			log.Fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s", wsRoot)
+			fatalf("Could not find .invariant-workspace or .invariant-layer[s] in %s", wsRoot)
 		}
 		if err := json.Unmarshal(layerData, &layers); err != nil {
-			log.Fatalf("Failed to parse .invariant-layer from %s: %v", wsRoot, err)
+			fatalf("Failed to parse .invariant-layer from %s: %v", wsRoot, err)
 		}
 	}
 
@@ -99,7 +98,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if sourceLayer == nil {
-		log.Fatalf("Could not identify source layer")
+		fatalf("Could not identify source layer")
 	}
 
 	filesOpts := files.Options{
@@ -113,13 +112,13 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 
 	fs, err := files.NewInMemoryFiles(filesOpts)
 	if err != nil {
-		log.Fatalf("Failed to load source layer file tree: %v", err)
+		fatalf("Failed to load source layer file tree: %v", err)
 	}
 	defer fs.Close()
 
 	relPath, err := filepath.Rel(wsRoot, absDir)
 	if err != nil {
-		log.Fatalf("Failed to calculate relative path from workspace root: %v", err)
+		fatalf("Failed to calculate relative path from workspace root: %v", err)
 	}
 
 	startNode := uint64(1)
@@ -131,7 +130,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 			}
 			info, lookupErr := fs.Lookup(context.Background(), startNode, part)
 			if lookupErr != nil {
-				log.Fatalf("Path %s not found in workspace file tree", relPath)
+				fatalf("Path %s not found in workspace file tree", relPath)
 			}
 			startNode = info.Node
 		}
@@ -152,7 +151,7 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 
 		entries, err := fs.ReadDirectory(context.Background(), nodeID, 0, 0)
 		if err != nil {
-			log.Printf("Warning: failed to read dir %d: %v", nodeID, err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to read dir %d: %v\n", nodeID, err)
 			return
 		}
 
@@ -212,13 +211,13 @@ func runWorkspacePull(globalCfg *config.InvariantConfig, args []string) {
 			for nodeID := range jobs {
 				r, err := fs.ReadFile(context.Background(), nodeID, 0, 0)
 				if err != nil {
-					log.Printf("Warning: failed to read node %d: %v", nodeID, err)
+					fmt.Fprintf(os.Stderr, "Warning: failed to read node %d: %v\n", nodeID, err)
 					continue
 				}
 				n, err := io.Copy(io.Discard, r)
 				r.Close()
 				if err != nil && err != io.EOF {
-					log.Printf("Warning: error reading node %d: %v", nodeID, err)
+					fmt.Fprintf(os.Stderr, "Warning: error reading node %d: %v\n", nodeID, err)
 				}
 				atomic.AddUint64(&pulledBytes, uint64(n))
 			}

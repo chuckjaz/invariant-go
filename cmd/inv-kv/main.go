@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/chuckjaz/invariant-go/internal/content"
 	"github.com/chuckjaz/invariant-go/internal/discovery"
@@ -25,6 +27,19 @@ func generateID() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
 }
 
 func main() {
@@ -110,7 +125,7 @@ func main() {
 		var err error
 		btreeSlotAuth, err = hex.DecodeString(btreeSlotAuthHex)
 		if err != nil {
-			log.Fatalf("Invalid btree-slot-auth hex: %v", err)
+			fatalf("Invalid btree-slot-auth hex: %v", err)
 		}
 	}
 
@@ -119,7 +134,7 @@ func main() {
 		var err error
 		journalSlotAuth, err = hex.DecodeString(journalSlotAuthHex)
 		if err != nil {
-			log.Fatalf("Invalid journal-slot-auth hex: %v", err)
+			fatalf("Invalid journal-slot-auth hex: %v", err)
 		}
 	}
 
@@ -129,13 +144,13 @@ func main() {
 	}
 	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 	if discoveryURL == "" {
-		log.Fatalf("A discovery service URL is required to find storage and slots services")
+		fatalf("A discovery service URL is required to find storage and slots services")
 	}
 
 	keyFile = itp.ServiceKeyPath(dir, keyID, keyFile)
 	privKey, err := itp.LoadOrGenerateKey(keyFile)
 	if err != nil {
-		log.Fatalf("Failed to load or generate ITP key: %v", err)
+		fatalf("Failed to load or generate ITP key: %v", err)
 	}
 
 	resolvedToken, err := itp.ResolveOrRedeemToken(context.Background(), itp.ServiceAuthOptions{
@@ -150,7 +165,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to authenticate with discovery service: %v", err)
+		fatalf("Failed to authenticate with discovery service: %v", err)
 	}
 	if provisionInvite != "" {
 		log.Printf("Successfully provisioned service token to %s", itp.ServiceTokenPath(dir, keyID, tokenFile))
@@ -168,10 +183,10 @@ func main() {
 	findService := func(kind string) string {
 		id, err := disc.Find(context.Background(), kind, "", 1)
 		if err != nil {
-			log.Fatalf("Could not find %s service: %v", kind, err)
+			fatalf("Could not find %s service: %v", kind, err)
 		}
 		if len(id) == 0 {
-			log.Fatalf("Could not find %s service", kind)
+			fatalf("Could not find %s service", kind)
 		}
 		return id[0].Address
 	}
@@ -204,19 +219,19 @@ func main() {
 		case "SuppliedAllKey":
 			writerOpts.KeyPolicy = content.SuppliedAllKey
 			if keyStr == "" {
-				log.Fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
+				fatalf("Error: --key is required when --key-policy is SuppliedAllKey")
 			}
 
 			importHex, err := hex.DecodeString(keyStr)
 			if err != nil {
-				log.Fatalf("Error parsing --key: %v", err)
+				fatalf("Error parsing --key: %v", err)
 			}
 			if len(importHex) != 32 {
-				log.Fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
+				fatalf("Error: --key must be a 32-byte hex-encoded string (got %d bytes)", len(importHex))
 			}
 			writerOpts.SuppliedKey = importHex
 		default:
-			log.Fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
+			fatalf("Error: unsupported key-policy '%s'", keyPolicyStr)
 		}
 	}
 
@@ -235,7 +250,7 @@ func main() {
 		writerOpts,
 	)
 	if err != nil {
-		log.Fatalf("Failed to initialize KV store: %v", err)
+		fatalf("Failed to initialize KV store: %v", err)
 	}
 	defer store.Close()
 
@@ -252,7 +267,7 @@ func main() {
 		DERPMapURL:   derpMapURL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -279,7 +294,7 @@ func main() {
 		discovery.WithIdentity(nodeIdent),
 	)
 	if err != nil {
-		log.Fatalf("Failed to register with discovery service: %v", err)
+		fatalf("Failed to register with discovery service: %v", err)
 	}
 	log.Printf("Registered with discovery service %s as %s", discoveryURL, myID)
 
@@ -299,5 +314,5 @@ func main() {
 	} else {
 		log.Printf("KV service listening on %s (ITP Address: %s, Public Key: %s, BTree Slot ID: %s, Journal Slot ID: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public(), btreeSlotID, journalSlotID)
 	}
-	log.Fatal(http.Serve(listener, server))
+	fatal(http.Serve(listener, server))
 }

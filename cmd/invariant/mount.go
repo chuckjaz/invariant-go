@@ -39,11 +39,11 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 	}
 
 	if mountpoint == "" {
-		log.Fatalf("Mountpoint is required (specify [root] or --mount)")
+		fatalf("Mountpoint is required (specify [root] or --mount)")
 	}
 
 	if err := os.MkdirAll(mountpoint, 0755); err != nil {
-		log.Fatalf("Failed to create mountpoint directory %s: %v", mountpoint, err)
+		fatalf("Failed to create mountpoint directory %s: %v", mountpoint, err)
 	}
 
 	filesrv := SetupFileSystem(globalCfg, &commonFlags)
@@ -73,7 +73,7 @@ func runMount(globalCfg *config.InvariantConfig, args []string) {
 		GID:             gid,
 	})
 	if err != nil {
-		log.Fatalf("Mount fail: %v\n", err)
+		fatalf("Mount fail: %v\n", err)
 	}
 
 	log.Printf("Mounted on %s\n", mountpoint)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -26,7 +25,7 @@ func getClientKey() *tailcat.PrivateKey {
 		keyFile := itp.DefaultKeyPath("client")
 		pk, err := itp.LoadOrGenerateKey(keyFile)
 		if err != nil {
-			log.Fatalf("Failed to load or generate client key: %v", err)
+			fatalf("Failed to load or generate client key: %v", err)
 		}
 		cachedClientKey = pk
 	})

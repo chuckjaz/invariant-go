@@ -21,6 +21,19 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
+func fatalf(format string, args ...any) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(1)
+}
+
+func fatal(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	os.Exit(1)
+}
+
 func main() {
 	var listenIP bool
 	flag.BoolVar(&listenIP, "listen-ip", false, "Listen on a host IP port instead of using ITP (Tailcat)")
@@ -81,7 +94,7 @@ func main() {
 	if dir != "" {
 		fsd, err := discovery.NewFileSystemDiscovery(dir, snapshotInterval)
 		if err != nil {
-			log.Fatalf("Failed to initialize file system discovery: %v", err)
+			fatalf("Failed to initialize file system discovery: %v", err)
 		}
 
 		if storageURL != "" && slotsURL != "" {
@@ -169,7 +182,7 @@ func main() {
 			}
 			file.Close()
 		} else {
-			log.Fatalf("Failed to open service keys file %s: %v", serviceKeysFile, err)
+			fatalf("Failed to open service keys file %s: %v", serviceKeysFile, err)
 		}
 	}
 	if oauthUserInfoURL != "" {
@@ -189,7 +202,7 @@ func main() {
 			Port:     port,
 		})
 		if err != nil {
-			log.Fatalf("Failed to listen on IP port %d: %v", port, err)
+			fatalf("Failed to listen on IP port %d: %v", port, err)
 		}
 		defer listener.Close()
 		controlPlaneURL = fmt.Sprintf("http://127.0.0.1:%d", listener.Port())
@@ -204,14 +217,14 @@ func main() {
 		}
 		privKey, err := itp.LoadOrGenerateKey(keyFile)
 		if err != nil {
-			log.Fatalf("Failed to load or generate ITP key: %v", err)
+			fatalf("Failed to load or generate ITP key: %v", err)
 		}
 		listener, err = itp.Listen(context.Background(), itp.ListenOptions{
 			PrivateKey: privKey,
 			DERPMapURL: derpMapURL,
 		})
 		if err != nil {
-			log.Fatalf("Failed to listen on ITP: %v", err)
+			fatalf("Failed to listen on ITP: %v", err)
 		}
 		defer listener.Close()
 		server.WithPeerKeyResolver(listener)
@@ -251,5 +264,5 @@ func main() {
 		}
 	}
 
-	log.Fatal(http.Serve(listener, server))
+	fatal(http.Serve(listener, server))
 }
