@@ -17,10 +17,19 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/names"
 )
 
+func formatStatusAddress(addr string, verbose bool) string {
+	if !verbose && (strings.HasPrefix(addr, "itp://") || strings.HasPrefix(addr, "tailcat://")) {
+		return "<itp>"
+	}
+	return addr
+}
+
 func runStatus(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	var discoveryURL string
 	fs.StringVar(&discoveryURL, "discovery", "", "Discovery service URL")
+	var verbose bool
+	fs.BoolVar(&verbose, "verbose", false, "Show full target addresses")
 	_ = fs.Parse(args)
 
 	if discoveryURL == "" && globalCfg != nil {
@@ -117,7 +126,8 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 		if aliases == "" {
 			aliases = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", r.desc.ID, r.desc.Address, protos, tags, aliases, r.status)
+		targetAddr := formatStatusAddress(r.desc.Address, verbose)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", r.desc.ID, targetAddr, protos, tags, aliases, r.status)
 	}
 	w.Flush()
 }
