@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,5 +271,91 @@ func TestIPListener(t *testing.T) {
 	}
 	if ln.Addr() == nil {
 		t.Fatal("expected non-nil Addr for IP listener")
+	}
+}
+
+func TestITPConcurrentMultiServerDial(t *testing.T) {
+	t.Parallel()
+
+	logf := func(format string, args ...any) {
+		t.Logf(format, args...)
+	}
+	dm := integration.RunDERPAndSTUN(t, logger.Logf(logf), "127.0.0.1")
+	reg := dm.Regions[1]
+	if reg == nil {
+		t.Fatal("expected region 1 in DERPMap")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const numServers = 4
+	addrs := make([]string, numServers)
+	for i := range numServers {
+		ln, err := Listen(ctx, ListenOptions{
+			DERPRegion: reg,
+		})
+		if err != nil {
+			t.Fatalf("Listen %d failed: %v", i, err)
+		}
+		defer ln.Close()
+
+		id := fmt.Sprintf("svc-%d", i)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/id", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(id))
+		})
+		srv := &http.Server{Handler: mux}
+		go srv.Serve(ln)
+		defer srv.Close()
+
+		addrs[i] = ln.ITPAddr
+	}
+
+	clientKey := key.NewNode()
+	tr := NewTransport(clientKey, "")
+	defer tr.Close()
+	client := &http.Client{Transport: tr}
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	errs := make(chan error, numServers)
+
+	for i, addr := range addrs {
+		wg.Add(1)
+		go func(i int, addr string) {
+			defer wg.Done()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr+"/id", nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				errs <- err
+				return
+			}
+			want := fmt.Sprintf("svc-%d", i)
+			if string(body) != want {
+				errs <- fmt.Errorf("got %q, want %q", string(body), want)
+			}
+		}(i, addr)
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent request failed: %v", err)
+	}
+
+	elapsed := time.Since(start)
+	if elapsed >= 900*time.Millisecond {
+		t.Fatalf("concurrent dials took %v (expected < 900ms without 1s DERP retry delay)", elapsed)
 	}
 }

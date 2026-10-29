@@ -16,6 +16,13 @@ import (
 	"tailscale.com/types/logger"
 )
 
+type clientEntry struct {
+	client    *tailcat.Client
+	connected bool
+}
+
+var initDialMu sync.Mutex
+
 // Transport is an http.RoundTripper that handles itp:// URLs
 // using Tailcat WireGuard connections, while delegating http:// and https:// URLs.
 type Transport struct {
@@ -26,7 +33,7 @@ type Transport struct {
 	itpTransport *http.Transport
 
 	mu      sync.Mutex
-	clients map[tailcat.Addr]*tailcat.Client
+	clients map[tailcat.Addr]*clientEntry
 }
 
 // TransportOption configures a Transport.
@@ -44,7 +51,7 @@ func NewTransport(clientKey key.NodePrivate, bearerToken string, opts ...Transpo
 	t := &Transport{
 		ClientKey:   clientKey,
 		BearerToken: bearerToken,
-		clients:     make(map[tailcat.Addr]*tailcat.Client),
+		clients:     make(map[tailcat.Addr]*clientEntry),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -61,8 +68,36 @@ func NewTransport(clientKey key.NodePrivate, bearerToken string, opts ...Transpo
 			if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
 				port = p
 			}
-			client := t.getOrCreateClient(tailcat.Addr(host))
-			return client.DialTCPPort(ctx, uint16(port))
+			entry := t.getOrCreateClient(tailcat.Addr(host))
+			t.mu.Lock()
+			connected := entry.connected
+			t.mu.Unlock()
+
+			// Tailcat creates a separate DERP connection per Client instance.
+			// When multiple Clients share the same ClientKey and perform their
+			// initial DERP meow/meowed handshake concurrently, the DERP server
+			// only routes replies to the most recent writer for that public key,
+			// causing concurrent handshakes to drop packets and wait for the 1s
+			// retry ticker. Serializing the initial dial per peer avoids DERP
+			// active-client contention while allowing subsequent dials to run in parallel.
+			if !connected {
+				initDialMu.Lock()
+				t.mu.Lock()
+				connected = entry.connected
+				t.mu.Unlock()
+				if !connected {
+					conn, err := entry.client.DialTCPPort(ctx, uint16(port))
+					if err == nil {
+						t.mu.Lock()
+						entry.connected = true
+						t.mu.Unlock()
+					}
+					initDialMu.Unlock()
+					return conn, err
+				}
+				initDialMu.Unlock()
+			}
+			return entry.client.DialTCPPort(ctx, uint16(port))
 		},
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -73,12 +108,12 @@ func NewTransport(clientKey key.NodePrivate, bearerToken string, opts ...Transpo
 	return t
 }
 
-func (t *Transport) getOrCreateClient(tcAddr tailcat.Addr) *tailcat.Client {
+func (t *Transport) getOrCreateClient(tcAddr tailcat.Addr) *clientEntry {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if c, ok := t.clients[tcAddr]; ok {
-		return c
+	if entry, ok := t.clients[tcAddr]; ok {
+		return entry
 	}
 
 	logf := logger.Logf(log.Printf)
@@ -86,14 +121,16 @@ func (t *Transport) getOrCreateClient(tcAddr tailcat.Addr) *tailcat.Client {
 		logf = logger.Discard
 	}
 
-	c := &tailcat.Client{
-		Server:     tcAddr,
-		Key:        t.ClientKey,
-		Logf:       logf,
-		DERPMapURL: t.DERPMapURL,
+	entry := &clientEntry{
+		client: &tailcat.Client{
+			Server:     tcAddr,
+			Key:        t.ClientKey,
+			Logf:       logf,
+			DERPMapURL: t.DERPMapURL,
+		},
 	}
-	t.clients[tcAddr] = c
-	return c
+	t.clients[tcAddr] = entry
+	return entry
 }
 
 // RoundTrip executes a single HTTP transaction.
@@ -135,12 +172,12 @@ func (t *Transport) Close() error {
 	defer t.mu.Unlock()
 
 	var firstErr error
-	for _, c := range t.clients {
-		if err := c.Close(); err != nil && firstErr == nil {
+	for _, entry := range t.clients {
+		if err := entry.client.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	t.clients = make(map[tailcat.Addr]*tailcat.Client)
+	t.clients = make(map[tailcat.Addr]*clientEntry)
 	t.itpTransport.CloseIdleConnections()
 	return firstErr
 }

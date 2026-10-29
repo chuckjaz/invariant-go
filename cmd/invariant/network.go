@@ -14,10 +14,14 @@ import (
 )
 
 var (
-	cachedClientKey *tailcat.PrivateKey
-	cachedKeyOnce   sync.Once
-	registeredCPs   = make(map[string]bool)
-	registeredCPsMu sync.Mutex
+	cachedClientKey       *tailcat.PrivateKey
+	cachedKeyOnce         sync.Once
+	cachedHTTPClient      *http.Client
+	cachedHTTPClientToken string
+	cachedHTTPClientDERP  string
+	cachedHTTPClientMu    sync.Mutex
+	registeredCPs         = make(map[string]bool)
+	registeredCPsMu       sync.Mutex
 )
 
 func getClientKey() *tailcat.PrivateKey {
@@ -68,7 +72,17 @@ func newHTTPClient(cfg *config.InvariantConfig) *http.Client {
 		derpMapURL = cfg.DERPMapURL
 	}
 
-	return itp.NewHTTPClient(pk.Private, token, itp.WithDERPMapURL(derpMapURL))
+	cachedHTTPClientMu.Lock()
+	defer cachedHTTPClientMu.Unlock()
+
+	if cachedHTTPClient != nil && cachedHTTPClientToken == token && cachedHTTPClientDERP == derpMapURL {
+		return cachedHTTPClient
+	}
+
+	cachedHTTPClient = itp.NewHTTPClient(pk.Private, token, itp.WithDERPMapURL(derpMapURL))
+	cachedHTTPClientToken = token
+	cachedHTTPClientDERP = derpMapURL
+	return cachedHTTPClient
 }
 
 func newDiscoveryClient(discoveryURL string, cfg *config.InvariantConfig) *discovery.Client {
