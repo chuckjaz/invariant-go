@@ -382,3 +382,12 @@ func TestCLIErrorDisplayedWhenLoggingDisabled(t *testing.T) {
 		t.Fatalf("expected error message on stderr when logging is disabled, got: %q", string(out))
 	}
 }
+
+func TestITPAddrRegexMatchesBase64URL(t *testing.T) {
+	fullAddr := "itp://tcpGFwWCAyigmGfEXiFjhAdNhFmAQJA7TjYyXS1r89YkeKbSAGOGFrWCBDb9P064YswBhbl8uQt8WHQ-abc_123"
+	logLine := fmt.Sprintf("2026/10/28 18:10:00 Discovery service listening on ITP address %s (Public Key: nodekey:1234)...", fullAddr)
+	got := itpAddrRegex.FindString(logLine)
+	if got != fullAddr {
+		t.Fatalf("expected itpAddrRegex to match %q, got %q", fullAddr, got)
+	}
+}

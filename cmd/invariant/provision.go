@@ -22,7 +22,7 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/start"
 )
 
-var itpAddrRegex = regexp.MustCompile(`itp://[a-zA-Z0-9]+`)
+var itpAddrRegex = regexp.MustCompile(`itp://[a-zA-Z0-9_-]+`)
 
 func runProvision(globalCfg *config.InvariantConfig, args []string) {
 	fs := flag.NewFlagSet("provision", flag.ExitOnError)
@@ -125,6 +125,9 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 		derpMapURL = globalCfg.DERPMapURL
 	}
 	probeHTTP := itp.NewHTTPClient(pk.Private, "", itp.WithDERPMapURL(derpMapURL))
+	if tr, ok := probeHTTP.Transport.(*itp.Transport); ok {
+		defer tr.Close()
+	}
 	if err := waitForDiscoveryReady(ctx, discoveryURL, probeHTTP); err != nil {
 		return fmt.Errorf("discovery service at %s did not become ready: %w", discoveryURL, err)
 	}
@@ -134,8 +137,7 @@ func provisionServices(ctx context.Context, globalCfg *config.InvariantConfig, s
 		return fmt.Errorf("failed to obtain admin token for discovery: %w", err)
 	}
 
-	adminHTTP := itp.NewHTTPClient(pk.Private, adminToken, itp.WithDERPMapURL(derpMapURL))
-	adminClient := discovery.NewClient(discoveryURL, adminHTTP).WithAccessToken(adminToken)
+	adminClient := discovery.NewClient(discoveryURL, probeHTTP).WithAccessToken(adminToken)
 
 	for _, sc := range svcCfg.Services {
 		svcName := filepath.Base(sc.Command)
@@ -296,7 +298,7 @@ func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, bin
 	select {
 	case u := <-urlCh:
 		detectedURL = u
-	case <-time.After(3 * time.Second):
+	case <-time.After(30 * time.Second):
 	case <-ctx.Done():
 		return cmd, "", ctx.Err()
 	}
@@ -305,7 +307,8 @@ func startDiscoveryForProvision(ctx context.Context, sc start.ServiceConfig, bin
 }
 
 func waitForDiscoveryReady(ctx context.Context, discoveryURL string, httpClient *http.Client) error {
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
+	var lastErr error
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(discoveryURL, "/")+"/id", nil)
 		if err == nil {
@@ -315,7 +318,12 @@ func waitForDiscoveryReady(ctx context.Context, discoveryURL string, httpClient 
 				if resp.StatusCode == http.StatusOK {
 					return nil
 				}
+				lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			} else {
+				lastErr = err
 			}
+		} else {
+			lastErr = err
 		}
 		select {
 		case <-time.After(100 * time.Millisecond):
@@ -323,20 +331,19 @@ func waitForDiscoveryReady(ctx context.Context, discoveryURL string, httpClient 
 			return ctx.Err()
 		}
 	}
+	if lastErr != nil {
+		return fmt.Errorf("timed out waiting for %s/id: %w", discoveryURL, lastErr)
+	}
 	return fmt.Errorf("timed out waiting for %s/id", discoveryURL)
 }
 
 func ensureProvisionAdminToken(ctx context.Context, globalCfg *config.InvariantConfig, discoverySvc *start.ServiceConfig, discoveryURL string, unauthHTTP *http.Client) (string, error) {
 	pk := getClientKey()
-	derpMapURL := ""
-	if globalCfg != nil {
-		derpMapURL = globalCfg.DERPMapURL
-	}
 
 	if existing := resolveUserToken(globalCfg); existing != "" {
-		authHTTP := itp.NewHTTPClient(pk.Private, existing, itp.WithDERPMapURL(derpMapURL))
-		c := discovery.NewClient(discoveryURL, authHTTP).WithAccessToken(existing)
-		if ok, _, err := c.VerifyAccessToken(ctx, existing); err == nil && ok {
+		c := discovery.NewClient(discoveryURL, unauthHTTP).WithAccessToken(existing)
+		if ok, rec, err := c.VerifyAccessToken(ctx, existing); err == nil && ok && (rec == nil || rec.Role == discovery.RoleAdmin) {
+			_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), discoveryURL)
 			return existing, nil
 		}
 	}

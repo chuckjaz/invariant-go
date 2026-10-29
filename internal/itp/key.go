@@ -237,9 +237,12 @@ func ResolveOrRedeemToken(ctx context.Context, opts ServiceAuthOptions) (string,
 	// If an explicit invite code is provided, redeem it with Discovery
 	if inviteCode != "" && discoveryURL != "" && opts.PrivateKey != nil {
 		httpClient := NewHTTPClient(opts.PrivateKey.Private, "", WithDERPMapURL(opts.DERPMapURL))
+		if tr, ok := httpClient.Transport.(*Transport); ok {
+			defer tr.Close()
+		}
 		dClient := discovery.NewClient(discoveryURL, httpClient)
 
-		redeemCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		redeemCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		identName := opts.ServiceName
