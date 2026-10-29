@@ -128,7 +128,7 @@ func runSlot(globalCfg *config.InvariantConfig, args []string) {
 		if len(namesID) == 0 {
 			fmt.Fprintf(os.Stderr, "Warning: Could not find any names-v1 service to register name.\n")
 		} else {
-			namesClient := names.NewClient(namesID[0].Address, nil)
+			namesClient := names.NewClient(namesID[0].Address, httpClient)
 			err = namesClient.Put(context.Background(), *nameFlag, slotID, []string{"slot-v1"})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to register name: %v\n", err)

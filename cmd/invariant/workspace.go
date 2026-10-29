@@ -511,7 +511,7 @@ func initClients(globalCfg *config.InvariantConfig) (discovery.Discovery, finder
 	var storageClient storage.Storage
 	if finderAddr != "" {
 		finderClient = finder.NewClient(finderAddr, httpClient)
-		storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+		storageClient = storage.NewAggregateClient(finderClient, dClient, 3, 1000, storage.WithHTTPClient(httpClient))
 	} else {
 		sAddr := findService("storage-v1")
 		if sAddr == "" {

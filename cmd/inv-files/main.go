@@ -133,7 +133,7 @@ func main() {
 
 	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, httpClient)
-	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000, storage.WithHTTPClient(httpClient))
 	slotsAddr := findService("slots-v1")
 	slotsClient := slots.NewClient(slotsAddr, httpClient)
 

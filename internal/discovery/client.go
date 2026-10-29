@@ -64,6 +64,11 @@ func (c *Client) Token() string {
 	return c.token
 }
 
+// HTTPClient returns the underlying HTTP client used for requests.
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
+}
+
 // Get retrieves the service description for the given ID.
 func (c *Client) Get(ctx context.Context, id string) (ServiceDescription, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, id), nil)

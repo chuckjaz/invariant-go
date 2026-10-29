@@ -31,6 +31,31 @@ func TestIdentityClient_Success(t *testing.T) {
 	if id := clientNoPrefix.ID(); id != expectedID {
 		t.Errorf("Expected ID %s, got %s", expectedID, id)
 	}
+
+	// 3. With itp:// scheme and custom RoundTripper
+	itpAddr := "itp://tcpGFwWCAyigmGfEXiFjhAdNhFmAQJA7TjYyXS1r89YkeKbSAGOGFrWCBDb9P064YswBhbl8uQt8WHQ"
+	itpHTTPClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Scheme != "itp" {
+				t.Errorf("Expected scheme itp, got %s", req.URL.Scheme)
+			}
+			if req.URL.String() != itpAddr+"/id" {
+				t.Errorf("Expected URL %s/id, got %s", itpAddr, req.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       http.NoBody,
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	_ = NewClient(itpAddr, itpHTTPClient).ID()
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestIdentityClient_Errors(t *testing.T) {

@@ -383,7 +383,7 @@ func initRepoClients(globalCfg *config.InvariantConfig, explicitTag string) (sto
 				os.Exit(1)
 			}
 			finderAddr := findService("finder-v1", "")
-			var aggregateOpts []storage.AggregateClientOption
+			aggregateOpts := []storage.AggregateClientOption{storage.WithHTTPClient(httpClient)}
 			if writeTag != "" {
 				aggregateOpts = append(aggregateOpts, storage.WithWriteTagOption(writeTag))
 			}

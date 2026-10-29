@@ -65,6 +65,7 @@ type Listener struct {
 	TailcatAddr      tailcat.Addr
 	ITPAddr          string
 	PublicKey        key.NodePublic
+	controlPlane     discovery.ControlPlane
 	allowedMu        sync.RWMutex
 	allowedSet       map[key.NodePublic]bool
 	staticAllowed    []key.NodePublic
@@ -127,16 +128,13 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 
 	// Fetch authorized keys from ControlPlane if available
 	if opts.ControlPlane != nil {
-		// Seed with own public key so tailcat.Server activates allowlist mode immediately
 		selfPub := pk.Private.Public()
-		allowed = append(allowed, selfPub)
 		allowedSet[selfPub] = true
 
 		if authKeys, err := opts.ControlPlane.AuthorizedKeys(ctx); err == nil {
 			for _, kStr := range authKeys {
 				var k key.NodePublic
 				if err := k.UnmarshalText([]byte(kStr)); err == nil {
-					allowed = append(allowed, k)
 					allowedSet[k] = true
 				}
 			}
@@ -175,6 +173,7 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 		TailcatAddr:      tcAddr,
 		ITPAddr:          fmt.Sprintf("itp://%s", tcAddr),
 		PublicKey:        pk.Private.Public(),
+		controlPlane:     opts.ControlPlane,
 		allowedSet:       allowedSet,
 		staticAllowed:    staticCopy,
 		enforceAllowlist: enforceAllowlist,
@@ -185,7 +184,7 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 	if opts.ControlPlane != nil {
 		interval := opts.SyncInterval
 		if interval <= 0 {
-			interval = 30 * time.Second
+			interval = 5 * time.Second
 		}
 		go l.syncLoop(opts.ControlPlane, interval)
 	}
@@ -203,13 +202,48 @@ func (l *Listener) Accept() (net.Conn, error) {
 		}
 		if l.IsTailcat && l.enforceAllowlist {
 			pk, ok := l.PeerKey(conn.RemoteAddr().String())
-			if !ok || !l.IsClientAllowed(pk) {
+			if !ok {
 				_ = conn.Close()
 				continue
+			}
+			if !l.IsClientAllowed(pk) {
+				if l.controlPlane != nil {
+					l.syncControlPlaneKeys()
+				}
+				if !l.IsClientAllowed(pk) {
+					_ = conn.Close()
+					continue
+				}
 			}
 		}
 		return conn, nil
 	}
+}
+
+func (l *Listener) syncControlPlaneKeys() {
+	if l.controlPlane == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	keys, err := l.controlPlane.AuthorizedKeys(ctx)
+	cancel()
+	if err != nil {
+		return
+	}
+	newSet := make(map[key.NodePublic]bool)
+	newSet[l.PublicKey] = true
+	for _, sk := range l.staticAllowed {
+		newSet[sk] = true
+	}
+	for _, kStr := range keys {
+		var k key.NodePublic
+		if err := k.UnmarshalText([]byte(kStr)); err == nil {
+			newSet[k] = true
+		}
+	}
+	l.allowedMu.Lock()
+	l.allowedSet = newSet
+	l.allowedMu.Unlock()
 }
 
 func (l *Listener) syncLoop(cp discovery.ControlPlane, interval time.Duration) {
@@ -221,26 +255,7 @@ func (l *Listener) syncLoop(cp discovery.ControlPlane, interval time.Duration) {
 		case <-l.stopSync:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			keys, err := cp.AuthorizedKeys(ctx)
-			cancel()
-			if err == nil {
-				newSet := make(map[key.NodePublic]bool)
-				newSet[l.PublicKey] = true
-				for _, sk := range l.staticAllowed {
-					newSet[sk] = true
-				}
-				for _, kStr := range keys {
-					var k key.NodePublic
-					if err := k.UnmarshalText([]byte(kStr)); err == nil {
-						newSet[k] = true
-						l.server.AddAllowedClient(k)
-					}
-				}
-				l.allowedMu.Lock()
-				l.allowedSet = newSet
-				l.allowedMu.Unlock()
-			}
+			l.syncControlPlaneKeys()
 		}
 	}
 }

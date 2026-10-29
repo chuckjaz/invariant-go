@@ -13,6 +13,8 @@ import (
 	"tailscale.com/tstest/integration"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
+
+	"github.com/chuckjaz/invariant-go/internal/discovery"
 )
 
 func TestKeyPersistence(t *testing.T) {
@@ -191,6 +193,63 @@ func TestITPAdmissionControl(t *testing.T) {
 	_, err = cDisallowed.Do(reqDisallowed)
 	if err == nil {
 		t.Fatal("expected disallowed client to fail, got nil error")
+	}
+}
+
+func TestITPControlPlaneDynamicAdmission(t *testing.T) {
+	t.Parallel()
+
+	logf := func(format string, args ...any) {
+		t.Logf(format, args...)
+	}
+	dm := integration.RunDERPAndSTUN(t, logger.Logf(logf), "127.0.0.1")
+	reg := dm.Regions[1]
+	if reg == nil {
+		t.Fatal("expected region 1 in DERPMap")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cp := discovery.NewInMemoryDiscovery()
+
+	ln, err := Listen(ctx, ListenOptions{
+		DERPRegion:   reg,
+		ControlPlane: cp,
+		SyncInterval: 10 * time.Minute, // Long interval to verify on-demand sync in Accept()
+	})
+	if err != nil {
+		t.Fatalf("Listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/id", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("service-id-123"))
+	})
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	// Register a client key on the control plane AFTER the listener has already started
+	clientKey := key.NewNode()
+	if err := cp.RegisterClient(ctx, clientKey.Public().String(), discovery.NodeIdentity{Name: "cli"}); err != nil {
+		t.Fatalf("RegisterClient failed: %v", err)
+	}
+
+	tr := NewTransport(clientKey, "")
+	defer tr.Close()
+	client := &http.Client{Transport: tr}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ln.ITPAddr+"/id", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("expected dynamically authorized client to succeed immediately, got: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "service-id-123" {
+		t.Fatalf("expected service-id-123, got %q", string(body))
 	}
 }
 

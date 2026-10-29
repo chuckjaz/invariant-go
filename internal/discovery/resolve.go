@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/chuckjaz/invariant-go/internal/names"
 )
@@ -14,10 +15,15 @@ func ResolveName(ctx context.Context, dClient Discovery, idOrName string) (strin
 		return idOrName, nil
 	}
 
+	var httpClient *http.Client
+	if dc, ok := dClient.(*Client); ok && dc != nil {
+		httpClient = dc.HTTPClient()
+	}
+
 	namesServers, err := dClient.Find(ctx, "names-v1", "", 100)
 	if err == nil && len(namesServers) > 0 {
 		for _, ns := range namesServers {
-			nClient := names.NewClient(ns.Address, nil)
+			nClient := names.NewClient(ns.Address, httpClient)
 			entry, err := nClient.Get(ctx, idOrName)
 			if err == nil {
 				return entry.Value, nil

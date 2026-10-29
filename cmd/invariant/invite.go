@@ -247,6 +247,23 @@ func redeemInvitationWithOAuth(ctx context.Context, cfg *config.InvariantConfig,
 		Email: ident.Email,
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), discovery.ErrInvitationUsed.Error()) {
+			tokenPath := itp.DefaultTokenPath("client")
+			if existingToken, loadErr := itp.LoadAccessToken(tokenPath); loadErr == nil && existingToken != "" {
+				verifyHTTP := itp.NewHTTPClient(pk.Private, existingToken, itp.WithDERPMapURL(derpMapURL))
+				verifyClient := discovery.NewClient(discoveryURL, verifyHTTP).WithAccessToken(existingToken)
+				if valid, existingRec, vErr := verifyClient.VerifyAccessToken(redeemCtx, existingToken); vErr == nil && valid && existingRec != nil {
+					cpURL := existingRec.ControlPlaneURL
+					if cpURL == "" {
+						cpURL = discoveryURL
+					}
+					if cpURL != "" {
+						_ = itp.SaveAccessToken(itp.DefaultDiscoveryURLPath("client"), cpURL)
+					}
+					return existingRec, tokenPath, nil
+				}
+			}
+		}
 		return nil, "", err
 	}
 

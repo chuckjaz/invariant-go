@@ -3,6 +3,7 @@ package discovery
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,6 +102,10 @@ func (t *HealthTracker) checkAll() {
 
 	var wg sync.WaitGroup
 	for _, s := range services {
+		if strings.HasPrefix(s.Address, "itp://") || strings.HasPrefix(s.Address, "tailcat://") {
+			continue
+		}
+
 		t.mu.RLock()
 		status := t.statuses[s.ID]
 		t.mu.RUnlock()

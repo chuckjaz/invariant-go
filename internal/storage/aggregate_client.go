@@ -63,12 +63,20 @@ func WithWriteTagOption(tag string) AggregateClientOption {
 	}
 }
 
+// WithHTTPClient configures the AggregateClient to use the given HTTP client's transport when communicating with storage servers.
+func WithHTTPClient(httpClient *http.Client) AggregateClientOption {
+	return func(c *AggregateClient) {
+		c.httpClient = httpClient
+	}
+}
+
 // AggregateClient aggregates a finder, discovery service, and standard storage clients.
 type AggregateClient struct {
 	finder          finder.Finder
 	discovery       discovery.Discovery
 	numStoreServers int
 	writeTag        string
+	httpClient      *http.Client
 
 	// Live servers cache
 	liveMu          sync.RWMutex
@@ -115,11 +123,15 @@ func NewAggregateClient(f finder.Finder, d discovery.Discovery, numStoreServers,
 func (c *AggregateClient) Clone(opts ...AggregateClientOption) *AggregateClient {
 	c.liveMu.RLock()
 	currentTag := c.writeTag
+	httpClient := c.httpClient
 	c.liveMu.RUnlock()
 
 	client := NewAggregateClient(c.finder, c.discovery, c.numStoreServers, c.maxBlocks)
 	if currentTag != "" {
 		client.writeTag = currentTag
+	}
+	if httpClient != nil {
+		client.httpClient = httpClient
 	}
 	for _, opt := range opts {
 		opt(client)
@@ -207,8 +219,13 @@ func (c *AggregateClient) addLiveService(svc discovery.ServiceDescription) Stora
 		return client.client
 	}
 
+	baseTransport := http.DefaultTransport
+	if c.httpClient != nil && c.httpClient.Transport != nil {
+		baseTransport = c.httpClient.Transport
+	}
+
 	transport := &errorTrackingTransport{
-		base:     http.DefaultTransport,
+		base:     baseTransport,
 		serverID: svc.ID,
 		onError:  c.removeLiveServer,
 	}

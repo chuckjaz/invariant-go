@@ -195,7 +195,7 @@ func main() {
 	finderClient := finder.NewClient(finderAddr, httpClient)
 
 	// Create storage client
-	storageClient := storage.NewAggregateClient(finderClient, disc, 3, 1000)
+	storageClient := storage.NewAggregateClient(finderClient, disc, 3, 1000, storage.WithHTTPClient(httpClient))
 
 	slotsAddr := findService("slots-v1")
 

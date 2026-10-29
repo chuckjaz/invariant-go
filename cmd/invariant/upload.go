@@ -143,7 +143,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	finderAddr := findService("finder-v1")
 	finderClient := finder.NewClient(finderAddr, httpClient)
 	var storageClient storage.Storage
-	var aggregateOpts []storage.AggregateClientOption
+	aggregateOpts := []storage.AggregateClientOption{storage.WithHTTPClient(httpClient)}
 	writeTag := tagStr
 	if strings.EqualFold(writeTag, "any") {
 		writeTag = ""
@@ -317,7 +317,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 
 	if slotID != "" {
 		slotsAddr := findService("slots-v1")
-		slotsClient := slots.NewClient(slotsAddr, nil)
+		slotsClient := slots.NewClient(slotsAddr, httpClient)
 
 		err = slotsClient.Update(context.Background(), slotID, rootEntry.Content.Address, previousAddress, privKeyHex)
 		if err != nil {

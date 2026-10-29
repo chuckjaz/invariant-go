@@ -22,7 +22,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 		httpClient = &http.Client{Timeout: 2 * time.Second}
 	}
 	httpClient = httputil.NewDiagnosticClient(httpClient)
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "itp://") && !strings.HasPrefix(baseURL, "tailcat://") {
 		baseURL = "http://" + baseURL
 	}
 	return &Client{

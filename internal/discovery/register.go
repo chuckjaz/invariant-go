@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -66,11 +67,16 @@ func RegisterName(ctx context.Context, disc Discovery, name, id string, protocol
 		return fmt.Errorf("a discovery service is required for the service to be named")
 	}
 
+	var httpClient *http.Client
+	if dc, ok := disc.(*Client); ok && dc != nil {
+		httpClient = dc.HTTPClient()
+	}
+
 	var lastErr error
 	for range 5 {
 		nameServices, err := disc.Find(ctx, "names-v1", "", 1)
 		if err == nil && len(nameServices) > 0 {
-			nameClient := names.NewClient(nameServices[0].Address, nil)
+			nameClient := names.NewClient(nameServices[0].Address, httpClient)
 			err = nameClient.Put(ctx, name, id, protocols)
 			if err == nil {
 				return nil

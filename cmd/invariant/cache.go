@@ -86,7 +86,7 @@ func runCache(globalCfg *config.InvariantConfig, args []string) {
 
 		if finderAddr != "" {
 			finderClient := finder.NewClient(finderAddr, httpClient)
-			storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+			storageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000, storage.WithHTTPClient(httpClient))
 
 			var slotsClient slots.Slots
 			if slotsAddr != "" {

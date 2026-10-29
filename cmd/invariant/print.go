@@ -85,7 +85,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 	finderClient := finder.NewClient(finderAddr, httpClient)
-	baseStorageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000)
+	baseStorageClient := storage.NewAggregateClient(finderClient, dClient, 3, 1000, storage.WithHTTPClient(httpClient))
 	storageClient, _ := SetupCacheStorage(&cmFlags, baseStorageClient)
 
 	var link content.ContentLink
@@ -99,7 +99,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 		// Bypass sequential `discovery.ResolveName` by directly leveraging pre-fetched names-v1 endpoints
 		namesAddr := servicesByProtocol["names-v1"]
 		if namesAddr != "" {
-			nameClient := names.NewClient(namesAddr, nil)
+			nameClient := names.NewClient(namesAddr, httpClient)
 			entry, err := nameClient.Get(context.Background(), targetAddr)
 			if err == nil && entry.Value != "" {
 				targetAddr = entry.Value
@@ -114,7 +114,7 @@ func runPrint(globalCfg *config.InvariantConfig, args []string) {
 	slotsAddr := servicesByProtocol["slots-v1"]
 	var slotsClient slots.Slots
 	if slotsAddr != "" {
-		slotsClient = slots.NewClient(slotsAddr, nil)
+		slotsClient = slots.NewClient(slotsAddr, httpClient)
 	}
 	if link.Slot && slotsClient == nil {
 		fmt.Fprintf(os.Stderr, "Could not find slots-v1 service for slot lookup\n")
