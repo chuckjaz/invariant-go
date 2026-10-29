@@ -18,7 +18,7 @@ import (
 )
 
 func formatStatusAddress(addr string, verbose bool) string {
-	if !verbose && (strings.HasPrefix(addr, "itp://") || strings.HasPrefix(addr, "tailcat://")) {
+	if !verbose && strings.HasPrefix(addr, "itp://") {
 		return "<itp>"
 	}
 	return addr

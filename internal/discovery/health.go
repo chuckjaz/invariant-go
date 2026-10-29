@@ -102,7 +102,7 @@ func (t *HealthTracker) checkAll() {
 
 	var wg sync.WaitGroup
 	for _, s := range services {
-		if strings.HasPrefix(s.Address, "itp://") || strings.HasPrefix(s.Address, "tailcat://") {
+		if strings.HasPrefix(s.Address, "itp://") {
 			continue
 		}
 

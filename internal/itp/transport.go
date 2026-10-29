@@ -16,7 +16,7 @@ import (
 	"tailscale.com/types/logger"
 )
 
-// Transport is an http.RoundTripper that handles itp:// and tailcat:// URLs
+// Transport is an http.RoundTripper that handles itp:// URLs
 // using Tailcat WireGuard connections, while delegating http:// and https:// URLs.
 type Transport struct {
 	Base         http.RoundTripper
@@ -99,7 +99,7 @@ func (t *Transport) getOrCreateClient(tcAddr tailcat.Addr) *tailcat.Client {
 // RoundTrip executes a single HTTP transaction.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	scheme := strings.ToLower(req.URL.Scheme)
-	if scheme == "itp" || scheme == "tailcat" {
+	if scheme == "itp" {
 		reqClone := req.Clone(req.Context())
 		reqClone.URL.Scheme = "http"
 

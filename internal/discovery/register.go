@@ -32,7 +32,7 @@ func WithIdentity(id NodeIdentity) RegistrationOption {
 // with the discovery service. If the advertise address is empty, it uses localhost.
 // If it lacks a port, the port is appended.
 func AdvertiseAndRegister(ctx context.Context, disc Discovery, id, advertiseAddr string, port int, protocols, tags []string, opts ...RegistrationOption) error {
-	if strings.HasPrefix(advertiseAddr, "itp://") || strings.HasPrefix(advertiseAddr, "tailcat://") {
+	if strings.HasPrefix(advertiseAddr, "itp://") {
 		// ITP address, preserve as is
 	} else if advertiseAddr == "" {
 		advertiseAddr = fmt.Sprintf("http://localhost:%d", port)
