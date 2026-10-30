@@ -132,6 +132,107 @@ func TestCLIInviteRedeemAndTokenResolution(t *testing.T) {
 	}
 }
 
+func TestOAuthTokenAutoRefresh(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("INVARIANT_ACCESS_TOKEN", "")
+	t.Setenv("INVARIANT_OAUTH_TOKEN", "")
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "valid-refresh-token" {
+			http.Error(w, "invalid_grant", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"refreshed-alice-oauth-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenSrv.Close()
+
+	userInfoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer refreshed-alice-oauth-token" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sub":"123","name":"Alice","email":"alice@example.com"}`)
+			return
+		}
+		http.Error(w, "invalid oauth token", http.StatusUnauthorized)
+	}))
+	defer userInfoSrv.Close()
+
+	ctx := context.Background()
+
+	// 1. Expired token without a refresh token must fail
+	if err := SaveOAuthToken(&OAuthTokenFile{
+		AccessToken: "expired-alice-oauth-token",
+		Expiry:      time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("SaveOAuthToken failed: %v", err)
+	}
+	if _, _, err := requireLoggedInOAuth(ctx, oauthLoginOptions{
+		tokenURL:    tokenSrv.URL,
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	}); err == nil {
+		t.Fatalf("expected requireLoggedInOAuth to fail when expired and no refresh token is present")
+	}
+
+	// 2. Expired token with a valid refresh token automatically refreshes and saves the new token
+	if err := SaveOAuthToken(&OAuthTokenFile{
+		AccessToken:  "expired-alice-oauth-token",
+		RefreshToken: "valid-refresh-token",
+		Expiry:       time.Now().Add(-10 * time.Minute),
+		TokenURL:     tokenSrv.URL,
+	}); err != nil {
+		t.Fatalf("SaveOAuthToken failed: %v", err)
+	}
+
+	tf, ident, err := requireLoggedInOAuth(ctx, oauthLoginOptions{
+		userInfoURL: userInfoSrv.URL,
+		httpClient:  userInfoSrv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected requireLoggedInOAuth to auto-refresh token, got error: %v", err)
+	}
+	if tf.AccessToken != "refreshed-alice-oauth-token" {
+		t.Fatalf("expected refreshed access token, got %q", tf.AccessToken)
+	}
+	if tf.RefreshToken != "valid-refresh-token" {
+		t.Fatalf("expected refresh token to be preserved, got %q", tf.RefreshToken)
+	}
+	if ident.Email != "alice@example.com" {
+		t.Fatalf("expected verified email alice@example.com, got %q", ident.Email)
+	}
+
+	// Verify the refreshed token was persisted to ~/.invariant/oauth_token.json
+	persisted, err := LoadOAuthTokenFile()
+	if err != nil {
+		t.Fatalf("LoadOAuthTokenFile failed: %v", err)
+	}
+	if persisted.AccessToken != "refreshed-alice-oauth-token" || !persisted.Expiry.After(time.Now()) {
+		t.Fatalf("expected persisted token to be updated with future expiry, got %+v", persisted)
+	}
+
+	// 3. LoadOAuthToken also auto-refreshes when expired
+	if err := SaveOAuthToken(&OAuthTokenFile{
+		AccessToken:  "expired-alice-oauth-token",
+		RefreshToken: "valid-refresh-token",
+		Expiry:       time.Now().Add(-10 * time.Minute),
+		TokenURL:     tokenSrv.URL,
+	}); err != nil {
+		t.Fatalf("SaveOAuthToken failed: %v", err)
+	}
+	tok, err := LoadOAuthToken()
+	if err != nil {
+		t.Fatalf("LoadOAuthToken failed: %v", err)
+	}
+	if tok != "refreshed-alice-oauth-token" {
+		t.Fatalf("expected LoadOAuthToken to return refreshed token, got %q", tok)
+	}
+}
+
 func TestProvisionHelperProcess(t *testing.T) {
 	svcType := os.Getenv("GO_PROVISION_HELPER_SVC")
 	if svcType == "" {

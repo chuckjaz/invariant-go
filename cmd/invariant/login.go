@@ -32,6 +32,9 @@ type OAuthTokenFile struct {
 	Expiry       time.Time `json:"expiry"`
 	Name         string    `json:"name,omitempty"`
 	Email        string    `json:"email,omitempty"`
+	ClientID     string    `json:"client_id,omitempty"`
+	ClientSecret string    `json:"client_secret,omitempty"`
+	TokenURL     string    `json:"token_url,omitempty"`
 }
 
 // OAuthTokenPath returns the file path for storing the OAuth user token.
@@ -81,11 +84,19 @@ func LoadOAuthTokenFile() (*OAuthTokenFile, error) {
 }
 
 // LoadOAuthToken reads the OAuth access token from ~/.invariant/oauth_token.json,
-// or INVARIANT_OAUTH_TOKEN environment variable.
+// or INVARIANT_OAUTH_TOKEN environment variable. If the saved token is expired
+// and a refresh token is present, it automatically refreshes and saves the token.
 func LoadOAuthToken() (string, error) {
 	t, err := LoadOAuthTokenFile()
 	if err != nil {
 		return "", err
+	}
+	if !t.Expiry.IsZero() && time.Now().After(t.Expiry) && strings.TrimSpace(t.RefreshToken) != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := refreshOAuthToken(ctx, t, oauthLoginOptions{}); err == nil {
+			_ = SaveOAuthToken(t)
+		}
 	}
 	return t.AccessToken, nil
 }
@@ -202,13 +213,107 @@ func performOAuthLogin(ctx context.Context, opts oauthLoginOptions) (*OAuthToken
 	if tf.Name == "" {
 		tf.Name = ident.Name
 	}
+	if opts.clientID != "" && opts.clientID != defaultGoogleClientID {
+		tf.ClientID = opts.clientID
+	}
+	if opts.clientSecret != "" && opts.clientSecret != defaultGoogleClientSecret {
+		tf.ClientSecret = opts.clientSecret
+	}
+	if opts.tokenURL != "" && opts.tokenURL != defaultGoogleTokenURL {
+		tf.TokenURL = opts.tokenURL
+	}
 	if err := SaveOAuthToken(&tf); err != nil {
 		return nil, nil, fmt.Errorf("error saving OAuth token: %w", err)
 	}
 	return &tf, ident, nil
 }
 
+func refreshOAuthToken(ctx context.Context, tf *OAuthTokenFile, opts oauthLoginOptions) error {
+	if tf == nil || strings.TrimSpace(tf.RefreshToken) == "" {
+		return fmt.Errorf("no refresh token available")
+	}
+	resolved := resolveOAuthOptions(opts)
+	clientID := opts.clientID
+	if clientID == "" {
+		clientID = tf.ClientID
+	}
+	if clientID == "" {
+		clientID = resolved.clientID
+	}
+	clientSecret := opts.clientSecret
+	if clientSecret == "" {
+		clientSecret = tf.ClientSecret
+	}
+	if clientSecret == "" {
+		clientSecret = resolved.clientSecret
+	}
+	tokenURL := opts.tokenURL
+	if tokenURL == "" {
+		tokenURL = tf.TokenURL
+	}
+	if tokenURL == "" {
+		tokenURL = resolved.tokenURL
+	}
+	if tokenURL == "" {
+		return fmt.Errorf("no OAuth token URL configured")
+	}
+
+	data := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {strings.TrimSpace(tf.RefreshToken)},
+		"client_id":     {clientID},
+	}
+	if clientSecret != "" {
+		data.Set("client_secret", clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create token refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	httpClient := opts.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 15 * time.Second}
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("token refresh returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResp oauthTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return fmt.Errorf("failed to decode refreshed token response: %w", err)
+	}
+
+	refreshed := tokenResp.toTokenFile()
+	if strings.TrimSpace(refreshed.AccessToken) == "" {
+		return fmt.Errorf("token refresh returned empty access token")
+	}
+
+	tf.AccessToken = refreshed.AccessToken
+	if refreshed.TokenType != "" {
+		tf.TokenType = refreshed.TokenType
+	}
+	if refreshed.RefreshToken != "" {
+		tf.RefreshToken = refreshed.RefreshToken
+	}
+	if !refreshed.Expiry.IsZero() {
+		tf.Expiry = refreshed.Expiry
+	}
+	return nil
+}
+
 func requireLoggedInOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTokenFile, *discovery.NodeIdentity, error) {
+	rawOpts := opts
 	opts = resolveOAuthOptions(opts)
 
 	if strings.TrimSpace(opts.manualToken) != "" {
@@ -234,11 +339,25 @@ func requireLoggedInOAuth(ctx context.Context, opts oauthLoginOptions) (*OAuthTo
 	if strings.HasPrefix(tok, "inv_at_") {
 		return nil, nil, fmt.Errorf("not logged in with OAuth: run 'invariant login' first")
 	}
+	refreshed := false
 	if !tf.Expiry.IsZero() && time.Now().After(tf.Expiry) {
-		return nil, nil, fmt.Errorf("OAuth credentials have expired: run 'invariant login' first")
+		if strings.TrimSpace(tf.RefreshToken) == "" {
+			return nil, nil, fmt.Errorf("OAuth credentials have expired: run 'invariant login' first")
+		}
+		if err := refreshOAuthToken(ctx, tf, rawOpts); err != nil {
+			return nil, nil, fmt.Errorf("OAuth credentials have expired and token refresh failed (run 'invariant login' again): %w", err)
+		}
+		refreshed = true
+		tok = strings.TrimSpace(tf.AccessToken)
 	}
 
 	ident, err := validateOAuthCredentials(ctx, tok, opts.userInfoURL, opts.httpClient)
+	if err != nil && !refreshed && strings.TrimSpace(tf.RefreshToken) != "" {
+		if refreshErr := refreshOAuthToken(ctx, tf, rawOpts); refreshErr == nil {
+			tok = strings.TrimSpace(tf.AccessToken)
+			ident, err = validateOAuthCredentials(ctx, tok, opts.userInfoURL, opts.httpClient)
+		}
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to validate saved OAuth credentials (run 'invariant login' again): %w", err)
 	}
@@ -347,6 +466,7 @@ func obtainBrowserOAuthToken(clientID, clientSecret, authURL, tokenURL string) (
 		"scope":                 {"openid https://www.googleapis.com/auth/userinfo.email"},
 		"state":                 {state},
 		"access_type":           {"offline"},
+		"prompt":                {"consent"},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}
