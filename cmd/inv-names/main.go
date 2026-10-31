@@ -63,7 +63,7 @@ func main() {
 	var enableTrace bool
 	flag.BoolVar(&enableTrace, "trace", false, "Enable distributed tracing on this service")
 	var enableLog bool
-	flag.BoolVar(&enableLog, "log", false, "Enable logging output")
+	flag.BoolVar(&enableLog, "log", true, "Enable logging output")
 	flag.Parse()
 
 	if !enableLog {

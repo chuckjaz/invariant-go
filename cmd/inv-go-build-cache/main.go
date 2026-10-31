@@ -58,7 +58,7 @@ func main() {
 	flag.StringVar(&keyStr, "key", "", "32-byte hex-encoded key (required if key-policy is SuppliedAllKey)")
 
 	var enableLog bool
-	flag.BoolVar(&enableLog, "log", false, "Enable logging output")
+	flag.BoolVar(&enableLog, "log", true, "Enable logging output")
 
 	flag.Parse()
 
