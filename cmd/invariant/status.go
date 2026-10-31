@@ -41,6 +41,8 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 
 	client := newDiscoveryClient(discoveryURL, globalCfg)
 	httpClient := newHTTPClient(globalCfg)
+	idHTTPClient := *httpClient
+	idHTTPClient.Timeout = 5 * time.Second
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -77,7 +79,7 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 		go func(i int, d discovery.ServiceDescription) {
 			defer wg.Done()
 
-			idClient := identity.NewClient(d.Address, httpClient)
+			idClient := identity.NewClient(d.Address, &idHTTPClient)
 			actualID := idClient.ID()
 
 			status := "OFFLINE / ERROR"
@@ -93,7 +95,10 @@ func runStatus(globalCfg *config.InvariantConfig, args []string) {
 			if actualID != "" {
 				seenNames := make(map[string]bool)
 				for _, nc := range nameClients {
-					if res, err := nc.Lookup(ctx, actualID); err == nil {
+					lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					res, err := nc.Lookup(lookupCtx, actualID)
+					lookupCancel()
+					if err == nil {
 						for _, n := range res {
 							if !seenNames[n] {
 								seenNames[n] = true

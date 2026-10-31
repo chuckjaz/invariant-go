@@ -221,6 +221,10 @@ func main() {
 	serviceKey = resolvedToken
 
 	httpClient := itp.NewHTTPClient(privKey.Private, serviceKey, itp.WithDERPMapURL(derpMapURL))
+	server.WithHTTPClient(httpClient)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
 
 	var dClient *discovery.Client
 	var cp discovery.ControlPlane
@@ -243,6 +247,24 @@ func main() {
 		fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
+
+	if listenIP {
+		log.Printf("Listening on :%d (HTTP)...", listener.Port())
+	} else {
+		log.Printf("Listening on %s (ITP Address: %s, Public Key: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
+	if s3Bucket != "" {
+		log.Printf("Using S3 storage at bucket %s (prefix: %s)", s3Bucket, s3Prefix)
+	} else if dir != "" {
+		log.Printf("Using File System storage at %s", dir)
+	} else {
+		log.Printf("Using In-Memory storage")
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- http.Serve(listener, server)
+	}()
 
 	if dClient != nil {
 		nodeIdent := discovery.NodeIdentity{
@@ -341,21 +363,5 @@ func main() {
 		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
-	if enableTrace {
-		server.WithTracer(trace.NewTracer(10000))
-	}
-
-	if listenIP {
-		log.Printf("Listening on :%d (HTTP)...", listener.Port())
-	} else {
-		log.Printf("Listening on %s (ITP Address: %s, Public Key: %s)...", listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
-	}
-	if s3Bucket != "" {
-		log.Printf("Using S3 storage at bucket %s (prefix: %s)", s3Bucket, s3Prefix)
-	} else if dir != "" {
-		log.Printf("Using File System storage at %s", dir)
-	} else {
-		log.Printf("Using In-Memory storage")
-	}
-	fatal(http.Serve(listener, server))
+	fatal(<-serveErr)
 }

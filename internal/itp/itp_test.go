@@ -359,3 +359,106 @@ func TestITPConcurrentMultiServerDial(t *testing.T) {
 		t.Fatalf("concurrent dials took %v (expected < 900ms without 1s DERP retry delay)", elapsed)
 	}
 }
+
+func TestITPServerAlsoDialingAsClient(t *testing.T) {
+	t.Parallel()
+
+	logf := func(format string, args ...any) {
+		t.Logf(format, args...)
+	}
+	dm := integration.RunDERPAndSTUN(t, logger.Logf(logf), "127.0.0.1")
+	reg := dm.Regions[1]
+	if reg == nil {
+		t.Fatal("expected region 1 in DERPMap")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Service B (e.g. inv-names)
+	pkB, err := LoadOrGenerateKey(filepath.Join(t.TempDir(), "b.key"))
+	if err != nil {
+		t.Fatalf("LoadOrGenerateKey B failed: %v", err)
+	}
+	lnB, err := Listen(ctx, ListenOptions{
+		PrivateKey: pkB,
+		DERPRegion: reg,
+	})
+	if err != nil {
+		t.Fatalf("Listen B failed: %v", err)
+	}
+	defer lnB.Close()
+
+	muxB := http.NewServeMux()
+	muxB.HandleFunc("/id", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("service-b"))
+	})
+	srvB := &http.Server{Handler: muxB}
+	go srvB.Serve(lnB)
+	defer srvB.Close()
+
+	// Service A (e.g. inv-finder / inv-storage) listens on ITP and then dials Service B
+	// using its own private key pkA.Private before Client C dials Service A.
+	pkA, err := LoadOrGenerateKey(filepath.Join(t.TempDir(), "a.key"))
+	if err != nil {
+		t.Fatalf("LoadOrGenerateKey A failed: %v", err)
+	}
+	lnA, err := Listen(ctx, ListenOptions{
+		PrivateKey: pkA,
+		DERPRegion: reg,
+	})
+	if err != nil {
+		t.Fatalf("Listen A failed: %v", err)
+	}
+	defer lnA.Close()
+
+	muxA := http.NewServeMux()
+	muxA.HandleFunc("/id", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("service-a"))
+	})
+	srvA := &http.Server{Handler: muxA}
+	go srvA.Serve(lnA)
+	defer srvA.Close()
+
+	// Service A dials Service B using pkA.Private
+	clientA := NewHTTPClient(pkA.Private, "")
+	defer clientA.Transport.(*Transport).Close()
+
+	reqAB, err := http.NewRequestWithContext(ctx, http.MethodGet, lnB.ITPAddr+"/id", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext A->B failed: %v", err)
+	}
+	respAB, err := clientA.Do(reqAB)
+	if err != nil {
+		t.Fatalf("Service A dialing Service B failed: %v", err)
+	}
+	bodyAB, _ := io.ReadAll(respAB.Body)
+	respAB.Body.Close()
+	if string(bodyAB) != "service-b" {
+		t.Fatalf("expected service-b, got %q", string(bodyAB))
+	}
+
+	// Now Client C (e.g. invariant status) dials Service A.
+	// Previously, Service A's outbound clientA connection replaced Service A's server on DERP
+	// because both used pkA.Private, causing Client C's dial to Service A to time out.
+	clientCKey := key.NewNode()
+	clientC := NewHTTPClient(clientCKey, "")
+	defer clientC.Transport.(*Transport).Close()
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer dialCancel()
+
+	reqCA, err := http.NewRequestWithContext(dialCtx, http.MethodGet, lnA.ITPAddr+"/id", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext C->A failed: %v", err)
+	}
+	respCA, err := clientC.Do(reqCA)
+	if err != nil {
+		t.Fatalf("Client C dialing Service A failed: %v", err)
+	}
+	bodyCA, _ := io.ReadAll(respCA.Body)
+	respCA.Body.Close()
+	if string(bodyCA) != "service-a" {
+		t.Fatalf("expected service-a, got %q", string(bodyCA))
+	}
+}

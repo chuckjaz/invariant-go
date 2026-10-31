@@ -161,7 +161,7 @@ func main() {
 		}
 	}
 
-	d := distribute.NewInMemoryDistribute(disc, repFactor, 3, destination, backupRate)
+	d := distribute.NewInMemoryDistribute(disc, repFactor, 3, destination, backupRate).WithHTTPClient(httpClient)
 	if disc != nil {
 		d.StartSync(10 * time.Second)
 	}
@@ -209,17 +209,19 @@ func main() {
 			fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, server.ID())
-	}
 
-	if name != "" {
-		go func() {
-			err := discovery.RegisterName(context.Background(), disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
-			if err != nil {
-				log.Printf("Failed to register name %q: %v", name, err)
-			} else {
-				log.Printf("Registered name %q for ID %s", name, server.ID())
-			}
-		}()
+		if name != "" {
+			go func() {
+				err := discovery.RegisterName(context.Background(), disc, name, server.ID(), []string{"distribute-v1", "notify-v1"})
+				if err != nil {
+					log.Printf("Failed to register name %q: %v", name, err)
+				} else {
+					log.Printf("Registered name %q for ID %s", name, server.ID())
+				}
+			}()
+		}
+	} else if name != "" {
+		fatalf("Cannot register name without a valid discovery service")
 	}
 
 	if listenIP {

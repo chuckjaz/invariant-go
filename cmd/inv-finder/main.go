@@ -188,17 +188,19 @@ func main() {
 			fatalf("Failed to register with discovery service: %v", err)
 		}
 		log.Printf("Registered with discovery service %s as %s", discoveryURL, id)
-	}
 
-	if name != "" {
-		go func() {
-			err := discovery.RegisterName(context.Background(), disc, name, id, []string{"finder-v1", "notify-v1"})
-			if err != nil {
-				log.Printf("Failed to register name %q: %v", name, err)
-			} else {
-				log.Printf("Registered name %q for ID %s", name, id)
-			}
-		}()
+		if name != "" {
+			go func() {
+				err := discovery.RegisterName(context.Background(), disc, name, id, []string{"finder-v1", "notify-v1"})
+				if err != nil {
+					log.Printf("Failed to register name %q: %v", name, err)
+				} else {
+					log.Printf("Registered name %q for ID %s", name, id)
+				}
+			}()
+		}
+	} else if name != "" {
+		fatalf("Cannot register name without a valid discovery service")
 	}
 
 	server := finder.NewFinderServer(f, disc)

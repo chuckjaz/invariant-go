@@ -166,6 +166,27 @@ func main() {
 	}
 	defer listener.Close()
 
+	server := slots.NewServer(s)
+	if enableTrace {
+		server.WithTracer(trace.NewTracer(10000))
+	}
+
+	if listenIP {
+		log.Printf("Slots service (ID %s) listening on :%d (HTTP)...", s.ID(), listener.Port())
+	} else {
+		log.Printf("Slots service (ID %s) listening on %s (ITP Address: %s, Public Key: %s)...", s.ID(), listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
+	}
+	if dir != "" {
+		log.Printf("Using File System Slots storage at %s", dir)
+	} else {
+		log.Printf("Using In-Memory Slots storage")
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- http.Serve(listener, server)
+	}()
+
 	if dClient != nil {
 		nodeIdent := discovery.NodeIdentity{
 			Name: name,
@@ -207,11 +228,6 @@ func main() {
 		fatalf("Cannot register name without a valid discovery service")
 	}
 
-	server := slots.NewServer(s)
-	if enableTrace {
-		server.WithTracer(trace.NewTracer(10000))
-	}
-
 	var notifyClients []slots.NotifyClient
 	if dClient != nil {
 		for nid := range strings.SplitSeq(notifyIDs, ",") {
@@ -242,16 +258,5 @@ func main() {
 		server.StartNotification(context.Background(), notifyClients, notifyBatchSize, notifyBatchDuration)
 	}
 
-	if listenIP {
-		log.Printf("Slots service (ID %s) listening on :%d (HTTP)...", s.ID(), listener.Port())
-	} else {
-		log.Printf("Slots service (ID %s) listening on %s (ITP Address: %s, Public Key: %s)...", s.ID(), listener.ITPAddr, listener.ITPAddr, privKey.Private.Public())
-	}
-	if dir != "" {
-		log.Printf("Using File System Slots storage at %s", dir)
-	} else {
-		log.Printf("Using In-Memory Slots storage")
-	}
-
-	fatal(http.Serve(listener, server))
+	fatal(<-serveErr)
 }

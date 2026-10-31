@@ -2,6 +2,8 @@ package itp
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -13,10 +15,27 @@ import (
 
 	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"github.com/tailscale/tailcat"
+	"go4.org/mem"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
 )
+
+// serverKeyForNode deterministically derives a separate WireGuard node private
+// key for the Tailcat server from a service's primary private key. Using a
+// distinct server key prevents DERP public-key collisions when the same
+// service process also dials outbound ITP connections as a Tailcat client
+// using pk.Private.
+func serverKeyForNode(k key.NodePrivate) key.NodePrivate {
+	raw := k.Raw32()
+	mac := hmac.New(sha256.New, raw[:])
+	mac.Write([]byte("github.com/chuckjaz/invariant-go itp server key v1"))
+	srvRaw := mac.Sum(nil)
+	srvRaw[0] &= 248
+	srvRaw[31] &= 127
+	srvRaw[31] |= 64
+	return key.NodePrivateFromRaw32(mem.B(srvRaw))
+}
 
 // ListenOptions configures an ITP or IP listener.
 type ListenOptions struct {
@@ -146,8 +165,10 @@ func Listen(ctx context.Context, opts ListenOptions) (*Listener, error) {
 		logf = logger.Discard
 	}
 
+	serverKey := serverKeyForNode(pk.Private)
+
 	srv := &tailcat.Server{
-		Key:            pk.Private,
+		Key:            serverKey,
 		PresharedKey:   pk.Public.PresharedKey,
 		Logf:           logf,
 		Region:         opts.DERPRegion,

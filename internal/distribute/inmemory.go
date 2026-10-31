@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"log"
 	"maps"
+	"net/http"
 	"slices"
 	"sort"
 	"sync"
@@ -30,6 +31,7 @@ type InMemoryDistribute struct {
 	blockLocations       map[string][]string   // block -> list of storage service IDs
 	lastActiveNodesCount int
 	discovery            discovery.Discovery
+	httpClient           *http.Client
 	repFactor            int
 	maxAttempts          int
 	destination          string
@@ -59,6 +61,12 @@ func NewInMemoryDistribute(disc discovery.Discovery, repFactor int, maxAttempts 
 			isDestination: true,
 		}
 	}
+	return d
+}
+
+// WithHTTPClient sets the HTTP client used when communicating with storage services.
+func (d *InMemoryDistribute) WithHTTPClient(c *http.Client) *InMemoryDistribute {
+	d.httpClient = c
 	return d
 }
 
@@ -329,7 +337,7 @@ func (d *InMemoryDistribute) Sync() {
 
 						// Create store client from destSrv URL
 						// And tell dest to fetch from source via its ID so dest looks it up in discovery
-						c := storage.NewClient(destAddr, nil)
+						c := storage.NewClient(destAddr, d.httpClient)
 						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 						err := c.Fetch(ctx, block, sourceSrvID, sourceAddr)
 						cancel()
@@ -398,7 +406,7 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 		return // Can't resolve destination
 	}
 
-	destClient := storage.NewClient(destAddr, nil)
+	destClient := storage.NewClient(destAddr, d.httpClient)
 
 	// Reset rate limit window if an hour has passed
 	d.mu.Lock()
@@ -434,7 +442,7 @@ func (d *InMemoryDistribute) syncToDestination(blockLocations map[string][]strin
 			continue
 		}
 
-		sourceClient := storage.NewClient(sourceAddr, nil)
+		sourceClient := storage.NewClient(sourceAddr, d.httpClient)
 		ctxSize, cancelSize := context.WithTimeout(context.Background(), 3*time.Second)
 		size, ok := sourceClient.Size(ctxSize, block)
 		cancelSize()

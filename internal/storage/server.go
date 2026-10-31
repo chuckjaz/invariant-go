@@ -18,13 +18,14 @@ import (
 )
 
 type StorageServer struct {
-	id        string
-	storage   Storage
-	discovery discovery.Discovery
-	cacheMu   sync.RWMutex
-	devCache  map[string]discovery.ServiceDescription
-	handler   http.Handler
-	tracer    *trace.Tracer
+	id         string
+	storage    Storage
+	discovery  discovery.Discovery
+	httpClient *http.Client
+	cacheMu    sync.RWMutex
+	devCache   map[string]discovery.ServiceDescription
+	handler    http.Handler
+	tracer     *trace.Tracer
 }
 
 func NewStorageServer(storage Storage) *StorageServer {
@@ -50,6 +51,13 @@ func NewStorageServer(storage Storage) *StorageServer {
 func (s *StorageServer) WithTracer(t *trace.Tracer) *StorageServer {
 	s.tracer = t
 	s.handler = s.Handler()
+	return s
+}
+
+// WithHTTPClient sets the HTTP client used by the storage server when fetching
+// blocks from remote storage services (e.g., over ITP).
+func (s *StorageServer) WithHTTPClient(c *http.Client) *StorageServer {
+	s.httpClient = c
 	return s
 }
 
@@ -210,7 +218,7 @@ func (s *StorageServer) handleFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a storage client pointing at the remote node
-	remoteClient := NewClient(desc.Address, nil)
+	remoteClient := NewClient(desc.Address, s.httpClient)
 
 	// Stream the data directly from the remote node to our local storage
 	data, ok := remoteClient.Get(r.Context(), reqBody.Address)
