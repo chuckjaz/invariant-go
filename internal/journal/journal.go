@@ -25,12 +25,15 @@ type entry[K comparable, V any] struct {
 // V: The map value type.
 type Store[K comparable, V any] struct {
 	mu               sync.RWMutex
+	snapshotMu       sync.Mutex
 	store            map[K]V
 	baseDir          string
 	journalFile      *os.File
 	journalName      string
 	snapshotInterval time.Duration
+	stopOnce         sync.Once
 	stopCh           chan struct{}
+	wg               sync.WaitGroup
 }
 
 // NewStore creates a new Store, loads the snapshot, applies the journals,
@@ -87,7 +90,11 @@ func NewStore[K comparable, V any](
 
 	// 4. Start background snapshot goroutine
 	if snapshotInterval > 0 {
-		go s.snapshotLoop()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.snapshotLoop()
+		}()
 	}
 
 	return s, nil
@@ -135,7 +142,10 @@ func (s *Store[K, V]) openNewJournal() error {
 
 // Close gracefully stops the snapshot loop and closes the open journal file.
 func (s *Store[K, V]) Close() error {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
+	s.wg.Wait()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.journalFile != nil {
@@ -148,8 +158,7 @@ func (s *Store[K, V]) Close() error {
 
 // Snapshot creates an immediate snapshot of the in-memory store and starts a new journal.
 func (s *Store[K, V]) Snapshot() error {
-	s.doSnapshot()
-	return nil
+	return s.doSnapshot()
 }
 
 // Get safely retrieves a value from the store.
@@ -234,12 +243,15 @@ func (s *Store[K, V]) snapshotLoop() {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
-			s.doSnapshot()
+			_ = s.doSnapshot()
 		}
 	}
 }
 
-func (s *Store[K, V]) doSnapshot() {
+func (s *Store[K, V]) doSnapshot() error {
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+
 	s.mu.Lock()
 	// Copy the map to safely marshal it outside the lock
 	storeCopy := make(map[K]V, len(s.store))
@@ -248,40 +260,40 @@ func (s *Store[K, V]) doSnapshot() {
 	// Create new journal while holding the lock
 	if err := s.openNewJournal(); err != nil {
 		s.mu.Unlock()
-		return
+		return err
 	}
 	newJournal := s.journalName
 	s.mu.Unlock()
 
 	// 1. Write the copied store to a temporary snapshot file
-	tmpPath := filepath.Join(s.baseDir, "snapshot.tmp")
-	file, err := os.Create(tmpPath)
+	tmpFile, err := os.CreateTemp(s.baseDir, "snapshot-*.tmp")
 	if err != nil {
-		return
+		return err
 	}
+	tmpPath := tmpFile.Name()
 
-	if err := json.NewEncoder(file).Encode(storeCopy); err != nil {
-		file.Close()
+	if err := json.NewEncoder(tmpFile).Encode(storeCopy); err != nil {
+		tmpFile.Close()
 		os.Remove(tmpPath)
-		return
+		return err
 	}
 
 	// Fsync before close
-	if err := file.Sync(); err != nil {
-		file.Close()
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
 		os.Remove(tmpPath)
-		return
+		return err
 	}
-	if err := file.Close(); err != nil {
+	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
-		return
+		return err
 	}
 
 	// 2. Rename the temporary snapshot to the actual snapshot
 	finalPath := filepath.Join(s.baseDir, "snapshot.json")
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		os.Remove(tmpPath)
-		return
+		return err
 	}
 
 	// 3. Safely remove old journals
@@ -295,4 +307,5 @@ func (s *Store[K, V]) doSnapshot() {
 			}
 		}
 	}
+	return nil
 }
