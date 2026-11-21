@@ -126,10 +126,12 @@ func (s *CachingStorage) init() {
 				s.currentSize += sizesToAdd[i]
 			}
 		}
+		shouldEvict := s.currentSize > s.desiredSize
 		s.mu.Unlock()
+		if shouldEvict {
+			s.signalEviction()
+		}
 	}
-
-	s.checkEviction()
 }
 
 func (s *CachingStorage) Close() {
@@ -137,11 +139,18 @@ func (s *CachingStorage) Close() {
 }
 
 func (s *CachingStorage) checkEviction() {
-	if s.currentSize > s.desiredSize {
-		select {
-		case s.evict <- struct{}{}:
-		default:
-		}
+	s.mu.Lock()
+	shouldEvict := s.currentSize > s.desiredSize
+	s.mu.Unlock()
+	if shouldEvict {
+		s.signalEviction()
+	}
+}
+
+func (s *CachingStorage) signalEviction() {
+	select {
+	case s.evict <- struct{}{}:
+	default:
 	}
 }
 
@@ -167,7 +176,9 @@ func (s *CachingStorage) addUsed(address string, size int64) {
 	s.lruMap[address] = elem
 	s.currentSize += size
 
-	s.checkEviction()
+	if s.currentSize > s.desiredSize {
+		s.signalEviction()
+	}
 }
 
 type asyncTeeReadCloser struct {
