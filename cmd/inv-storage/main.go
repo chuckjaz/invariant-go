@@ -318,11 +318,12 @@ func main() {
 				continue
 			}
 
-			hid, err = resolveWithRetry(dClient, hid, 5, 2*time.Second)
+			resolvedID, err := resolveWithRetry(dClient, hid, 5, 2*time.Second)
 			if err != nil {
 				fatalf("Could not resolve notify name/id %s: %v", hid, err)
 				continue
 			}
+			hid = resolvedID
 
 			desc, ok := dClient.Get(context.Background(), hid)
 			if !ok {

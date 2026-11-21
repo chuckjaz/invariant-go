@@ -3,6 +3,7 @@ package finder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/chuckjaz/invariant-go/internal/discovery"
@@ -64,8 +65,7 @@ func (s *FinderServer) handleFind(w http.ResponseWriter, r *http.Request) {
 
 	responses, err := s.finder.Find(r.Context(), address)
 	if err != nil {
-		// Differentiate between bad address formats and internal errors
-		if err.Error() == "invalid block address format: encoding/hex: invalid byte: U+007A 'z'" {
+		if errors.Is(err, ErrInvalidAddress) {
 			http.Error(w, "Bad Request: invalid address format", http.StatusBadRequest)
 			return
 		}

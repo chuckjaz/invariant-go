@@ -2,10 +2,14 @@ package finder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 )
+
+// ErrInvalidAddress is returned when a block address is not valid hex.
+var ErrInvalidAddress = errors.New("invalid block address format")
 
 // FindResponse represents a service holding or knowing about a block.
 type FindResponse struct {
@@ -90,7 +94,7 @@ func (f *MemoryFinder) Find(ctx context.Context, address string) ([]FindResponse
 	// Not found locally. Use Kademlia routing to find the closest finders.
 	targetID, err := ParseNodeID(address)
 	if err != nil {
-		return nil, fmt.Errorf("invalid block address format: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAddress, err)
 	}
 
 	closestFinders := f.routingTable.FindClosest(targetID, BucketSize)
