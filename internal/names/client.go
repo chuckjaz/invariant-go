@@ -30,7 +30,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 
 // Get retrieves the name entry for a given name.
 func (c *Client) Get(ctx context.Context, name string) (NameEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", c.baseURL, url.PathEscape(name)), nil)
 	if err != nil {
 		return NameEntry{}, err
 	}
@@ -58,7 +58,7 @@ func (c *Client) Get(ctx context.Context, name string) (NameEntry, error) {
 
 // Put updates or creates a name entry.
 func (c *Client) Put(ctx context.Context, name string, value string, tokens []string) error {
-	u, err := url.Parse(fmt.Sprintf("%s/%s", c.baseURL, name))
+	u, err := url.Parse(fmt.Sprintf("%s/%s", c.baseURL, url.PathEscape(name)))
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (c *Client) Put(ctx context.Context, name string, value string, tokens []st
 
 // Delete removes a name entry.
 func (c *Client) Delete(ctx context.Context, name string, expectedValue string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s", c.baseURL, name), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s", c.baseURL, url.PathEscape(name)), nil)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (c *Client) Delete(ctx context.Context, name string, expectedValue string) 
 
 // Lookup queries the service for aliases registered against an ID.
 func (c *Client) Lookup(ctx context.Context, id string) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/lookup/%s", c.baseURL, id), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/lookup/%s", c.baseURL, url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
