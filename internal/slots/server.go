@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -51,15 +52,19 @@ func (s *Server) StartNotification(ctx context.Context, clients []NotifyClient, 
 	}
 
 	go func() {
+		// Subscribe before listing so slots created during/after List are never missed.
+		sub := s.slots.Subscribe(ctx)
+
 		// 1. Send initial batch of all existing slots
 		for batch := range s.slots.List(ctx, batchSize) {
 			for _, client := range clients {
-				_ = client.Notify(s.id, batch)
+				if err := client.Notify(s.id, batch); err != nil {
+					log.Printf("slots: initial notify failed: %v", err)
+				}
 			}
 		}
 
 		// 2. Listen for new slots and send them in batches
-		sub := s.slots.Subscribe(ctx)
 		var currentBatch []string
 		ticker := time.NewTicker(batchDuration)
 		defer ticker.Stop()
@@ -69,7 +74,9 @@ func (s *Server) StartNotification(ctx context.Context, clients []NotifyClient, 
 				return
 			}
 			for _, client := range clients {
-				_ = client.Notify(s.id, currentBatch)
+				if err := client.Notify(s.id, currentBatch); err != nil {
+					log.Printf("slots: batch notify failed: %v", err)
+				}
 			}
 			currentBatch = nil
 		}

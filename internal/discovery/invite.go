@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -284,7 +285,9 @@ func EnsureBootstrapInvitation(ctx context.Context, m InvitationManager, ttl tim
 					inv.Code = FormatInvitationCode(inv.Code, cpURL)
 				}
 				if inviteFilePath != "" {
-					_ = writeBootstrapInviteFile(inviteFilePath, inv.Code)
+					if err := writeBootstrapInviteFile(inviteFilePath, inv.Code); err != nil {
+						log.Printf("discovery: failed to write bootstrap invite file %s: %v", inviteFilePath, err)
+					}
 				}
 				return &inv, false, nil
 			}

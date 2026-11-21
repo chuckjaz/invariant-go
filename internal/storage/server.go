@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -92,15 +93,19 @@ func (s *StorageServer) StartNotification(ctx context.Context, clients []NotifyC
 			return
 		}
 
+		// Subscribe before listing so blocks stored during/after List are never missed.
+		sub := cStorage.Subscribe(ctx)
+
 		// 1. Send initial batch of all existing blocks
 		for batch := range cStorage.List(ctx, batchSize) {
 			for _, client := range clients {
-				_ = client.Notify(s.id, batch)
+				if err := client.Notify(s.id, batch); err != nil {
+					log.Printf("storage: initial notify failed: %v", err)
+				}
 			}
 		}
 
 		// 2. Listen for new blocks and send them in batches
-		sub := cStorage.Subscribe(ctx)
 		var currentBatch []string
 		ticker := time.NewTicker(batchDuration)
 		defer ticker.Stop()
@@ -110,7 +115,9 @@ func (s *StorageServer) StartNotification(ctx context.Context, clients []NotifyC
 				return
 			}
 			for _, client := range clients {
-				_ = client.Notify(s.id, currentBatch)
+				if err := client.Notify(s.id, currentBatch); err != nil {
+					log.Printf("storage: batch notify failed: %v", err)
+				}
 			}
 			currentBatch = nil
 		}

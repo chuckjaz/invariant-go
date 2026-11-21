@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -402,6 +403,7 @@ func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) R
 		if h.cfg.Storage != nil {
 			l, err := content.Write(bytes.NewReader(body), h.cfg.Storage, h.cfg.WriterOptions)
 			if err != nil {
+				log.Printf("buildcache: async storage write for %s failed: %v", keyName, err)
 				return
 			}
 			link = l
@@ -417,9 +419,13 @@ func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) R
 			}
 
 			entryBytes, err := json.Marshal(bgEntry)
-			if err == nil {
-				kvKey := fmt.Sprintf("go-build-cache:%x", actionID)
-				_, _ = h.cfg.KVStore.Put(context.Background(), nil, kvKey, entryBytes)
+			if err != nil {
+				log.Printf("buildcache: failed to marshal entry for %s: %v", keyName, err)
+				return
+			}
+			kvKey := fmt.Sprintf("go-build-cache:%x", actionID)
+			if _, err := h.cfg.KVStore.Put(context.Background(), nil, kvKey, entryBytes); err != nil {
+				log.Printf("buildcache: async KV put for %s failed: %v", keyName, err)
 			}
 		}
 	}(req.ActionID, req.OutputID, bodyData, now, fileName)

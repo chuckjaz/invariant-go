@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -171,6 +172,8 @@ func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 
 	// Send batches to the new finder
 	for sID, addrs := range pushMap {
-		_ = remoteClient.Notify(ctx, sID, addrs)
+		if err := remoteClient.Notify(ctx, sID, addrs); err != nil {
+			log.Printf("finder: notify peer %s for storage %s failed: %v", newFinderID, sID, err)
+		}
 	}
 }
