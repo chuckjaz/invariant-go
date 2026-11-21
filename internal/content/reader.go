@@ -212,7 +212,7 @@ func (r *blockListReader) updateLRU(targetIdx int) {
 	for i, k := range r.cacheKeys {
 		if k == targetIdx {
 			r.cacheKeys = append(r.cacheKeys[:i], r.cacheKeys[i+1:]...)
-			return
+			break
 		}
 	}
 	r.cacheKeys = append(r.cacheKeys, targetIdx)
