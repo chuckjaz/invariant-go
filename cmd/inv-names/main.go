@@ -89,7 +89,11 @@ func main() {
 		n = names.NewInMemoryNames()
 	}
 
-	id := n.(identity.Identity).ID()
+	idProvider, ok := n.(identity.Identity)
+	if !ok {
+		fatalf("Names backend does not implement identity.Identity")
+	}
+	id := idProvider.ID()
 	keyID := id
 	if dir == "" {
 		keyID = "names"

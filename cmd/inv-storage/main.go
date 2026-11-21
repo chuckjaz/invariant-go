@@ -191,7 +191,11 @@ func main() {
 	}
 
 	server := storage.NewStorageServer(s)
-	id := s.(identity.Identity).ID()
+	idProvider, ok := s.(identity.Identity)
+	if !ok {
+		fatalf("Storage backend does not implement identity.Identity")
+	}
+	id := idProvider.ID()
 	keyID := id
 	if dir == "" {
 		keyID = "storage"

@@ -140,7 +140,11 @@ func main() {
 
 	keyID := "kv"
 	if explicitBTreeSlotID != "" {
-		keyID = "kv-" + explicitBTreeSlotID[:8]
+		prefix := explicitBTreeSlotID
+		if len(prefix) > 8 {
+			prefix = prefix[:8]
+		}
+		keyID = "kv-" + prefix
 	}
 	discoveryURL = itp.ResolveDiscoveryURL(dir, keyID, discoveryURL, inviteCode)
 	if discoveryURL == "" {

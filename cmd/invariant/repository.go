@@ -756,7 +756,11 @@ func runRepoCommit(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("[%s] %s\n", hash[:8], c.Message)
+	short := hash
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	fmt.Printf("[%s] %s\n", short, c.Message)
 }
 
 func runRepoSync(globalCfg *config.InvariantConfig, args []string) {
@@ -945,7 +949,11 @@ func runRepoRevert(globalCfg *config.InvariantConfig, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("[%s] %s\n", res.RevertCommitHash[:8], res.NewCommit.Message)
+	short := res.RevertCommitHash
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	fmt.Printf("[%s] %s\n", short, res.NewCommit.Message)
 }
 
 func runRepoBlame(globalCfg *config.InvariantConfig, args []string) {
