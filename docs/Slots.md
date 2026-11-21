@@ -1,38 +1,40 @@
-# The invariant project - slots protocol
+# The invariant project - Slots Protocol
 
-A slots service is a container of mapping of an :id to to its current :address. The :id is a 32 byte hex encoded value. The :address is a string representing the sha256 hash of a content block. A slots service can be queried for the :address of a given :id. A slots service can be updated with a new :address for a given :id.
+A slots service maintains a mapping from a slot `:id` to its current `:address`. A slot `:id` is a 32-byte hex-encoded value, and `:address` is a string representing the SHA-256 hash of a content block. Slots can be queried for their current `:address` and updated atomically using compare-and-swap (`previousAddress`).
 
 ## Values
 
 ### `:id`
 
-A 32 byte hex encoded value.
+A 32-byte hex-encoded value.
 
 ### `:address`
 
-A string representing the sha256 hash of a content block.
+A string representing the SHA-256 hash of a content block.
 
 ### `:policy`
 
-A string representing the policy for the slot. The policy can be `ecc` for an Ed25519 256-bit elliptic curve key pair.
+A protection policy for the slot. Currently supported: `ecc` for an Ed25519 256-bit elliptic curve key pair (where `:id` is the hex-encoded public key).
 
 ## Endpoints
 
-## `GET /id`
+### `GET /id`
 
-Returns the ID of the slots service.
+Returns the ID of the slots service (`200 OK`, `Content-Type: text/plain`).
 
-## `GET /:id`
+### `GET /:id`
 
-Returns the :address for the given :id.
+Returns the `:address` for the given `:id` (`200 OK`, `Content-Type: text/plain`).
 
-## `PUT /:id`
+Returns `400 Bad Request` if `:id` is empty, `404 Not Found` if the slot does not exist, or `500 Internal Server Error` on failure.
 
-Sets the :address for the given :id. 
+### `PUT /:id`
 
-### Request
+Atomically updates the `:address` for the given `:id`.
 
-The request is a JSON object with TypeScript type of,
+#### Request
+
+JSON object matching `SlotUpdate`:
 
 ```ts
 interface SlotUpdate {
@@ -41,21 +43,21 @@ interface SlotUpdate {
 }
 ```
 
-The request is rejected if the current :address is not equal to previousAddress. Clients should use GET /:id to get the :address before attempting an update. If the address has changed the client should attempt to merge the changes, which depends on the content, before attempting to update again. The slots service does not validate the merge, it just uses previousAddress to enforce a serialization of updates.
+The request is rejected with `409 Conflict` if the slot's current `:address` does not equal `previousAddress`. Clients should use `GET /:id` to fetch the current `:address` before attempting an update, merge any concurrent changes, and retry.
 
-When a slot is created with a :policy, the :address is the public key of the :policy. Request to update the slot require an authorization header with the signature of the request data using the private key of the :policy.
+When a slot was created with a `:policy` (e.g., `ecc`), requests to update the slot must include an `Authorization` header containing the hex-encoded signature of the raw JSON request body signed with the slot's private key.
 
-### Response
+#### Response
 
-The response is empty.
+`200 OK` (empty body) on success, `400 Bad Request` on empty `:id` or invalid JSON, `401 Unauthorized` on missing or invalid signature, `404 Not Found` if the slot does not exist, `409 Conflict` on `previousAddress` mismatch, or `500 Internal Server Error` on failure.
 
 ### `POST /:id?protected=:policy`
 
-Create a new slot with the given :id.
+Create a new slot with the given `:id` and optional `protected` query parameter (`:policy`).
 
-### Request
+#### Request
 
-The request is a JSON object with TypeScript type of,
+JSON object matching `SlotRegistration`:
 
 ```ts
 interface SlotRegistration {
@@ -63,6 +65,6 @@ interface SlotRegistration {
 }
 ```
 
-### Response
+#### Response
 
-The response is empty.
+`200 OK` (empty body) on success, `400 Bad Request` on empty `:id` or invalid JSON, `409 Conflict` if the slot already exists, or `500 Internal Server Error` on failure.

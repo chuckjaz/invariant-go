@@ -1,49 +1,51 @@
 # The invariant project - Finder Protocol
 
-The finder protocol is a protocol for finding blocks in storage services.
-
-The finder service uses the Kademlia algorithm to find the storage service that have the given block ID.
+The Finder Protocol is a protocol for locating blocks across storage services using Kademlia routing.
 
 ## Version
 
-The version 1 of the finder protocol with the protocol token of finder-v1.
+Version 1 of the finder protocol uses the protocol token `finder-v1`.
 
 ## Values
 
 ### `:id`
 
-A ID which is a 32 byte hex encoded value.
+A service ID, which is a 32-byte hex-encoded value.
 
 ### `:address`
 
-A block ID which is a 32 byte hex encoded sha256 hash of the content of the block.
+A block address, which is a 32-byte hex-encoded SHA-256 hash of the block content.
 
 ## Endpoints
 
 ### `GET /id`
 
-Returns the ID of the finder service.
-
-### Response
-
-The hex encoded ID of the finder service.
+Returns the hex-encoded ID of the finder service (`200 OK`, `Content-Type: text/plain`).
 
 ### `GET /:address`
 
-Returns the ID of the storage service that has the given block address or the ID of another finder that may know about it. The response is an array of JSON objects with TypeScript type of,
+Returns the IDs of storage services that hold the given block address, or the IDs of peer finder services that may know about it.
+
+#### Response
+
+`200 OK` (`Content-Type: application/json`) returning a JSON array of `FindResponse` objects:
 
 ```ts
-interface FindResponse  {
+interface FindResponse {
     id: string;
-    protocol: string;
+    protocol: string; // "storage-v1" or "finder-v1"
 }
 ```
 
-The `protocol` is the protocol of the service. If it is a `storage-v1` then it has the block. If it is a `finder-v1` then it may know about the block and the client should query it. The client should query the services in the order they are returned. 
+If `protocol` is `storage-v1`, that service holds the block. If `protocol` is `finder-v1`, it is a peer finder closer in Kademlia distance that may know about the block. Clients should query the returned services in order.
 
-## `PUT /notify/:id`
+Returns `400 Bad Request` if `:address` is empty or not a valid hex block address, or `500 Internal Server Error` on failure.
 
-Notifies the finder service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with type of,
+### `PUT /notify/:id`
+
+Notifies the finder service that the storage service with `:id` has blocks with the given addresses (see [Notify Protocol](Notify.md)).
+
+#### Request
 
 ```ts
 interface HasRequest {
@@ -51,22 +53,20 @@ interface HasRequest {
 }
 ```
 
-### Response
+#### Response
 
-The response is empty.
+`200 OK` (empty body) on success, `400 Bad Request` on empty `:id` or invalid JSON, or `500 Internal Server Error` on failure.
 
-## PUT `/peer/:id`
+### `PUT /peer/:id`
 
-Notifies the finder service that there is another finder with `:id`.
+Notifies the finder service that another finder service exists with `:id`.
 
-A finder should notify other finders of its existence periodically. If a finder is created with a discovery service, it should register with the discovery service and then query for other finder services and notify them of its existence.
+A finder periodically notifies peer finders discovered via the discovery service. Once notified of a peer finder, it asynchronously pushes information about blocks it knows of that are closer in Kademlia XOR distance to the new peer than to itself.
 
-Once a finder has been notified of a finder, it should tell the finder of all the blocks it knows about that are closer to the new finder than the current finder. Closer is defined as having a smaller Kademlia distance from its ID and the block address. 
+#### Request
 
-### Request
+Empty body.
 
-The request is empty.
+#### Response
 
-### Response
-
-The response is empty.
+`200 OK` (empty body) on success, or `400 Bad Request` if `:id` is empty or peer registration fails.

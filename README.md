@@ -1,200 +1,167 @@
 # The invariant project
 
-A content addressing storage system that can be used to store arbitrary data. Data can be uploaded to the storage system and retrieved using a content link. The storage system is built on top of a distributed storage system that can be scaled arbitrarily.
+A content-addressed storage system that can be used to store arbitrary data. Data can be uploaded to the storage system and retrieved using a [ContentLink](docs/Content.md). The storage system is built on top of a distributed set of microservices that can be scaled arbitrarily.
 
-The system is made up of multiple micro-services that can be run independently or together and replaced or updated arbitrarily.
+The system is made up of multiple microservices that can be run independently or together and replaced or updated arbitrarily.
 
 ### File System
-A directory can be uploaded to the storage system and then mounted locally via FUSE or exported natively as an NFS server. The directory can then be interacted with as a regular file system. The file system can be mounted on multiple machines and will automatically sync from one machine to another.
+A directory can be uploaded to the storage system and then mounted locally via FUSE or exported natively as an [NFSv3 server](docs/NFS.md). The directory can then be interacted with as a regular file system. The file system can be mounted on multiple machines and will automatically sync from one machine to another.
 
-The file system can be layered, which allows for files in a directory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files are usually stored in some subdirectory of the project directory. The source files can cached locally, replicated to a network storage device, and always backed up to the cloud. The files could be stored only locally. This prevents files that can be rebuilt taking up space on the cloud storage provider.
+The file system can be layered ([Workspace](docs/Workspace.md)), which allows files in a directory to go to different storage devices or cloud storage providers. For example, a development directory is often made up of source files and built files. The source files can be cached locally, replicated to a network storage device, and always backed up to the cloud, while generated files are stored only locally.
 
-### Key-Value store
-A key-value store is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data. The key-value store is backed by an immutable journal, an immutable B-Tree index, and an in-memory cache.
+### Key-Value Store
+A [key-value store](docs/KeyValue.md) is built on top of the storage service. It provides a mechanism to store and retrieve arbitrary data backed by an immutable [journal](docs/Journal.md), an immutable B-Tree index, and an in-memory cache.
 
 ### Version Control Repository
 A distributed version control and code review system ([protocol and command description](docs/Repository.md)) is built on top of Invariant's content-addressable storage, mutable slots, names service, and layered FUSE workspaces. Commits, file trees, and blobs are stored directly in CAS rather than a local `.git` directory, and branches and change sets are mounted as isolated workspaces. It supports branching, 3-way merges and rebasing, integrated code reviews, and bidirectional synchronization with Git repositories.
 
-### Automatic backup and recovery
-The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encyrpted copies of the files at rest.
+### Automatic Backup and Recovery
+The system can be configured to automatically upload the file system to cloud storage providers such as AWS S3, Google Cloud Storage, or Azure Blob Storage. The system can be configured to compress and encrypt the data before uploading it to the cloud storage provider as well as only storing encrypted copies of the files at rest.
 
 If the local storage device fails, the system can be configured to automatically recover from the cloud storage provider incrementally. The files are then cached locally as they are read from the cloud storage provider.
 
 ### Replication
-When storing files locally, either on the same machine, or via a connected storage device, the data can be distributed among multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor. If the data is backed up to the cloud, the data will not be lost if the local storage device fails. The data will be read from the cloud storage provider not cached locally.
+When storing files locally, either on the same machine or via a connected storage device, the data can be distributed among multiple physical storage devices to improve redundancy and availability. These devices can be added and removed from the system arbitrarily, which will redistribute the data among the remaining devices or populate a new device with replications of the data. Data will not be lost if a storage device fails unless the total number of storage devices falls below the replication factor.
 
-## Microservices
+## Microservices and Tools
 
-The file system and key-value are built on microservices. Here is a list of the services and their descriptions.
+The file system, key-value store, and build cache are built on microservices:
 
 | Service | Command | Description |
-|---------|---------|-----|
-| Storage | `inv-storage` | The storage service is the primary service that is used to store and retrieve data. It is a content addressed storage system that is built on top of a distributed storage system that can be scaled arbitrarily. |
-| Finder | `inv-finder` | The finder service is responsible for finding data among multiple storage devices. |
-| Distribute | `inv-distribute` | The distribute service is responsible for distributing data among multiple storage devices. |
-| Discovery | `inv-discovery` | The discovery service allows service detection, service registration, and service delegation. |
-| Slots | `inv-slots` | The slots service is responsible for allocating and managing slots. Slots are updatable addresses that maintain the current address of the root of a file system or the key-value store journal. |
-| Names | `inv-names` | The names service is a naming layer that acts like a local DNS. It also can use DNS directly. The names service allow mapping names to IDs. Examples of mappings are a device ID to a human readable name, or a slot ID to a service name. |
-| Files | `inv-files` | A file services that is the backing service for the FUSE file system and the NFS service. |
-| KeyValue | `inv-kv` | A key-value store service that allows storing and retrieving values for a given key. |
+| ------- | ------- | ----------- |
+| Storage | `inv-storage` | Stores and retrieves content-addressed blobs ([Storage Protocol](docs/Storage.md)). Supports in-memory, filesystem, S3, Git, and GitHub backends. |
+| Finder | `inv-finder` | Locates blocks among storage services using Kademlia routing ([Finder Protocol](docs/Finder.md)). |
+| Distribute | `inv-distribute` | Replicates blocks across storage services ([Distribute Protocol](docs/Distribute.md)). |
+| Discovery | `inv-discovery` | Service detection, registration, control plane (`itp-v1`), invitations, and service keys ([Discovery Protocol](docs/Discovery.md)). |
+| Slots | `inv-slots` | Allocates and manages mutable slots for filesystem roots and KV journals ([Slots Protocol](docs/Slots.md)). |
+| Names | `inv-names` | Maps logical names to service IDs or block addresses, with DNS TXT fallback ([Names Protocol](docs/Names.md)). |
+| Files | `inv-files` | Filesystem service backing FUSE and NFS ([Files Protocol](docs/Files.md), [FileTree](docs/FileTree.md)). |
+| KeyValue | `inv-kv` | Transactional MVCC key-value store ([KeyValue Protocol](docs/KeyValue.md)). |
+| Build Cache | `inv-go-build-cache` | Go 1.24 `GOCACHEPROG` distributed build cache adapter ([Build Cache](docs/BuildCache.md)). |
 
-Both the File and KeyValue service are privileged services as both services initialed with the root content-link for all the data reachable by the service. If the data is encrypted, for example, they have access to the root link key, transitively, all the other keys for the data. The Files service should only be run on the system that mounts the file system or the NFS export. The other services are unprivileged. They do not have access to the unencrypted data.
+Both `inv-files` and `inv-kv` are privileged services because they are initialized with the root content link for the data they serve. The other services are unprivileged and do not have access to unencrypted data.
 
-## Executing services
+## Documentation Index
 
-Many of the services support dynamic port binding if you omit the `-port` flag or provide `-port 0`. This is useful for avoiding port conflicts when running multiple instances.
+- **Protocols & Services**: [Discovery](docs/Discovery.md), [Storage](docs/Storage.md), [Names](docs/Names.md), [Slots](docs/Slots.md), [Distribute](docs/Distribute.md), [Finder](docs/Finder.md), [Notify](docs/Notify.md), [KeyValue](docs/KeyValue.md), [Files](docs/Files.md)
+- **Data Models & Subsystems**: [Content](docs/Content.md), [FileTree](docs/FileTree.md), [Workspace](docs/Workspace.md), [Repository](docs/Repository.md), [BuildCache](docs/BuildCache.md), [NFS](docs/NFS.md), [GitScan](docs/GitScan.md), [Journal](docs/Journal.md)
+- **Infrastructure & Operations**: [ITP](docs/ITP.md), [Config (`config.yaml` / `services.yaml`)](docs/Config.md), [Trace](docs/Trace.md), [Tags](docs/Tags.md), [Systemd Examples](docs/examples/systemd/README.md)
+
+## Executing Services
+
+By default, all `inv-*` microservices listen over [ITP (`itp://`)](docs/ITP.md) (`-listen-ip=false`). To bind a local TCP port (`http://...`) instead—as shown in the local development examples below—pass `-listen-ip`. Omitting `-port` or passing `-port 0` binds a dynamic port on `inv-storage`, `inv-names`, `inv-slots`, `inv-distribute`, `inv-files`, and `inv-kv` (`inv-discovery` defaults to `3003`, and `inv-finder` defaults to `3004`).
+
+Common flags shared by microservices include `-listen-ip`, `-port`, `-key-file`, `-derp-map`, `-service-key` (`INVARIANT_SERVICE_KEY`), `-trace`, `-log`, and (except `inv-discovery`) `-discovery`, `-invite` (`INVARIANT_INVITE`), `-provision`, `-token-file`, and (except `inv-discovery` and `inv-files`) `-tags`/`-tag` and `-advertise`.
 
 ### Discovery Service (`inv-discovery`)
 To run the discovery server ([protocol description](docs/Discovery.md)), which defaults to port `3003`:
 ```bash
-# Run with in-memory discovery storage
-go run ./cmd/inv-discovery -port 3003
+# Run with in-memory discovery storage over TCP
+go run ./cmd/inv-discovery -listen-ip -port 3003
 
 # Run with upstream delegation to another discovery service
-go run ./cmd/inv-discovery -port 3003 -upstream http://upstream:3003
+go run ./cmd/inv-discovery -listen-ip -port 3003 -upstream http://upstream:3003
 ```
 
 ### Names Service (`inv-names`)
-The names service ([protocol description](docs/Names.md)) provides a mechanism to bind logical string names to 64-character IDs. It can be run in memory or backed by the file system.
+The names service ([protocol description](docs/Names.md)) binds logical string names to 64-character IDs:
 ```bash
 # Run with in-memory names storage
-go run ./cmd/inv-names -port 3005 -discovery http://localhost:3003
+go run ./cmd/inv-names -listen-ip -port 3005 -discovery http://localhost:3003
 
 # Run with persistent snapshot/journal names storage
-go run ./cmd/inv-names -port 3005 -dir /tmp/names -discovery http://localhost:3003
+go run ./cmd/inv-names -listen-ip -port 3005 -dir /tmp/names -discovery http://localhost:3003
 
 # Run with upstream delegation to another name service
-go run ./cmd/inv-names -port 3005 -upstream http://upstream:3005 -discovery http://localhost:3003
+go run ./cmd/inv-names -listen-ip -port 3005 -upstream http://upstream:3005 -discovery http://localhost:3003
 ```
 
 ### Storage Service (`inv-storage`)
-The storage service ([protocol description](docs/Storage.md)) is responsible for storing and retrieving blobs of data.
+The storage service ([protocol description](docs/Storage.md)) stores and retrieves blobs of data:
 ```bash
-# Run with in-memory storage naitvely
-go run ./cmd/inv-storage -port 3000
+# Run with in-memory storage naively
+go run ./cmd/inv-storage -listen-ip -port 3000
 
 # Run with AWS S3 backend
-go run ./cmd/inv-storage -port 3000 -s3-bucket my-bucket -s3-prefix invariant-blocks/
+go run ./cmd/inv-storage -listen-ip -port 3000 -s3-bucket my-bucket -s3-prefix invariant-blocks/
 
-# Run with persistent nested file system blocks and register with discovery & distribute services
-go run ./cmd/inv-storage -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify notify-service-id
+# Run with persistent nested filesystem blocks and register with discovery & distribute
+go run ./cmd/inv-storage -listen-ip -port 3000 -dir /tmp/blocks -discovery http://localhost:3003 -distribute distribute-1 -notify distribute-1
 ```
-*(Note: The `-notify` flag points to IDs implementing the Notify protocol.)*
+*(Note: The `-notify` flag points to IDs or names implementing the [Notify protocol](docs/Notify.md).)*
 
 ### Distribute Service (`inv-distribute`)
-The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication logic. It can pull available names/IDs from the discovery service.
+The distribute server ([protocol description](docs/Distribute.md)) coordinates block replication:
 ```bash
 # Run with default in-memory distribution logic
-go run ./cmd/inv-distribute -port 3001
+go run ./cmd/inv-distribute -listen-ip -port 3001
 
 # Run with a specific replication factor and connect to discovery
-go run ./cmd/inv-distribute -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
+go run ./cmd/inv-distribute -listen-ip -port 3001 -N 3 -discovery http://localhost:3003 -name distribute-1
 
-# Run with a backup destination (resolved automatically via discovery) and rate limit (MB/hour)
-# The destination is excluded from standard replication
-go run ./cmd/inv-distribute -port 3001 -destination backup-storage-id -backup-rate 100
+# Run with a backup destination (resolved via discovery) and rate limit (MB/hour)
+go run ./cmd/inv-distribute -listen-ip -port 3001 -destination backup-storage-id -backup-rate 100
 ```
 
 ### Finder Service (`inv-finder`)
-The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing logic, interacting via the Peer protocol.
+The finder server ([protocol description](docs/Finder.md)) manages Kademlia routing (default port `3004` when `-listen-ip` is set):
 ```bash
-# Start a standalone finder
-go run ./cmd/inv-finder -port 3002
+# Start a standalone finder on default port 3004
+go run ./cmd/inv-finder -listen-ip
 
-# Connect the finder to the discovery service
-go run ./cmd/inv-finder -port 3002 -discovery http://localhost:3003
+# Connect the finder to the discovery service on a custom port
+go run ./cmd/inv-finder -listen-ip -port 3002 -discovery http://localhost:3003
 ```
 
 ### Slots Service (`inv-slots`)
-A service to allocate and manage mutable slots. It can also notify other services.
+Manages mutable slots ([protocol description](docs/Slots.md)):
 ```bash
-go run ./cmd/inv-slots -port 3004 -discovery http://localhost:3003 -notify notify-service-id
+go run ./cmd/inv-slots -listen-ip -port 3004 -discovery http://localhost:3003 -notify notify-service-id
 ```
 
-### Invariant CLI Utility
-The `invariant` utility is the main client and orchestrator for the system. It reads global configuration from `~/.invariant/config.yaml` and provides subcommands for cluster interaction:
+### Files Service (`inv-files`)
+Serves a file tree over HTTP ([protocol description](docs/Files.md)):
+```bash
+go run ./cmd/inv-files -listen-ip -discovery http://localhost:3003 -slot my-slot
+```
 
-- `provision`: Bootstrap the control plane and provision service tokens (`service.token`) and discovery addresses (`discovery.url`) for all services defined in a YAML configuration file.
-  - Supports `--install` to automatically install the latest versions of any missing service commands via `go install` if `go` is available on `PATH`.
-- `start`: Start services locally defined in a YAML configuration file.
-- `invite`: Create, redeem, list, or revoke control-plane invitation codes (`create --role <user|service|admin>`, `redeem <inv_invite_...@itp://...>`, `list`, `revoke <id>`).
-- `token`: List or revoke active control-plane access tokens (`list`, `revoke <id>`).
+### Key-Value Service (`inv-kv`)
+Serves the transactional key-value store ([protocol description](docs/KeyValue.md)):
+```bash
+go run ./cmd/inv-kv -listen-ip -dir /tmp/kv-journal -discovery http://localhost:3003
+```
+
+## Invariant CLI Utility (`invariant`)
+
+The `invariant` utility is the main client and orchestrator. It reads global configuration from `~/.invariant/config.yaml` (see [Config](docs/Config.md)) and accepts the global `-log` flag before any subcommand.
+
+- `provision`: Bootstrap the control plane and provision service tokens and discovery URLs for services in `services.yaml` (`-config`, `-discovery`, `-bin-dir`, `--install`).
+- `start`: Start services locally defined in `services.yaml` (`-config`, `-max-backoff`, `-retry-interval`).
+- `systemd`: Generate, install, start, stop, or inspect systemd unit files from `services.yaml` (`install`, `update`, `uninstall`, `log`, `start`, `stop`, `files`).
+- `status`: Display registered services from discovery (`-discovery`, `-verbose`).
+- `invite`: Create, redeem, list, or revoke control-plane invitations (`create`, `redeem`, `list`, `revoke`).
+- `token`: List or revoke active control-plane access tokens (`list`, `revoke`).
+- `service-key`: Create, list, or revoke service keys (`create`, `list`, `revoke`).
 - `login`: Authenticate with the OAuth2 provider to obtain user credentials (`~/.invariant/oauth_token.json`).
-- `slot`: Allocate a new slot from the slots service.
-  - Supports `--protected` to generate a 256-bit elliptic curve (Ed25519) key pair, using the 32-byte public key as the slot ID and storing the private key in `~/.invariant/keys/`.
-- `name`: Register a logical name to a slot.
-- `lookup`: Look up a registered name to get its corresponding ID or address.
-- `nfs`: Start the invariant file system as a completely native NFS Server.
-  - Listen on a specific port (e.g., `--listen :2049`).
-  - Supports `--compress`, `--encrypt`, `--key-policy`, and `--key` flags for configuring writing of new files to the mount.
-- `mount`: Mount the invariant file system locally via FUSE (supports dynamic `.invariant-layer` reloading, name-to-address resolution, optimized read/write caching, and merging remote changes into local nested/dirty directories).
-  - Supports `--compress`, `--encrypt`, `--key-policy`, and `--key` flags for configuring writing of new files to the mount.
-- `upload`: Upload a local directory to invariant storage as a file tree, preserving file creation and modification times, and automatically splitting zip files.
-  - Supports `--compress` and `--encrypt`.
-  - Supports `--key-policy` (e.g. `Deterministic` (default), `RandomPerBlock`, `RandomAllKey`, `SuppliedAllKey`), with `--key` for supplying your own 32-byte hex key.
-  - Supports `--slot <hex_id_or_name>` to automatically update a mutable slot (resolved by ID or name) to point to the new content tree on successful upload.
-  - Supports `--prev <hex_id>` to supply the parent payload state if the local slot cache (`~/.invariant/slots/`) is empty.
-  - Supports `--dry-run` to compute stats and short-circuit actual block uploads.
-  - Supports `--stats` to print total bytes, uploaded blocks, and created directories to standard error.
-- `workspace`: Handle layered workspaces that separate persistent core network files from transient local-only temporary environments.
-  - `create <directory> <content_link|slot_name>`: Initializes a local directory referencing `.invariant-layer` metadata routing transient local data away from primary data scopes securely. The `<content_link|slot_name>` can be dynamically resolved via the names service. Supports `--protected`, `--layers`, and `--create-only`.
-  - `mount <directory>`: Parses the `.invariant-workspace` and mounts the virtual composite layered file system locally via FUSE natively inheriting standard disk caching (`~/.cache/invariant`) and offline overflow. Runs as a background daemon by default, or supports `-foreground`.
-  - `unmount <directory>`: Unmounts the current layered workspace.
-  - `pull [directory]`: Parses the workspace and caches all required source layer blocks directly into the local disk storage natively utilizing concurrency limits and `~/.cache/invariant/overflow` validation fallbacks.
-- `repository`: Manage Invariant version control repositories ([detailed documentation](docs/Repository.md)).
-  - **Primary workflow**:
-    - `change <name>`: Create a writable change branch workspace branched from upstream (supports `-private`, `-upstream`, and `-tag`).
-    - `status`: Show working tree file modifications, additions, and deletions relative to the current `HEAD` commit.
-    - `diff [<commit1>] [<commit2>]`: Produce unified diffs of workspace changes or between commits (supports `--stat`).
-    - `sync`: Synchronize and rebase the active change workspace onto the latest upstream `HEAD` via 3-way merge (supports `--continue`, `--abort`, and `-tag`).
-    - `log [<path>]`: Display the commit history log (supports `-tree` / `-graph` for full DAG history and `-n <count>`).
-    - `commit`: Snapshot and commit workspace changes to the current branch slot (supports repeatable `-m <msg>`, `--amend`, `--squash <commit>`, and `-tag`).
-    - `review`: Manage code reviews, inline comments, and approvals:
-      - `request [<directory>]`: Request a code review on the active change branch and emit a review token.
-      - `open <sha|token|name>`: Open a review workspace for inspection without changing its status (supports `-d <dir>` and `-writable`).
-      - `start [<sha|token|name>]`: Transition a review to `in_progress` and open/mount its workspace (supports `-d <dir>`, `-writable`, and `-reviewer`).
-      - `comment [<comment-file>]`: Add structured review comments via a JSON file or flags (`-token`, `-m`, `-file`, `-line`, `-end-line`, `-author`).
-      - `comments [<identifier>]`: Display review comments formatted as markdown with code context or raw JSON (`-json`).
-      - `approve [<identifier>]`: Approve a code review and retire the review workspace.
-      - `reject [<identifier>]`: Reject a code review and retire the review workspace.
-      - `abandon [<identifier>]`: Abandon a code review and retire the review workspace.
-      - `update [<identifier>]`: Update an existing review record with the latest committed changes on the branch.
-    - `submit [<directory>]`: Fast-forward/push changes from the change workspace to the target upstream branch (default `main`) and retire the workspace (supports `-target` and `-tag`).
-    - `show [<commit>[:<path>]]`: Inspect commit metadata and diffs, or view a file's contents at a specific commit snapshot.
-  - **Initialization and configuration**:
-    - `create <name> [<content>]`: Create a new repository, register it with the Names Service, and initialize the `main` branch (supports `-content`, `-d`, `-tag`, `-create-only`, `-encrypt`, `-compress`, `-writable`, and `-readonly` / `-read-only`).
-    - `open <name> [<directory>]`: Open an existing repository from the Names Service into a layered FUSE workspace (supports `-b` / `-branch`, `-d` / `-directory`, `-layers`, `-create-only`, `-foreground`, `-writable`, and `-tag`).
-    - `config <get|set|unset|list>`: Manage repository-scoped or global user (`--global`) configuration settings.
-  - **Branch management**:
-    - `branch [list|delete <name>]`: List local workspaces, upstream branches, and discovered peer branches, or delete a branch.
-    - `checkout <branch|peer-branch>`: Switch to or mount a local, upstream, or peer-published change branch (supports `-writable`).
-    - `cherry-pick <branch|commit> [<end-commit>]`: Apply commits from another branch or commit range onto the current workspace (supports `-tag`).
-    - `rebase [-i] [<upstream>]`: Interactively edit, reorder, squash, or drop commits in a change branch.
-    - `tag [create <name> [<commit>]|list|delete <name>]`: Create, list, or delete immutable release tags.
-  - **Workspace management**:
-    - `clean`: Purge untracked and temporary files from the workspace (supports `-f`, `-d`, and `-x`).
-    - `layer <add <repo_name> <mount_path> [--commit=<sha>]|list|remove <mount_path>>`: Manage pinned sub-repository dependency layers.
-    - `restore [<path>]`: Discard uncommitted local edits and restore files from a commit snapshot (supports `-source <commit>`, defaults to `HEAD`).
-    - `revert <commit>`: Apply the inverse patch of a commit and record a new revert commit (supports `-tag`).
-    - `stash [push [-m <msg>]|pop|list|drop [<index>]]`: Shelve and restore uncommitted local changes to/from temporary CAS commits.
-    - `mount <name> [<directory>]`: Mount an existing repository workspace.
-    - `unmount [<directory>]`: Unmount a repository workspace and its nested workspaces.
-  - **Diagnostics**:
-    - `blame <file>`: Show line-by-line commit and author attribution for a file (supports `-commit <hash>`).
-    - `grep <pattern> [<path>]`: Search for patterns across commit trees in CAS (supports `-i`, `-n`, and `-commit <hash>`).
-    - `bisect <start [<bad> [<good>]]|bad [<commit>]|good [<commit>]|reset|run <cmd> [args...]>`: Perform binary search across commit history to isolate regressions.
-  - **Import / Export**:
-    - `git import [<git-dir>]`: Import commit history and file trees from a Git repository into Invariant CAS (supports `-repository` / `-repo`, `-branch`, `-directory` / `-d`, `-depth`, `-writable`, and `-tag`).
-    - `git export <target-git-dir>`: Export Invariant commits and file trees to a Git repository (supports `-branch` and `-from <commit>`).
-- `print`: Print a block's contents to standard output. Supports ContentLink JSON input directly or via pipe. Subpath traversal is also supported (e.g., `invariant print <content-link>/path/to/file`). Supports `-s` to treat the target hash code or name as a mutable slot.
+- `slot`: Allocate a new slot from the slots service (`-name`, `-protected` for Ed25519 keypair in `~/.invariant/keys/`).
+- `name`: Register a logical name to a slot or block (`-tokens`).
+- `lookup`: Look up a registered name to get its corresponding ID or address (`-discovery`).
+- `nfs`: Export an Invariant file tree as a native NFSv3 server (`-listen :2049`, see [NFS](docs/NFS.md)).
+- `mount`: Mount an Invariant file tree locally via FUSE (`-mount`, plus common mount flags).
+- `cache`: Inspect cache status for a mounted directory (walks `.invariant-mount.json` upward).
+- `upload`: Upload a local directory to Invariant storage as a file tree (`--compress`, `--encrypt`, `--key-policy`, `--key`, `--slot`, `--prev`, `--dry-run`, `--stats`, `--no-cache`, `--tag`).
+- `scan-repo`: Index Git SHA-1 <-> Invariant SHA-256 mappings in KV ([GitScan](docs/GitScan.md)).
+- `workspace`: Manage layered workspaces (`create`, `mount`, `unmount`, `pull`, `branch`, `merge`, `rebase`; see [Workspace](docs/Workspace.md)).
+- `repository`: Manage Invariant version control repositories (`create`, `open`, `change`, `status`, `diff`, `clean`, `commit`, `sync`, `submit`, `log`, `show`, `restore`, `revert`, `blame`, `grep`, `stash`, `bisect`, `rebase`, `cherry-pick`, `branch`, `checkout`, `tag`, `config`, `layer`, `mount`, `unmount`, `git import`, `git export`, `review`; see [Repository](docs/Repository.md)).
+- `print`: Print a block's or file's contents to stdout (supports ContentLink JSON, `name/subpath`, and `-s` / `-slot`).
 
 ```bash
 # Provision service tokens and start services defined in services.yaml
-go run ./cmd/invariant provision --install services.yaml
-go run ./cmd/invariant start services.yaml
+go run ./cmd/invariant provision --install -config services.yaml
+go run ./cmd/invariant start -config services.yaml
 ```
 
-**Example `services.yaml`**:
+**Example `services.yaml`** (see [Config](docs/Config.md) for substitution rules and `$key:` secrets):
 ```yaml
 common:
   discovery:
@@ -206,82 +173,86 @@ common:
 services:
   - command: inv-discovery
     args:
-        port: 3003
+      listen-ip: "true"
+      port: "3003"
 
   - command: inv-names
     use: [discovery]
     args:
-        dir: "*/names"
+      listen-ip: "true"
+      dir: "*/names"
 
   - command: inv-distribute
     use: [discovery]
     args:
-        name: "distribute-1"
+      listen-ip: "true"
+      name: "distribute-1"
 
   - command: inv-storage
     use: [discovery, distribute]
     args:
-        dir: "*/storage-1"
-        notify: "distribute-1"
+      listen-ip: "true"
+      dir: "*/storage-1"
+      notify: "distribute-1"
 
   - command: inv-storage
     use: [discovery, distribute]
     args:
-        dir: "*/storage-2"
-        notify: "distribute-1"
+      listen-ip: "true"
+      dir: "*/storage-2"
+      notify: "distribute-1"
 ```
 
-The `services.yaml` configuration also supports an `environment` map. Keys will overwrite container-local or service environment variables. When a value is prefixed with `$key:`, it safely substitutes the content of the secure key file (`~/.invariant/keys/<filename>`) preventing the secret from appearing inside the config format itself.
-
 ### Docker Compose
-For a more robust and industrial-strength deployment, you can use Docker and Docker Compose. This is the recommended alternative for running these services in production-like environments or cross-platform setups.
+For containerized deployments using pre-built `./bin/inv-*` binaries (or a user-supplied `Dockerfile`):
 
-**Example `docker-compose.yml`** (equivalent to the `services.yaml` above):
 ```yaml
-version: '3.8'
-
-x-discovery-args: &discovery-args
-  -discovery: http://discovery:3003
-  -advertise: http://0.0.0.0
-
 services:
   discovery:
-    build: .
-    command: ["./bin/inv-discovery", "-port", "3003"]
+    image: golang:1.24
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: ["./bin/inv-discovery", "-listen-ip", "-port", "3003"]
     ports:
       - "3003:3003"
 
   names:
-    build: .
-    command: ["./bin/inv-names", "-port", "3005", "-dir", "/data/names"]
+    image: golang:1.24
+    working_dir: /app
+    command: ["./bin/inv-names", "-listen-ip", "-port", "3005", "-dir", "/data/names", "-discovery", "http://discovery:3003", "-advertise", "http://names:3005"]
     volumes:
+      - .:/app
       - ./data/names:/data/names
     depends_on:
       - discovery
-    environment:
-      # Inject discovery args via command override conceptually, or rely on internal entrypoint scripts
-      # For simplicity, assumed inline here
-    command: ["./bin/inv-names", "-port", "3005", "-dir", "/data/names", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
 
   distribute:
-    build: .
-    command: ["./bin/inv-distribute", "-port", "3001", "-name", "distribute-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0"]
+    image: golang:1.24
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: ["./bin/inv-distribute", "-listen-ip", "-port", "3001", "-name", "distribute-1", "-discovery", "http://discovery:3003", "-advertise", "http://distribute:3001"]
     depends_on:
       - discovery
 
   storage-1:
-    build: .
-    command: ["./bin/inv-storage", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
+    image: golang:1.24
+    working_dir: /app
+    command: ["./bin/inv-storage", "-listen-ip", "-port", "3000", "-dir", "/data/storage-1", "-discovery", "http://discovery:3003", "-advertise", "http://storage-1:3000", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
+      - .:/app
       - ./data/storage-1:/data/storage-1
     depends_on:
       - discovery
       - distribute
 
   storage-2:
-    build: .
-    command: ["./bin/inv-storage", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://0.0.0.0", "-distribute", "distribute-1", "-notify", "distribute-1"]
+    image: golang:1.24
+    working_dir: /app
+    command: ["./bin/inv-storage", "-listen-ip", "-port", "3002", "-dir", "/data/storage-2", "-discovery", "http://discovery:3003", "-advertise", "http://storage-2:3002", "-distribute", "distribute-1", "-notify", "distribute-1"]
     volumes:
+      - .:/app
       - ./data/storage-2:/data/storage-2
     depends_on:
       - discovery
@@ -289,7 +260,7 @@ services:
 ```
 
 ## Installing the CLI and Services
-To compile and install the `invariant` CLI and microservice commands (`inv-discovery`, `inv-names`, `inv-slots`, `inv-storage`, `inv-finder`, `inv-distribute`, `inv-kv`, `inv-files`) using the Go toolchain:
+To compile and install the `invariant` CLI and all microservice commands using the Go toolchain:
 ```bash
 # Install the CLI and all microservices at once
 go install github.com/chuckjaz/invariant-go/cmd/...@latest
@@ -304,18 +275,24 @@ go install github.com/chuckjaz/invariant-go/cmd/inv-finder@latest
 go install github.com/chuckjaz/invariant-go/cmd/inv-distribute@latest
 go install github.com/chuckjaz/invariant-go/cmd/inv-kv@latest
 go install github.com/chuckjaz/invariant-go/cmd/inv-files@latest
+go install github.com/chuckjaz/invariant-go/cmd/inv-go-build-cache@latest
 ```
 
-Ensure your Go binary directory (`$(go env GOPATH)/bin` or `$GOBIN`) is on your `PATH`. You can also pass `--install` to `invariant provision` (e.g., `invariant provision --install services.yaml`) to automatically install any missing service commands referenced in `services.yaml` using `go install`.
+Ensure your Go binary directory (`$(go env GOPATH)/bin` or `$GOBIN`) is on your `PATH`. You can also pass `--install` to `invariant provision` (e.g., `invariant provision --install -config services.yaml`) to automatically install any missing service commands referenced in `services.yaml` using `go install`.
 
-## Building binaries
-To build all microservices into the `bin/` directory, use the supplied build script:
+## Building Binaries
+To build all 10 binaries into `bin/` (via `ninja` if installed, or `go build` fallback), run:
 ```bash
 ./build
 ```
 
-## Running tests
-To run continuous tests, execute standard go test coverage:
+## Running Tests
+To run the standard unit test suite:
 ```bash
 go test -v ./...
+```
+
+To run the multi-node simulated cluster integration tests (`internal/cluster`):
+```bash
+go test -tags cluster ./internal/cluster
 ```

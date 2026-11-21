@@ -2,6 +2,8 @@
 
 This directory contains example `systemd` unit files for running the individual Invariant microservices as background daemons natively on Linux.
 
+> **Note:** These unit files pass `-listen-ip` so the services bind local TCP ports (`http://localhost:3003`, etc.). Without `-listen-ip`, services default to listening over ITP (`itp://`). You can also generate and manage systemd unit files directly from a `services.yaml` file using `invariant systemd install` / `invariant systemd files`.
+
 ## Prerequisites
 
 Before starting the services via `systemd`:
@@ -13,7 +15,7 @@ Before starting the services via `systemd`:
 
 2. Move the generated binaries into `/usr/local/bin/` so `systemd` can find them:
    ```bash
-   sudo cp bin/* /usr/local/bin/
+   sudo cp bin/inv* /usr/local/bin/
    ```
 
 3. Create a dedicated system user and group named `invariant`:

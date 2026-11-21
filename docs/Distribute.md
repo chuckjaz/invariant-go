@@ -1,54 +1,50 @@
 # The invariant project - Distribute Protocol
 
-The Distribute Protocol is a simple protocol for distributing blobs between storage services.
+The Distribute Protocol is an HTTP protocol for coordinating blob replication across storage services.
 
-The job of a distribute service is to ensure that data blocks are distributed among storage services to reduce the chance that one of the storage services becoming unavailable will make the block unavailable. This is done by having the distribute service maintain a list of storage services and their addresses. The distribute service will then periodically check the health of the storage services and if a storage service is not available, it will attempt to replicate the data blocks from the unavailable storage service to other storage services.
+A distribute service ensures that data blocks are replicated across multiple storage services so that losing a storage device does not make blocks unavailable. It maintains a list of registered storage services, periodically checks their health, and replicates blocks when a storage service becomes unavailable or under-replicated.
 
-The primary algorithm used by distribute is to determine Kademlia distance of the block from the storage service ID and to take the top N storage services, where N is by default 3, and ensure they have the block. If they don't have the block the block is uploaded to the service.
+By default, distribute calculates the Kademlia XOR distance between a block address and each storage service ID, selecting the closest `N` storage services (default `N = 3`) and ensuring each holds the block. When configured with a `-destination` backup storage service (and optional `-backup-rate` in MB/hour), that destination is excluded from standard replication and receives rate-limited backup copies instead.
 
-The kademlia distance is calculated as the XOR of the binary representation of the two IDs.
+## Version
 
-# Version
+Version 1 of the distribute protocol uses the protocol token `distribute-v1`.
 
-The version 1 of the distribute protocol with the protocol token of distribute-v1.
+## Values
 
-# Values
+### `:id`
 
-## `:id`
+A server ID, which is a 32-byte hex-encoded value.
 
-A server ID which is a 32 byte hex encoded value.
+### `:address`
 
-## `:address`
+The content hash of a block.
 
-The content hash of the content.
+## Endpoints
 
-# Endpoints
+### `GET /id`
 
-## `GET /id`
+Returns the hex-encoded ID of the distribute service (`200 OK`, `Content-Type: text/plain`).
 
-Returns the ID of the distribute service.
+### `PUT /register/:id`
 
-### Response
+Register a storage service with the distribute service. Once registered, the distribute service periodically checks the storage service's health and replicates blocks from it if it becomes unavailable.
 
-The hex encoded ID of the distribute service.
+When a storage service starts, it sends `PUT /notify/:id` requests to report the blocks it holds, and sends periodic `PUT /notify/:id` updates as new blocks arrive.
 
-## `PUT /register/:id`
+#### Request
 
-Register a storage service with the distribute service. Once a storage service is registered, the distribute service will periodically check the health of the storage service and if it is not available, it will attempt to replicate the data blocks from the unavailable storage service to other storage services.
+Empty body.
 
-When a storage service starts it is expected to send `PUT /notify` requests to the distribute service to identify all the blocks it notify. It is also expected to send `PUT /notify` requests periodically to update the distribute service of new blocks receives.
+#### Response
 
-### Request
+`200 OK` (empty body) on success, `400 Bad Request` if `:id` is empty, or `500 Internal Server Error` on failure.
 
-The request is empty.
+### `PUT /notify/:id`
 
-### Response
+Notifies the distribute service that the storage service with `:id` holds blocks with the given addresses (see [Notify Protocol](Notify.md)).
 
-The response is empty.
-
-## `PUT /notify/:id`
-
-Notifies the distribute service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with TypeScript type of,
+#### Request
 
 ```ts
 interface HasRequest {
@@ -56,6 +52,6 @@ interface HasRequest {
 }
 ```
 
-### Response
+#### Response
 
-The response is empty. 
+`200 OK` (empty body) on success, `400 Bad Request` on empty `:id` or invalid JSON, or `500 Internal Server Error` on failure.

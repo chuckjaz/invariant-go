@@ -124,8 +124,11 @@ Specifies the initial CAS content link / address or commit link explicitly.
 ##### `-create-only`
 Creates the repository without opening, mounting it, or changing directory.
 
-##### `-d=<path>`, `-directory=<path>`
+##### `-d=<path>`
 Uses the content of `<path>` as the initial content of the repository. This becomes the content of the `main` branch of the repository. This option cannot be combined with a `<content>` argument.
+
+##### `-tag=<name>`
+Storage service write tag for importing initial content (effective default: `originals`).
 
 ##### `-encrypt`
 Encrypt the content of the repository. The repository will be encrypted at rest even when mounted. Files in the repository will only be decrypted when read. All data written will be encrypted before being stored.
@@ -158,6 +161,12 @@ The name of the workspace that is created as a peer directory of the current bra
 ##### `-private`
 Do not publish the branch name with the Names Service.
 
+##### `-upstream=<branch>`
+Upstream branch name to branch from (default: `main`).
+
+##### `-tag=<name>`
+Storage service write tag.
+
 ---
 
 ### `ir cherry-pick <branch|commit> [<commit>]`
@@ -173,29 +182,29 @@ The name of a branch to cherry-pick, which picks all changes from the branch unt
 ##### `<commit> [<commit>]`
 The SHA commit hash (or a unique prefix) to cherry-pick. If two commits are provided, it cherry-picks both commits and all commits in between.
 
+##### `-tag=<name>`
+Storage service write tag.
+
 ---
 
 ### `ir commit`
 **Status:** Implemented
 
-Commit all added, removed, and modified files in the workspace to its corresponding branch. If neither `-m` nor `-no-edit` is provided, or if `-e` is used, a text editor is opened to edit the message.
+Commit all added, removed, and modified files in the workspace to its corresponding branch. If `-m` is not provided, a text editor is opened to edit the message.
 
 #### Options
 
 ##### `-amend`
 Update the previous commit with the current changes, recording the superseded commit in `Refs["supersedes"]`.
 
-##### `-e`, `-edit`
-Open an editor for the commit message.
-
-##### `-no-edit`
-Do not open an editor.
-
-##### `-m <message>`, `-message <message>`
+##### `-m <message>`
 Use the option value as the message for the commit. This option can be repeated, and the values are concatenated with newlines.
 
 ##### `--squash=<commit>`
 Directly fold changes into an earlier commit in the change set.
+
+##### `-tag=<name>`
+Storage service write tag.
 
 ---
 
@@ -206,7 +215,7 @@ Purge uncommitted temporary and ignored files from the local workspace overlay l
 
 #### Options
 
-##### `-f`, `-force`
+##### `-f`
 Force file deletion.
 
 ##### `-d`
@@ -232,7 +241,12 @@ Display a summary of changed files with insertion/deletion counts.
 ### `ir restore [<path>]`
 **Status:** Implemented
 
-Discard uncommitted local edits and restore specific file(s) or the entire working tree directly from the current HEAD commit snapshot.
+Discard uncommitted local edits and restore specific file(s) or the entire working tree directly from a commit snapshot.
+
+#### Options
+
+##### `-source=<commit>`
+Commit hash or reference to restore from (defaults to `HEAD`).
 
 ---
 
@@ -241,12 +255,22 @@ Discard uncommitted local edits and restore specific file(s) or the entire worki
 
 Compute the inverse patch of the specified commit and apply it as a new commit on the current branch.
 
+#### Options
+
+##### `-tag=<name>`
+Storage service write tag.
+
 ---
 
 ### `ir blame <file>`
 **Status:** Implemented
 
 Annotate each line of the specified file with the commit hash, author, and timestamp from which the line originated.
+
+#### Options
+
+##### `-commit=<hash>`
+Inspect blame at a specific commit hash instead of `HEAD`.
 
 ---
 
@@ -257,10 +281,21 @@ Display commit metadata and unified diff for a commit, or display the content of
 
 ---
 
-### `ir grep <pattern>`
+### `ir grep <pattern> [<path>]`
 **Status:** Implemented
 
 Search for text or regular expression patterns across commit trees directly in CAS.
+
+#### Options
+
+##### `-i`
+Case-insensitive matching.
+
+##### `-n`
+Print line numbers (default: `true`).
+
+##### `-commit=<hash>`
+Search within a specific commit snapshot instead of `HEAD`.
 
 ---
 
@@ -301,19 +336,22 @@ Mark a commit as bad (containing the regression).
 ##### `good [<commit>]`
 Mark a commit as good (known working state).
 
-##### `run <script>`
+##### `reset`
+End the bisect session and clean up bisect state.
+
+##### `run <script> [args...]`
 Automatically run a test script at each midpoint step until the culprit commit is isolated.
 
 ---
 
-### `ir rebase`
+### `ir rebase [<upstream>]`
 **Status:** Implemented
 
 Rebase commits in a private change branch.
 
 #### Options
 
-##### `-i`, `-interactive`
+##### `-i`
 Interactively edit, reorder, squash, or drop commits in the change branch before submitting.
 
 ---
@@ -328,7 +366,7 @@ Manage branches and discover peer branches registered in the Names Service.
 ##### `list`
 List local branch workspaces, upstream branches, and discovered peer branches (`:<user>:<repo>:*`).
 
-##### `delete <name>`
+##### `delete <name>` (aliases: `-d`, `-D`)
 Delete a change branch workspace and unregister it from the Names Service.
 
 ---
@@ -337,6 +375,11 @@ Delete a change branch workspace and unregister it from the Names Service.
 **Status:** Implemented
 
 Checkout and mount a local or peer-published change branch (e.g. `ir checkout :alice:myrepo:feat-x`) into a local workspace directory and switch the current working directory.
+
+#### Options
+
+##### `-writable`
+Open the checked-out workspace as writable (default: `true`).
 
 ---
 
@@ -397,39 +440,6 @@ Unpin and remove a sub-repository dependency layer.
 
 ---
 
-### `ir git export [<repository directory>]`
-**Status:** Implemented
-
-Export the commits in the current branch to the corresponding branch of the given Git repository, mapping Invariant file trees to Git trees using the KV service SHA1 $\leftrightarrow$ SHA256 index.
-
-#### Options
-
-##### `-branch=<name>`
-Target Git branch name to update (default: `main`).
-
-##### `-from=<commit-hash>`
-Specific Invariant commit hash to export (default: active workspace HEAD).
-
----
-
-### `ir git import [<repository directory>]`
-**Status:** Implemented
-
-Import the commits into this branch from the corresponding branch of the given Git repository, using the KV service SHA1 $\leftrightarrow$ SHA256 mapping objects to convert Git trees and blobs to Invariant file trees.
-
-#### Options
-
-##### `-branch=<name>`
-Git branch to import (default: active Git `HEAD`).
-
-##### `-depth=<n>`
-Depth of commit history to import (default: 0 = full history).
-
-##### `-tag=<name>`
-Storage write tag for importing original blob content (default: `originals`).
-
----
-
 ### `ir log`
 **Status:** Implemented
 
@@ -442,6 +452,9 @@ Filter commit history to only commits modifying `<path>`.
 
 ##### `-tree`, `-graph`
 Display the full DAG commit graph including merge branches.
+
+##### `-n <count>`
+Limit the number of commits displayed (default: `0` = unlimited).
 
 ---
 
@@ -475,6 +488,9 @@ The target root directory on disk for the repository workspace (defaults to `./<
 ##### `-b=<branch>`, `-branch=<branch>`
 Target branch to open (default: `main`).
 
+##### `-d=<path>`, `-directory=<path>`
+Target root directory on disk for the repository workspace.
+
 ##### `-layers=<layer1,layer2>`
 Comma-separated list of additional layers for the FUSE workspace.
 
@@ -486,6 +502,9 @@ Mount directly in foreground instead of spawning background task.
 
 ##### `-writable`
 Open the workspace as writable.
+
+##### `-tag=<name>`
+Storage service write tag.
 
 ---
 
@@ -499,6 +518,11 @@ Abandon a review. This marks the review as abandoned and closes/removes the dire
 ##### `[<directory>]`
 The directory of the review branch. If not supplied, it is inferred from the current directory. If the current directory is within the review branch, the working directory will be changed to the repository root directory before removal.
 
+#### Options
+
+##### `-author=<identity>`
+Author identity for abandoning the review.
+
 ---
 
 ### `ir review approve [<directory>]`
@@ -511,12 +535,37 @@ Approve the review. This marks the review branch as approved and closes the revi
 ##### `[<directory>]`
 The directory of the review branch. If not supplied, it is inferred from the current directory. If the current directory is within the review branch, the working directory will be changed to the repository root directory before removal.
 
+#### Options
+
+##### `-reviewer=<identity>`
+Reviewer identity recording the approval.
+
 ---
 
 ### `ir review comment [<comment-file>]`
 **Status:** Implemented
 
-Add or update comments on a review using a JSON comment file matching the schema below.
+Add or update comments on a review using a JSON comment file matching the schema below, or inline via command-line flags.
+
+#### Options
+
+##### `-token=<token>`
+Review token (inferred from current directory if omitted).
+
+##### `-m=<message>`
+Comment text (for inline commenting without a JSON file).
+
+##### `-file=<path>`
+Repository-relative file path for an inline comment.
+
+##### `-line=<n>`
+Starting line number for an inline comment.
+
+##### `-end-line=<n>`
+Ending line number for an inline comment.
+
+##### `-author=<identity>`
+Comment author identity.
 
 #### Arguments
 
@@ -609,6 +658,9 @@ The name of the review registered in the Names Service (if one was registered).
 ##### `-writable`
 Open the branch as writable, creating a suggestion side-branch where proposed changes can be committed for the author to cherry-pick.
 
+##### `-d=<dir>`
+Target directory for the review workspace.
+
 ---
 
 ### `ir review reject [<directory>]`
@@ -620,6 +672,11 @@ Mark the review as rejected and close the review workspace.
 
 ##### `[<directory>]`
 The directory of the review branch. If not supplied, it is inferred from the current directory.
+
+#### Options
+
+##### `-reviewer=<identity>`
+Reviewer identity recording the rejection.
 
 ---
 
@@ -634,6 +691,11 @@ Returns a unique review `<token>` and an optional HTTP link to a Web UI service 
 
 ##### `[<directory>]`
 The directory of the workspace branch being reviewed. If not supplied, the branch is inferred from the current directory.
+
+#### Options
+
+##### `-author=<identity>`
+Author identity requesting the review.
 
 ---
 
@@ -662,6 +724,12 @@ The directory of the review branch if already opened.
 
 ##### `-writable`
 Open the review branch as writable.
+
+##### `-d=<dir>`
+Target directory for the review workspace.
+
+##### `-reviewer=<identity>`
+Reviewer identity starting the review.
 
 ---
 
@@ -696,6 +764,14 @@ If the upstream branch requires review approval, the associated review must be a
 ##### `[<directory>]`
 The directory of the workspace branch being submitted. If not supplied, it is inferred from the current directory.
 
+#### Options
+
+##### `-target=<branch>`
+Target upstream branch to submit to (default: `main`).
+
+##### `-tag=<name>`
+Storage service write tag.
+
 ---
 
 ### `ir sync [<directory>]`
@@ -715,6 +791,9 @@ Verify that all conflict markers have been resolved, snapshot the working tree, 
 
 ##### `--abort`
 Abort the sync operation and restore the workspace to the clean pre-sync commit state.
+
+##### `-tag=<name>`
+Storage service write tag.
 
 ---
 
@@ -742,7 +821,7 @@ The path to the source Git repository (defaults to `.`).
 
 #### Options
 
-##### `-repository[=<name>]`, `-repo[=<name>]`
+##### `-repository[=<name>]`, `-repo[=<name>]`, `-create[=<name>]`
 Create the repository if it does not already exist with the target branch, or add/fast-forward the branch if the repository already exists. If the branch already exists, determines if the imported commit has the current branch commit as a predecessor (fast-forward); if histories have diverged, an error is reported. If name is omitted or set to `true`, infers the repository name from the Git directory or branch name.
 
 ##### `-branch=<branch>`
@@ -779,3 +858,34 @@ Target Git branch name (defaults to `main`).
 
 ##### `-from=<commit-hash>`
 Specific Invariant commit hash to export (defaults to current workspace HEAD).
+
+---
+
+## HTTP Service APIs
+
+The `internal/repository/commit` and `internal/repository/review` packages expose HTTP REST servers for programmatic and Web UI integration.
+
+### Commit Service (`internal/repository/commit/server.go`)
+
+- `GET /id`: Returns the server ID (`200 OK`, `text/plain`).
+- `POST /commit`: Create a commit. Request JSON: `CreateRequest` (`repoName`, `branchName`, `treeLink`, `parents`, `message`, `author`, `committer`, `tags`, `refs`). Response (`200 OK`): `{"commit": Commit, "hash": string}`. Errors: `400`, `405`, `500`.
+- `GET /commit/{hash}`: Retrieve a `Commit` (`tree`, `parents`, `author`, `committer`, `message`, `timestamp`, `tags`, `refs`). Errors: `400`, `404`, `405`.
+- `GET /history?head=<hash>&spine=<bool>&path=<str>`: Retrieve commit history. Response (`200 OK`): `{"commits": Commit[], "hashes": string[]}`. Errors: `500`.
+- `POST /diff`: Compute diff between two trees. Request: `{"fromTree": {"address": string}, "toTree": {"address": string}}`. Response (`200 OK`): `{"diff": string, "stat": DiffStat}`. Errors: `400`, `500`.
+- `POST /sync`: Rebase a change branch. Request: `{"repoName": string, "changeBranch": string}`. Response (`200 OK`): `{"newHead": string, "conflicts"?: string[]}`. Errors: `400`, `500`.
+- `POST /submit`: Submit a change branch. Request: `SubmitRequest` (`repoName`, `changeBranch`, `targetBranch`, `expectedTarget`, `author`). Response (`200 OK`): `SubmitResponse` (`newHeadCommit`, `squashed`, `conflicts`). Errors: `400`, `500`.
+- `GET /blame?commit=<hash>&file=<path>`: Line-by-line blame. Response (`200 OK`): `BlameLine[]` (`lineNumber`, `content`, `commitHash`, `author`, `timestamp`). Errors: `500`.
+- `POST /bisect`: Compute next bisect candidate. Request: `{"good": string[], "bad": string[]}`. Response (`200 OK`): `{"candidate": string, "remaining": number}`. Errors: `400`, `500`.
+- `POST /rebase`: Apply a rebase plan. Request: `{"repoName": string, "changeBranch": string, "baseCommit": string, "plan": RebaseAction[]}`. Response (`200 OK`): `{"newHead": string}`. Errors: `400`, `500`.
+
+### Review Service (`internal/repository/review/server.go`)
+
+- `GET /id`: Returns the server ID (`200 OK`, `text/plain`).
+- `POST /reviews/request`: Request a review. Request: `{"repoName": string, "branchName": string, "author": Identity}`. Response (`200 OK`): `Record` (`token`, `repoName`, `branchName`, `changeSlotId`, `baseCommit`, `headCommit`, `status`, `reviewer`, `comments`, `createdAt`, `updatedAt`). Errors: `400`, `405`, `500`.
+- `GET /reviews/{token}`: Retrieve a review `Record`. Errors: `400`, `404`, `405`.
+- `POST /reviews/{token}/start`: Transition review to `in_progress`. Request: `{"reviewer": Identity}`. Returns `200 OK`, or `400`/`405`/`500`.
+- `POST /reviews/{token}/comments`: Add comments. Request: `{"comments": ReviewComment[], "author": Identity}`. Returns `200 OK`, or `400`/`405`/`500`.
+- `POST /reviews/{token}/approve`: Approve review. Request: `{"reviewer": Identity}`. Returns `200 OK`, or `400`/`405`/`500`.
+- `POST /reviews/{token}/reject`: Reject review. Request: `{"reviewer": Identity}`. Returns `200 OK`, or `400`/`405`/`500`.
+- `POST /reviews/{token}/abandon`: Abandon review. Request: `{"author": Identity}`. Returns `200 OK`, or `400`/`405`/`500`.
+- Unknown actions under `POST /reviews/{token}/...` return `404 Not Found`.

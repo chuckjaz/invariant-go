@@ -1,81 +1,93 @@
 # The invariant project - Workspace
 
-An invariant workspace is a layered directory that can be mounted and contains source files and the files those sources
-produce. The source files are persistent and findable outside the workspace but the produced files are, by default,
-only stored temporarily. When using a workspace, it is assumed that the produced files can be recreated at any time by
-running the tools that produce the files from the source files.
+An Invariant workspace is a layered directory that can be mounted locally and separates persistent source files from transient local-only or generated files. Source files are persisted in shared storage, while produced files (such as build artifacts) can be stored only locally and recreated at any time.
 
-## Using a workspace
+## `.invariant-workspace` Schema
 
-### Creating a workspace
+A workspace directory contains a `.invariant-workspace` JSON file (`WorkspaceInfo`):
 
-A workspace is created using the `invariant workspace create` command. The command has the following arguments:
+```ts
+interface WorkspaceInfo {
+    content: ContentLink;
+    parent_snapshot?: string;
+    parent_slot?: string;
+}
+```
 
-- `directory` - the directory to create the workspace.
-- `content` - the initial content of the directory.
+## Using a Workspace
 
-The `create` command will create the directory and a `.invariant-workspace` which is a JSON file that contains an
-object with a `content` field which is the content link to the workspace directory. Unless the `-create-only` option
-is provided, mounted over the directory created (see mounting below).
+### Creating a Workspace (`invariant workspace create`)
 
-The `content` can be a file tree address, slot address or content link. If the address provided is to a file tree,
-a slot will be created and substituted for the file tree address.
+```bash
+invariant workspace create [-layers <l1,l2>] [-create-only] [-protected] <directory> <content>
+```
 
-A workspace directory only contains a `.invariant-layer` file which describes the layers of the workspace. Mounting
-a workspace reads this file and mounts the workspace directory content in the directory.
+- `<directory>`: Target directory to initialize.
+- `<content>`: File tree 64-character hex address or a slot/content name resolved via `names-v1`. If it points to a file tree, a slot is created and substituted for the file tree address.
+- `-layers`: Comma-separated list of additional layer names.
+- `-create-only`: Initialize `.invariant-workspace` without mounting.
+- `-protected`: Create an Ed25519 (`ecc`) protected slot.
 
-### Mounting a workspace
+### Mounting a Workspace (`invariant workspace mount`)
 
-A workspace is mounted using the `invariant workspace mount` command. The command has the following argument:
+```bash
+invariant workspace mount [mount-flags] [-foreground] [-systemd] <directory>
+```
 
-- `directory` - the workspace directory to mount.
+Mounts the workspace via FUSE (spawning a background daemon by default unless `-foreground` is passed). Supports the common mount flags:
 
-The `directory` must refer to a workspace directory (that is, contain a `.invariant-workspace` file).
+- `-discovery <url>`: Discovery service URL.
+- `-root <link>`: Root content link override.
+- `-slot <id-or-name>`: Slot ID or name.
+- `-cache <MB>`: In-memory cache size in MB (default `128`).
+- `-disk-cache <MB>`: Disk cache size in MB (default `1024`).
+- `-cache-dir <path>`: Disk cache directory (default `~/.cache/invariant`).
+- `-overflow-dir <path>`: Overflow cache directory (default `~/.cache/invariant/overflow`).
+- `-compress`: Compress newly written files.
+- `-encrypt`: Encrypt newly written files.
+- `-key-policy <policy>`: Encryption key policy (default `Deterministic`).
+- `-key <hex>`: Hex encryption key for `SuppliedAllKey`.
+- `-auto-sync <duration>`: Auto-sync interval (default `1m`).
+- `-foreground`: Run FUSE mount in the foreground.
 
-If a `-systemd` flag is provided then the workspace will be remounted on boot using systemd.
-If a `-foreground` flag is provided command  will mount directly instead of spawning a background task.
+### Unmounting a Workspace (`invariant workspace unmount`)
 
-### Unmounting a workspace
+```bash
+invariant workspace unmount [-systemd] <directory>
+```
 
-A workspace is un-mounted by using `invariant workspace unmount`. The `unmount` command has the following argument:
+Unmounts the FUSE filesystem via `fusermount -u` and waits for the background mount process to exit.
 
-- `directory` - the workspace directory to unmount.
+### Pre-populating Cache (`invariant workspace pull`)
 
-If `-systemd` was supplied when mounted, systemd configuration is removed for the mount.
+```bash
+invariant workspace pull [mount-flags] [directory]
+```
 
-`fusermount -u` can also be used to unmount the directory but it does not update the systemd configuration.
+Walks up from `directory` (default `.`) to find `.invariant-workspace` or `.invariant-layer[s]`, and concurrently (16 workers) downloads all files from the source layer into the local disk cache. Prompts for confirmation if the total size exceeds `-disk-cache`.
 
-## Implementation
+### Branching, Merging, and Rebasing Workspaces
 
-### Creating the workspace
+- `invariant workspace branch [parent-directory] <branch-directory>`: Creates a new workspace slot branched from the parent workspace's current snapshot and records `parent_snapshot` and `parent_slot`.
+- `invariant workspace merge [parent-directory] <branch-directory>`: Performs a 3-way `MergeTrees` from the branch back into the parent slot via CAS (exits with status `2` if merge conflicts occur).
+- `invariant workspace rebase <parent-directory> [branch-directory]`: Performs a 3-way `MergeTrees` of upstream parent changes onto the branch slot and updates `parent_snapshot`.
 
-A workspace consists of multiple file-trees that are merged together to form one logical directory. The layers
-are the base layer (the file tree containing the `.invariant-layer` file), the source layer (the file tree of the
-sources) and zero or more produced file layers.
+## Layer Resolution Implementation
 
-The `create` command will
+When `create` initializes `.invariant-layer`:
 
-1. Load the reference file tree
-    1. if it it has a `.invariant-share` file, add the layers described in description in the file.
-    2. add any layers requested in the `-layers` option.
-    3. add the source layer. If `.invariant-ignore` or `.gitignore`, add the ignore statements to the `Exclude`
-    array of the layer.
-2. If any files are ignored by the source layer, create a temporary layer for all other files.
+1. If the base tree contains `.invariant-share` (JSON array of layers), those layers are added first.
+2. Any layers specified via `-layers` are added next (resolved first as `.invariant-<name>` in the base tree, otherwise via `names-v1`).
+3. The source layer is added with `excludes` rules loaded from `.invariant-ignore` and `.gitignore`.
+4. If any exclude rules exist, a writable `"local"` slot layer (`rootLink: "temporary"`, `storageDestination: "local"`) is appended for ignored/generated files.
 
-#### Example
-
-For example, a workspace can be created for the `invariant-go` project by first cloning
-`https://github.com/chuckjaz/invariant-go` and then using `invariant upload` to upload the content of the directory.
-Then a workspace can be created using `invariant workspace create invariant-go-mnt <address>` where `<address>` is the
-address returned by `upload`. This will mount a copy of the sources in `invariant-go-mnt`.
-
-This directory will contain a `.invariant-layer` file containing something like,
+Example `.invariant-layer`:
 
 ```json
 [
     {
         "rootLink": { "address": "<slot>", "slot": true },
-        "exclude": ["bin/"]
+        "excludes": ["bin/"]
     },
     {
         "rootLink": "temporary",
@@ -83,17 +95,3 @@ This directory will contain a `.invariant-layer` file containing something like,
     }
 ]
 ```
-
-This means that the sources are assumed to be anything not in the `bin` directory. A `rootLink` of `temporary` creates
-a temporary slot that will last only as long as the mount (this is not preserved across unmount/mount or reboot). A
-storage destination of `"local"` will only be stored locally.
-
-A `.invariant-share` file and `-layers` option can be used to create more specialized workspaces. The `.invariant-share`
-layers are always first followed by the `-layers`. When resolving the layer names, first a file is looked for in the
-source root directory called `.invariant-<name>` where `<name>` is replaced by the layer name. If that is not found the
-name is looked for in the name server.
-
-### Mounting the workspace
-
-The workspace is mounted by reading the `.invariant-workspace` file in the directory and mounting the content link that
-is contained in the `content` field. The additional fields, if present, are ignored and are reserved for future versions.

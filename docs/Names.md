@@ -1,20 +1,24 @@
-# The invariant project - Names protocol
+# The invariant project - Names Protocol
 
-The names protocol is a protocol that allows you register and retieve IDs and addresses by name. The ID can be sent to the discovery service to discover the location of the service. An address can be used to send requests to the service. For example, for a block address, the address can be sent to the storage service to retrieve the block.
+The names protocol allows registering and retrieving service IDs and block addresses by logical name. A service ID can be sent to the discovery service to locate the service, and a block address can be sent to a storage service to retrieve the block.
 
-Both IDs and addresses are 32-byte hex strings. 
+Both IDs and addresses are 32-byte (64-character) hex strings.
 
-Names can also be retrieved from a DNS TXT record with the form `invariant:<id|address>;<tokens>` where `<tokens>` is a comma separated list of protocol version tokens. A synthetic version token of `block-v1` is used for block addresses. For tokens of server protocols indicates it is an ID for the a server that has the given protocol. For example, if the token `storage-v1` is present then the ID is for a server that has the storage protocol.
+Names can also be retrieved from a DNS TXT record with the form `invariant:<id|address>;<tokens>`, where `<tokens>` is a comma-separated list of protocol version tokens. A synthetic version token of `block-v1` is used for block addresses. Server protocol tokens (such as `storage-v1`) indicate that the value is a service ID implementing those protocols.
 
 ## Version
 
-This version 1 of the names protocol is and has a version token of names-v1.
+Version 1 of the names protocol uses the protocol token `names-v1`.
 
 ## Values
 
 ### `:name`
 
-The name of a service or block.
+The logical name of a service, slot, or block.
+
+### `:id`
+
+A 32-byte hex-encoded service ID or value.
 
 ### `:value`
 
@@ -22,11 +26,36 @@ The ID of a service or the address of a block.
 
 ### `:tokens`
 
-The protocol version tokens for the service or block. For a block the token should be `block-v1`. For a service the token should be the protocol tokens of the protocols the service supports.
+A comma-separated list of protocol version tokens for the service or block (e.g., `block-v1` for a block, or `storage-v1` for a storage service).
 
-## GET /:name
+## Endpoints
 
-Retrieve the ID and address of the service or block with the given name. The response is a JSON object with the TypeScript type of,
+### `GET /id`
+
+Returns the ID of the names service (`200 OK`, `Content-Type: text/plain`), or `501 Not Implemented` if the backend does not expose an identity.
+
+### `GET /lookup/:id`
+
+Reverse-look up all logical names currently mapped to the given `:id`.
+
+#### Response
+
+`200 OK` (`Content-Type: application/json`) returning a JSON array of name strings (`string[]`), `400 Bad Request` if `:id` is empty, or `500 Internal Server Error` on failure.
+
+### `GET /:name`
+
+Retrieve the ID or address and protocol tokens associated with `:name`.
+
+#### Required response headers
+
+| Header | Value |
+| ------ | ----- |
+| `Content-Type` | `application/json` |
+| `ETag` | `:value` |
+
+#### Response
+
+`200 OK` with a JSON object matching `NameResponse`:
 
 ```ts
 interface NameResponse {
@@ -35,24 +64,34 @@ interface NameResponse {
 }
 ```
 
-## PUT /:name?value=:id&tokens=:tokens
+Returns `404 Not Found` if the name does not exist, or `500 Internal Server Error` on failure.
 
-Store the ID of a service or the address of a block with the given name. The tokens are protocol version tokens. For a block the token should be `block-v1`. For a service the token should be the protocol tokens of the protocols the service supports.
+### `PUT /:name?value=:id&tokens=:tokens`
 
-## DELETE /:name
+Store or update the ID or address (`value`, required) and optional comma-separated `tokens` for `:name`.
 
-Delete the name from the names service.
+#### Required response headers
 
-### Required request headers
+| Header | Value |
+| ------ | ----- |
+| `ETag` | `:value` |
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| If-Match      | `:value`                  |
+Returns `200 OK` on success, `400 Bad Request` if `value` is missing, or `500 Internal Server Error` on failure.
 
-The If-Match must match the current ID or address associated with the name. If it does not match, or is missing, the request will be rejected with a 412 Precondition Failed response.
+### `DELETE /:name`
 
-### Required response headers
+Delete `:name` from the names service.
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| ETag          | `:value`                  |
+#### Required request headers
+
+| Header | Value |
+| ------ | ----- |
+| `If-Match` | `:value` |
+
+The `If-Match` header must match the current ID or address associated with `:name`. If it does not match or is missing, the request is rejected with `412 Precondition Failed`. Returns `404 Not Found` if the name does not exist.
+
+#### Required response headers
+
+| Header | Value |
+| ------ | ----- |
+| `ETag` | `:value` |

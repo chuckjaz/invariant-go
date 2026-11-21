@@ -1,63 +1,73 @@
-# The invariant project - KeyValue protocol
+# The invariant project - KeyValue Protocol
 
-A key-value service provides a distributed, persistent mapping of string keys to octet stream values. It is built on top of the storage and slots protocols to ensure data durability and consistency.
+A key-value service provides a distributed, persistent mapping of string keys to octet stream values with MVCC transactions and version history. It is built on top of the storage and slots protocols for data durability and consistency.
+
+When running over Tailscale/ITP, the server resolves caller identity via `WhoIs` (cached for `WhoIsTTL`, default `1m`) and attaches it to the request context.
 
 ## Values
 
-### `key`
+### `:key`
 
 A string representing the key to store or retrieve.
 
-### `value`
+### `:value`
 
 An octet stream representing the data associated with a key.
 
+### `:txID`
+
+An unsigned 64-bit transaction ID (`uint64`).
+
 ## Endpoints
 
-### `GET /get?key=:key`
+### `GET /id`
+
+Returns the hex-encoded ID of the key-value service (`200 OK`, `Content-Type: text/plain`).
+
+### `GET /get?key=:key&tx=:txID`
 
 Retrieve the value associated with the given `:key`.
 
 #### Request
 
-The request requires the `key` query parameter. You may optionally pass a `tx` query parameter to perform the operation within an existing transaction. If `tx` is omitted, an implicit checkpoint transaction is created.
+Requires the `key` query parameter (`400 Bad Request` if missing). Optional `tx` query parameter performs the read within an existing transaction; if omitted, an implicit checkpoint transaction is created.
 
 #### Required response headers
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| Content-Type  | application/octet-stream  |
-| X-Transaction-ID    | `:txID`               |
+| Header | Value |
+| ------ | ----- |
+| `Content-Type` | `application/octet-stream` |
+| `X-Transaction-ID` | `:txID` |
 
 #### Response
 
-The body of the response is the value associated with the `:key`. If the key is not found, the server responds with a 404 Not Found status.
+`200 OK` with the raw value bytes in the body, or `404 Not Found` if the key is not found.
 
-### `POST /put?key=:key`
+### `POST /put?key=:key&tx=:txID`
 
 Store a value for the given `:key`.
 
 #### Request
 
-The request requires the `key` query parameter. You may optionally pass a `tx` query parameter to perform the operation within an existing transaction. If `tx` is omitted, an implicit single-operation transaction is created. The body of the request is the octet stream to store as the value.
+Requires the `key` query parameter (`400 Bad Request` if missing). Optional `tx` query parameter performs the write within an existing transaction; if omitted, an implicit single-operation transaction is created and committed. The request body is the raw octet stream value.
 
 #### Required response headers
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| X-Transaction-ID    | `:txID`               |
+| Header | Value |
+| ------ | ----- |
+| `X-Transaction-ID` | `:txID` |
 
 #### Response
 
-The body of the response is empty. The `X-Transaction-ID` header contains the transaction ID of the update, which monotonically increases for each successful put operation.
+`200 OK` (empty body) on success, `400 Bad Request` on missing `key` or body read error, or `500 Internal Server Error` on storage error. `X-Transaction-ID` contains the monotonically increasing sequence/transaction ID.
 
-### `POST /batch_get`
+### `POST /batch_get?tx=:txID`
 
-Retrieve the values associated with a batch of keys.
+Retrieve the values associated with a batch of keys. Optional `tx` query parameter specifies an existing transaction.
 
 #### Request
 
-The request body should be a JSON array containing the keys to retrieve:
+JSON array of key strings:
 
 ```json
 [
@@ -68,71 +78,95 @@ The request body should be a JSON array containing the keys to retrieve:
 
 #### Response
 
-The response is a `multipart/form-data` payload where each part corresponds to a found key. The part's name is the key, and the part's body is the octet stream value. Each part also includes an `X-Transaction-ID` header indicating the transaction ID of that specific key's value. Keys that are not found are omitted from the response.
+`200 OK` (`Content-Type: multipart/form-data`) where each part corresponds to a found key (`Content-Disposition: form-data; name="<key>"`), includes an `X-Transaction-ID` header, and has the octet stream value as its body. Missing keys are omitted. Returns `400 Bad Request` on invalid JSON or `500 Internal Server Error` on failure.
 
-### `POST /batch_put`
+### `POST /batch_put?tx=:txID`
 
-Store values for a batch of keys.
+Store values for a batch of keys. Optional `tx` query parameter specifies an existing transaction.
 
 #### Request
 
-The request should be a `multipart/form-data` payload. Each part's name represents the key, and the part's body is the octet stream to store as the value.
+A `multipart/form-data` payload where each part's `FormName()` (`name` in `Content-Disposition`) is the key and its body is the octet stream value.
 
 #### Required response headers
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| X-Transaction-ID    | `:txID`               |
+| Header | Value |
+| ------ | ----- |
+| `X-Transaction-ID` | `:txID` |
 
 #### Response
 
-The body of the response is empty. The `X-Transaction-ID` header contains the highest transaction ID resulting from the batch update.
+`200 OK` (empty body) on success, `400 Bad Request` on invalid multipart payload, or `500 Internal Server Error` on failure.
 
-### `GET /history?key=:key&min=:min&max=:max&limit=:limit`
+### `GET /history?key=:key&tx=:txID&min=:min&max=:max&limit=:limit`
 
-Retrieve the historical values associated with the given `:key` within a transaction ID range.
+Retrieve historical values associated with `:key` within a transaction ID range.
 
-#### Request
+#### Query Parameters
 
-The request requires the `key` query parameter. Optional parameters include `min` (minimum transaction ID, default 0), `max` (maximum transaction ID, default infinity), and `limit` (max number of records to return, default 100).
+- `key`: Required key string (`400 Bad Request` if missing).
+- `tx`: Optional transaction ID.
+- `min`: Minimum transaction ID (`uint64`, default `0`).
+- `max`: Maximum transaction ID (`uint64`, default `^uint64(0)`).
+- `limit`: Maximum number of versions to return (default `100`).
 
 #### Required response headers
 
-| Header        | Value                     |
-| ------------- | ------------------------- |
-| Content-Type  | multipart/form-data       |
-| X-Has-More    | `true` or `false`         |
+| Header | Value |
+| ------ | ----- |
+| `Content-Type` | `multipart/form-data` |
+| `X-Has-More` | `true` or `false` |
 
 #### Response
 
-The response is a `multipart/form-data` payload where each part corresponds to a historical version of the key. Each part includes an `X-Transaction-ID` header. The top-level `X-Has-More` header indicates if there might be more versions available beyond the returned page.
+`200 OK` (`multipart/form-data`) where each part has `Content-Disposition: form-data; name="<key>"` and an `X-Transaction-ID` header. Returns `500 Internal Server Error` on failure.
 
-### `POST /batch_history?min=:min&max=:max&limit=:limit`
+### `POST /batch_history?tx=:txID&min=:min&max=:max&limit=:limit`
 
-Retrieve the historical values associated with a batch of keys within a transaction ID range.
+Retrieve historical values for a batch of keys within a transaction ID range.
 
 #### Request
 
-The request body should be a JSON array containing the keys to retrieve. Optional query parameters include `min`, `max`, and `limit`.
+JSON array of key strings (`400 Bad Request` on invalid JSON). Supports optional `tx`, `min` (`0`), `max` (`^uint64(0)`), and `limit` (`100`) query parameters.
 
 #### Response
 
-The response is a `multipart/form-data` payload where each part corresponds to a historical version of a requested key. The part's name is the key. Each part includes an `X-Transaction-ID` header. Additionally, the **first** part returned for each key will include an `X-Has-More` header indicating if there might be more versions available for that specific key. Keys that are not found or have no versions in the range are omitted.
+`200 OK` (`Content-Type: multipart/form-data`) where each part's `name` is the key and includes an `X-Transaction-ID` header. The **first** part returned for each key also includes an `X-Has-More` (`true`/`false`) header. Keys with no matching versions are omitted. Returns `500 Internal Server Error` on failure.
 
 ## Transaction Endpoints
 
-### `POST /tx/start`
+### `POST /tx/start?sequential=:bool`
 
-Starts a new transaction. Returns the new transaction ID in the `X-Transaction-ID` response header.
+Start a new transaction. Pass `sequential=true` to request a sequential transaction.
+
+#### Response
+
+`200 OK` (`Content-Type: application/json`) with `X-Transaction-ID: <txID>` header and JSON body:
+
+```json
+{"transaction_id": 42}
+```
+
+Returns `500 Internal Server Error` on failure.
 
 ### `POST /tx/commit?tx=:txID`
 
-Commits an existing transaction. Returns 200 OK on success, or 409 Conflict if there was an MVCC conflict.
+Commit an existing transaction (`tx` query parameter required, `400 Bad Request` if invalid). Returns `200 OK` on success, or `409 Conflict` on an MVCC conflict.
 
 ### `POST /tx/abort?tx=:txID`
 
-Aborts an existing transaction.
+Abort an existing transaction (`tx` query parameter required, `400 Bad Request` if invalid). Returns `200 OK` on success, or `500 Internal Server Error` on failure.
 
 ### `POST /tx/checkpoint`
 
-Creates a checkpoint transaction. A checkpoint is immediately committed and is primarily used for read-only snapshots. Returns the checkpoint transaction ID in the `X-Transaction-ID` response header.
+Create an immediately committed checkpoint transaction for read-only snapshots.
+
+#### Response
+
+`200 OK` (`Content-Type: application/json`) with `X-Transaction-ID: <txID>` header and JSON body:
+
+```json
+{"transaction_id": 42}
+```
+
+Returns `500 Internal Server Error` on failure.

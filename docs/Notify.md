@@ -1,28 +1,32 @@
 # The invariant project - Notify Protocol
 
-The Notify protocol is a notification protocol for storage services to notify other services that they have a block.
+The Notify protocol is a notification protocol for storage services to notify other services (such as Distribute and Finder) that they hold a set of blocks.
 
-This protocol is a common part of the Distribute protocol and the Finder protocol. 
+This protocol is shared by the [Distribute Protocol](Distribute.md) and the [Finder Protocol](Finder.md).
 
 ## Version
 
-The version 1 of the notify protocol with the protocol token of has-v1.
+Version 1 of the notify protocol uses the protocol token `notify-v1`.
 
 ## Values
 
 ### `:id`
 
-A ID which is a 32 byte hex encoded value.
+A service ID, which is a 32-byte hex-encoded value.
 
 ### `:address`
 
-A block ID which is a 32 byte hex encoded sha256 hash of the content of the block.
+A block ID, which is a 32-byte hex-encoded SHA-256 hash of the block content.
 
-# Endpoints
+## Endpoints
 
-## `PUT /notify/:id`
+### `PUT /notify/:id`
 
-Notifies the storage service that the storage service with `:id` has blocks with the given addresses. The request is a JSON object with type of,
+Notifies the target service that the storage service with `:id` has blocks with the given addresses.
+
+#### Request
+
+JSON object (`Content-Type: application/json`) matching `HasRequest`:
 
 ```ts
 interface HasRequest {
@@ -30,6 +34,6 @@ interface HasRequest {
 }
 ```
 
-### Response
+#### Response
 
-The response is empty.
+`200 OK` (empty body) on success, `400 Bad Request` on invalid input, or `500 Internal Server Error` on failure.

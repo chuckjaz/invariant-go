@@ -1,12 +1,12 @@
-# The invariant project - files protocol
+# The invariant project - Files Protocol
 
-The files protocol is a file system protocol that creates and updates a file trees as specified by the [FileTree](docs/FileTree.md) specification. This system is intended to be used in conjunction with a FUSE to enable mounting a file tree into a directory.
+The files protocol is a filesystem HTTP protocol that creates, reads, and updates file trees as specified by the [FileTree](FileTree.md) specification. This system is used by the FUSE and NFS adapters to mount a file tree into a directory.
 
 ## Values
 
 ### `:content-information`
 
-The information about a content link.
+Information about a content node (`ContentInformationCommon`):
 
 ```typescript
 enum ContentKind {
@@ -16,172 +16,199 @@ enum ContentKind {
 }
 
 interface ContentInformationCommon {
-    node: Node
-    kind: ContentKind
-    modifyTime: number
-    createTime: number
-    executable: boolean
-    writable: boolean
-    etag: string
+    node: number;
+    kind: ContentKind;
+    modifyTime: number;
+    createTime: number;
+    executable: boolean;
+    writable: boolean;
+    etag: string;
 }
 ```
 
-- `node` - The node number of the content.
-- `kind` - The kind of the content.
-- `modifyTime` - The time the content was last modified.
-- `createTime` - The time the content was created.
-- `writable` - Whether the content is writable.
-- `mode` - The mode of the content in octal format.
-- `etag` - The etag of the content which is sha256 hash of the content. This is either the `expected` of the associated content link or `address` if their is not `expected` field.
+- `node` - The node number (`uint64`) of the entry.
+- `kind` - The kind of the entry (`File`, `Directory`, or `SymbolicLink`).
+- `modifyTime` - The time the entry was last modified (Unix seconds).
+- `createTime` - The time the entry was created (Unix seconds).
+- `executable` - Whether the entry has execute permission.
+- `writable` - Whether the entry is writable.
+- `etag` - The ETag of the content (SHA-256 hash: `expected` of the associated content link, or `address` if `expected` is absent).
 
-### :entry-attributes
+### `:node-info`
 
-The attributes of a file, directory or symbolic link.
+Combined entry metadata and size/mode information (`NodeInfo`):
+
+```typescript
+interface NodeInfo {
+    node: number;
+    kind: ContentKind;
+    size: number;
+    mode: number;
+    createTime: number;
+    modifyTime: number;
+    executable: boolean;
+    writable: boolean;
+    etag: string;
+}
+```
+
+### `:entry-attributes`
+
+Mutable or queried attributes of a file, directory, or symbolic link (`EntryAttributes`):
 
 ```typescript
 interface EntryAttributes {
-    writable?: boolean
-    modifyTime?: bigint
-    createTime?: bigint
-    mode?: string
-    size?: bigint
-    type?: string
+    writable?: boolean;
+    modifyTime?: number;
+    createTime?: number;
+    mode?: string;
+    size?: number;
+    type?: string;
 }
 ```
 
-- `writable` - Whether the entry is writable. An entry is writable if it is in a directory that is writable. A directory is writable if one of its ancestors is associated with a writable slot. The slot is kept updated with the address of the new root of the file tree as changes are made.
+- `writable` - Whether the entry is writable. An entry is writable if its directory (or an ancestor) is backed by a writable slot.
 - `modifyTime` - The time the entry was last modified.
 - `createTime` - The time the entry was created.
-- `mode` - The mode of the entry in octal format. `writable` takes precedence over `mode`. 
-- `size` - The size of the entry. Only valid for files.
-- `type` - The type of the entry. Only valid for files. A type of "-" is used to remove a type.
+- `mode` - The POSIX mode of the entry in octal format (e.g., `"0644"`). `writable` takes precedence over `mode`.
+- `size` - The size of the entry in bytes (only valid for files).
+- `type` - The MIME type of the entry (only valid for files). A value of `"-"` removes the MIME type.
 
 ### `:name`
 
-The name of of an entry in a directory.
+The name of an entry in a directory.
 
 ### `:node`
 
-The node number of a file, directory or symbolic link.
+The `uint64` node number of a file, directory, or symbolic link. Node `1` is reserved for the root directory.
 
-## `PUT /:node/:name`
+## Endpoints
 
-Create a file, directory or symbolic link with the given name in a directory with the given node number. The node number must be a valid node number for a directory. The node number 1 is reserved for the root directory and is always a directory.
+### `PUT /:node/:name`
 
-Note: this can be used to efficiently copy files or directories by using the `content` parameter to reference the content of the file or directory to be copied.
+Create a file, directory, or symbolic link with `:name` in the directory `:node`.
 
-### Optional Query Parameters
+Note: This can be used to efficiently copy files or directories by passing the `content` query parameter.
 
-- `kind` - The kind of the entry to create. Must be `File`, `Directory` or `SymbolicLink`.
-- `target` - The target of the symbolic link. Only used if `kind` is `SymbolicLink` and required if `kind` is `SymbolicLink`.
-- `content` - A content link to the content of the file. Only used if `kind` is `File` or `Directory`.  If `content` is not supplied, the file or directory is created empty.
+#### Optional Query Parameters
 
-## `GET /file/:node`
+- `kind` - Entry kind: `File` (default when `kind` is `"file"` or omitted), `Directory`, or `SymbolicLink`.
+- `target` - Target of the symbolic link (required when `kind` is `SymbolicLink`).
+- `content` - JSON-encoded `ContentLink` for `File` or `Directory`. If omitted, an empty file or directory is created.
 
-Read a file with the given node number. This reads both files and symbolic links. For symbolic links, the target is returned.
+#### Response
 
-### Optional Query Parameters
+`201 Created` on success, `400 Bad Request` on invalid `:node` or invalid `content` JSON, `403 Forbidden` if the filesystem is read-only, or `500 Internal Server Error` on failure.
 
-- `offset` - The offset into the file to read. If offset is omitted it is read from the beginning of the file. If offset is greater than the size of the file, an empty response is returned. If offset is negative, it is relative to the end of the file.
-- `length` - The length of the file to read. If length is omitted it is read until the end of the file.
+### `GET /file/:node`
 
-### Response
+Read a file or symbolic link target with node number `:node`.
 
-A bytes stream of the request content of the file.
+#### Optional Query Parameters
 
-## `POST /file/:node`
+- `offset` - Byte offset into the file (`int64`). If omitted, reads from the beginning. If negative, relative to the end of the file.
+- `length` - Number of bytes to read (`int64`). If omitted, reads until the end of the file.
 
-Overwrite a file with the given node number.
+#### Response
 
-### Optional Query Parameters
+`200 OK` streaming the file bytes, `400 Bad Request` on invalid `:node`, `404 Not Found` if `:node` is an invalid file node, or `500 Internal Server Error` on read error.
 
-- `offset` - The offset into the file to write. If offset is omitted it is written from the beginning of the file. If offset is greater than the size of the file, an empty response is returned. If offset is negative, it is relative to the end of the file.
-- `append` - If true, the file is appended to the end of the file. If `append` is true, `offset` is ignored.
+### `POST /file/:node`
 
-## `GET /directory/:node`
+Write or overwrite data in a file with node number `:node`.
 
-Read a directory with the given node number.
+#### Optional Query Parameters
 
-### Optional Query Parameters
+- `offset` - Byte offset into the file (`int64`). If omitted, writes from the beginning. If negative, relative to the end of the file.
+- `append` - If `"true"`, appends to the end of the file (`offset` is ignored).
 
-- `offset` - The offset into the directory to read. If offset is omitted it is read from the beginning of the directory. If offset is greater than the size of the directory, an empty response is returned. If offset is negative, it is relative to the end of the directory. The offset is directory entry count.
-- `length` - The length of the directory to read. If length is omitted it is read until the end of the directory. Length is the number of directory entries to read.
+#### Response
 
-### Response
+`200 OK` on success, `400 Bad Request` on invalid `:node`, `403 Forbidden` if read-only, `404 Not Found` if invalid file node, or `500 Internal Server Error` on failure.
 
-A JSON array of directory entries.
+### `GET /directory/:node`
 
-## `GET /attributes/:node`
+Read directory entries for directory `:node`.
 
-Read the attributes of a file, directory or symbolic link with the given node number.
+#### Optional Query Parameters
 
-### Response
+- `offset` - Entry index offset (`int64`). Negative values are relative to the end of the directory.
+- `length` - Maximum number of directory entries to return (`int64`).
 
-The response is a JSON object of type `:entry-attributes`.
+#### Response
 
-## `POST /attributes/:node`
+`200 OK` (`Content-Type: application/json`) returning a `Directory` JSON array of entries, `400 Bad Request` on invalid `:node`, or `500 Internal Server Error` on failure.
 
-Update the attributes of a file, directory or symbolic link with the given node number.
+### `GET /attributes/:node`
 
-### Request Body
+Read the `EntryAttributes` of `:node`. Returns `200 OK` (`Content-Type: application/json`), `400 Bad Request` on invalid `:node`, or `404 Not Found`.
 
-A JSON object of type `:entry-attributes`. Missing values are not modified.
+### `POST /attributes/:node`
 
-### Response
+Update the attributes of `:node`. Request body is a JSON `EntryAttributes` object (omitted fields are not modified).
 
-A JSON object of type `:entry-attributes` of the updated attributes.
+#### Response
 
-## `GET /content/:node`
+`200 OK` (`Content-Type: application/json`) returning the updated `EntryAttributes`, `400 Bad Request` on invalid `:node` or JSON, `403 Forbidden` if read-only, or `404 Not Found`.
 
-Read the content link of a file with the given node number.
+### `GET /content/:node`
 
-### Response
+Read the `ContentLink` of `:node`. Returns `200 OK` (`Content-Type: application/json`), or `400 Bad Request` on invalid `:node` or error.
 
-The response is a JSON object of type `:content-link`.
+### `GET /info/:node`
 
-## `GET /info/:node`
+Read the `ContentInformationCommon` of `:node`. Returns `200 OK` (`Content-Type: application/json`), `400 Bad Request` on invalid `:node`, or `404 Not Found`.
 
-Read the content information of a file with the given node number.
+### `GET /nodeinfo/:node`
 
-### Response
+Read the `NodeInfo` of `:node`. Returns `200 OK` (`Content-Type: application/json`), `400 Bad Request` on invalid `:node`, or `404 Not Found`.
 
-The response is a JSON object of type `:content-information`.
+### `GET /lookup/:node/:name`
 
-## `GET /lookup/:node/:name`
+Look up `:name` in directory `:node` and return its `ContentInformationCommon`. Returns `200 OK` (`Content-Type: application/json`), `400 Bad Request` on invalid `:node`, or `404 Not Found`.
 
-Lookup a file, directory or symbolic link with given name in the directory with the given node number.
+### `GET /lookup-nodeinfo/:node/:name`
 
-### Response
+Look up `:name` in directory `:node` and return its `NodeInfo`. Returns `200 OK` (`Content-Type: application/json`), `400 Bad Request` on invalid `:node`, or `404 Not Found`.
 
-The response is a JSON object of type `:content-information`.
+### `PUT /remove/:node/:name`
 
-## `PUT /remove/:node/:name`
+Remove `:name` from directory `:node`. Returns `200 OK` on success, `400 Bad Request` on invalid `:node`, `403 Forbidden` if read-only, or `404 Not Found`.
 
-Remove a file, directory or symbolic link with given name in the directory with the given node number.
+### `POST /rename/:node/:name`
 
-## `POST /rename/:node/:name`
+Rename or move `:name` from directory `:node`.
 
-Rename a file, directory or symbolic link with given name in the directory with the given node number.
+#### Query Parameters
 
-### Query Parameters
+- `name` - New entry name (required, `400 Bad Request` if missing).
+- `directory` - Destination directory `:node` (`uint64`; defaults to `:node`).
 
-- `name` - The new name of the file, directory or symbolic link. This parameter is required.
-- `directory` - The `:node` of the new directory. If not provided, it is `:node`.
+#### Response
 
-## `PUT /link/:node/:name`
+`200 OK` on success, `400 Bad Request` on invalid parameters, `403 Forbidden` if read-only, or `500 Internal Server Error` on failure.
 
-Create a link with the given name in a directory with the given node number. This is a hard link where changes made to the the node are reflected in the link and vice versa. This is not, however, presistent. Hard links are broken when the file system is unmounted.
+### `PUT /link/:node/:name`
 
-### Query Parameters
+Create an in-memory hard link named `:name` in directory `:node` pointing to an existing node. Hard links are ephemeral and are not persisted across unmount.
 
-- `node` - The node number of the file, directory or symbolic link to link to. This parameter is required.
+#### Query Parameters
 
-## `PUT /sync`
+- `node` - Target `:node` number (`uint64`, required).
 
-Sync the file system. This is ignored if the node provided is not writable. If it is writable the first ancestor that is a directory a slot content link is updated after all its content has been written to the storage services. If the node is a file, pending writes to other files may or may not be written at the same time.
+#### Response
 
-### Query Parameters
+`201 Created` on success, `400 Bad Request` on invalid parameters, `403 Forbidden` if read-only, or `500 Internal Server Error` on failure.
 
-- `node` - The node number of the file or directory to sync. If not provided, it is the root directory.
-- `wait` - If true, the request will wait for the sync to complete before returning. If false, the request will return immediately. The default is true. If `wait` is `false` the request will be successful even if the sync fails.
+### `PUT /sync`
 
+Sync pending writes in the filesystem. If `:node` is writable, the nearest ancestor backed by a writable slot has its slot updated after all modified content is flushed to storage.
+
+#### Query Parameters
+
+- `node` - Node number to sync (`uint64`, defaults to `1` for root).
+- `wait` - If `"false"`, returns immediately without waiting for sync completion; otherwise (`!= "false"`, default `true`) waits for sync completion.
+
+#### Response
+
+`200 OK` on success, `400 Bad Request` on invalid `node`, or `500 Internal Server Error` if sync fails while `wait` is true.
