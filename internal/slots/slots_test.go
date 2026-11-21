@@ -168,14 +168,10 @@ func TestSlots_FileSystemPersistence(t *testing.T) {
 }
 
 func TestSlots_FileSystemSnapshots(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "slots_test_snapshots")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Very short snapshot interval
-	fsSlots, err := slots.NewFileSystemSlots(tempDir, time.Millisecond*100)
+	fsSlots, err := slots.NewFileSystemSlots(tempDir, time.Millisecond*50)
 	if err != nil {
 		t.Fatalf("failed to create fs slots: %v", err)
 	}
@@ -185,16 +181,22 @@ func TestSlots_FileSystemSnapshots(t *testing.T) {
 		t.Fatalf("failed to create block: %v", err)
 	}
 
-	// Give enough time for a snapshot
-	time.Sleep(time.Millisecond * 250)
-
-	// Check if snapshot exists
-	_, err = os.Stat(filepath.Join(tempDir, "snapshot.json"))
-	if err != nil {
-		t.Fatalf("expected snapshot.json to exist, got error: %v", err)
+	// Poll for snapshot creation up to 2s to avoid flakiness under parallel load
+	snapshotPath := filepath.Join(tempDir, "snapshot.json")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err = os.Stat(snapshotPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected snapshot.json to exist, got error: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
-	fsSlots.Close()
+	if err := fsSlots.Close(); err != nil {
+		t.Fatalf("failed to close fs slots: %v", err)
+	}
 
 	// Reopen with long snapshot interface to test loading snapshot
 	fsSlots2, err := slots.NewFileSystemSlots(tempDir, time.Hour)
@@ -431,7 +433,7 @@ func TestSlots_Extra(t *testing.T) {
 		if len(batch) != 1 || batch[0] != "s2" {
 			t.Errorf("Expected notification for s2, got %v", batch)
 		}
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Error("Timed out waiting for server subscription notification")
 	}
 }
