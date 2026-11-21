@@ -266,52 +266,74 @@ func (j *ChainedJournal[T]) Append(ctx context.Context, item T, syncToDisk bool)
 
 	j.entries++
 	if j.maxEntries > 0 && j.entries >= j.maxEntries {
-		if err := j.rotateLocked(); err != nil {
+		rotatedPath, err := j.rotateLocked()
+		if err != nil {
 			return false, err
+		}
+		if rotatedPath != "" {
+			select {
+			case j.uploadCh <- rotatedPath:
+			default:
+				go func(p string) {
+					j.uploadCh <- p
+				}(rotatedPath)
+			}
 		}
 		return true, nil
 	}
 	return false, nil
 }
 
-func (j *ChainedJournal[T]) rotateLocked() error {
+func (j *ChainedJournal[T]) rotateLocked() (string, error) {
 	for j.syncing {
 		j.syncCond.Wait()
 	}
 	if j.currentFile == nil {
-		return nil
+		return "", nil
 	}
 	_ = j.currentWriter.Flush()
 	j.currentFile.Close()
 	rotatedPath := j.currentPath
 
 	if err := j.openNewFile(); err != nil {
-		return err
+		return "", err
 	}
 
 	j.uploadWg.Add(1)
-	j.uploadCh <- rotatedPath
-	return nil
+	return rotatedPath, nil
 }
 
 // Rotate forces a rotation of the current active journal file.
 func (j *ChainedJournal[T]) Rotate(ctx context.Context) error {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.rotateLocked()
+	rotatedPath, err := j.rotateLocked()
+	j.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if rotatedPath != "" {
+		j.uploadCh <- rotatedPath
+	}
+	return nil
 }
 
 // Flush closes the current journal, queues it for upload, and waits for all uploads to finish.
 func (j *ChainedJournal[T]) Flush(ctx context.Context) error {
 	j.mu.Lock()
+	var rotatedPath string
+	var err error
 	if j.currentFile != nil && j.entries > 0 {
-		if err := j.rotateLocked(); err != nil {
+		rotatedPath, err = j.rotateLocked()
+		if err != nil {
 			j.mu.Unlock()
 			return err
 		}
 	}
 	j.mu.Unlock()
 
+	if rotatedPath != "" {
+		j.uploadCh <- rotatedPath
+	}
 	j.uploadWg.Wait()
 	return nil
 }
@@ -332,15 +354,20 @@ func (j *ChainedJournal[T]) Sync() error {
 // Close closes the journal and waits for background tasks to finish.
 func (j *ChainedJournal[T]) Close() error {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.cancel != nil {
-		j.cancel()
-	}
+	var closeErr error
 	if j.currentFile != nil {
 		_ = j.currentWriter.Flush()
-		return j.currentFile.Close()
+		closeErr = j.currentFile.Close()
+		j.currentFile = nil
 	}
-	return nil
+	cancel := j.cancel
+	j.mu.Unlock()
+
+	j.uploadWg.Wait()
+	if cancel != nil {
+		cancel()
+	}
+	return closeErr
 }
 
 // PreviousJournal returns the link to the most recently uploaded journal page.
