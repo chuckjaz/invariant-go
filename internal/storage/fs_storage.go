@@ -259,14 +259,21 @@ func (s *FileSystemStorage) List(ctx context.Context, chunkSize int) <-chan []st
 
 			chunk = append(chunk, address)
 			if len(chunk) >= chunkSize {
-				ch <- chunk
+				select {
+				case ch <- chunk:
+				case <-ctx.Done():
+					return filepath.SkipAll
+				}
 				chunk = nil
 			}
 			return nil
 		})
 
 		if len(chunk) > 0 {
-			ch <- chunk
+			select {
+			case ch <- chunk:
+			case <-ctx.Done():
+			}
 		}
 	}()
 

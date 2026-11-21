@@ -109,18 +109,19 @@ func (s *InMemoryStorage) List(ctx context.Context, chunkSize int) <-chan []stri
 	go func() {
 		defer close(ch)
 		s.mu.RLock()
-		defer s.mu.RUnlock()
-
-		var chunk []string
+		addrs := make([]string, 0, len(s.store))
 		for addr := range s.store {
-			chunk = append(chunk, addr)
-			if len(chunk) >= chunkSize {
-				ch <- chunk
-				chunk = nil
-			}
+			addrs = append(addrs, addr)
 		}
-		if len(chunk) > 0 {
-			ch <- chunk
+		s.mu.RUnlock()
+
+		for i := 0; i < len(addrs); i += chunkSize {
+			end := min(i+chunkSize, len(addrs))
+			select {
+			case ch <- addrs[i:end]:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
