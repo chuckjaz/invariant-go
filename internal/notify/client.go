@@ -1,3 +1,4 @@
+// Package notify provides an HTTP client for the Invariant notify-v1 protocol.
 package notify
 
 import (
@@ -13,13 +14,13 @@ type NotifyRequest struct {
 	Addresses []string `json:"addresses"`
 }
 
-// Client implements a client for sending has requests to a has-v1 service.
+// Client implements a client for sending notifications to a notify-v1 service.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-// NewClient creates a new HTTP has client.
+// NewClient creates a new HTTP notify client.
 func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -32,7 +33,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	}
 }
 
-// Has notifies the service that a storage node holds the given blocks.
+// Notify informs the service that a storage node holds the given blocks.
 // The `storageID` is the ID of the storage node that has the blocks.
 func (c *Client) Notify(storageID string, addresses []string) error {
 	reqBody := NotifyRequest{Addresses: addresses}
