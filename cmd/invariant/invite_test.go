@@ -184,6 +184,7 @@ func TestOAuthTokenAutoRefresh(t *testing.T) {
 		AccessToken:  "expired-alice-oauth-token",
 		RefreshToken: "valid-refresh-token",
 		Expiry:       time.Now().Add(-10 * time.Minute),
+		ClientID:     "test-oauth-client-id",
 		TokenURL:     tokenSrv.URL,
 	}); err != nil {
 		t.Fatalf("SaveOAuthToken failed: %v", err)
@@ -220,6 +221,7 @@ func TestOAuthTokenAutoRefresh(t *testing.T) {
 		AccessToken:  "expired-alice-oauth-token",
 		RefreshToken: "valid-refresh-token",
 		Expiry:       time.Now().Add(-10 * time.Minute),
+		ClientID:     "test-oauth-client-id",
 		TokenURL:     tokenSrv.URL,
 	}); err != nil {
 		t.Fatalf("SaveOAuthToken failed: %v", err)

@@ -102,11 +102,9 @@ func LoadOAuthToken() (string, error) {
 }
 
 const (
-	defaultGoogleClientID     = "624751386960-o472j5n2rhib1odebc13lkqeptddp6dt.apps.googleusercontent.com"
-	defaultGoogleClientSecret = "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"
-	defaultGoogleAuthURL      = "https://accounts.google.com/o/oauth2/v2/auth"
-	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
-	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
+	defaultGoogleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
+	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
+	defaultGoogleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 )
 
 type oauthLoginOptions struct {
@@ -122,15 +120,9 @@ type oauthLoginOptions struct {
 func resolveOAuthOptions(opts oauthLoginOptions) oauthLoginOptions {
 	if opts.clientID == "" {
 		opts.clientID = os.Getenv("INVARIANT_OAUTH_CLIENT_ID")
-		if opts.clientID == "" {
-			opts.clientID = defaultGoogleClientID
-		}
 	}
 	if opts.clientSecret == "" {
 		opts.clientSecret = os.Getenv("INVARIANT_OAUTH_CLIENT_SECRET")
-		if opts.clientSecret == "" {
-			opts.clientSecret = defaultGoogleClientSecret
-		}
 	}
 	if opts.authURL == "" {
 		opts.authURL = os.Getenv("INVARIANT_OAUTH_AUTH_URL")
@@ -197,6 +189,9 @@ func performOAuthLogin(ctx context.Context, opts oauthLoginOptions) (*OAuthToken
 	}
 
 	// 2. Obtain fresh OAuth token via browser flow
+	if opts.clientID == "" {
+		return nil, nil, fmt.Errorf("no OAuth client ID configured (-client-id / INVARIANT_OAUTH_CLIENT_ID)")
+	}
 	if opts.authURL == "" || opts.tokenURL == "" {
 		return nil, nil, fmt.Errorf("no OAuth authorization server configured (--auth-url / INVARIANT_OAUTH_AUTH_URL)")
 	}
@@ -213,10 +208,10 @@ func performOAuthLogin(ctx context.Context, opts oauthLoginOptions) (*OAuthToken
 	if tf.Name == "" {
 		tf.Name = ident.Name
 	}
-	if opts.clientID != "" && opts.clientID != defaultGoogleClientID {
+	if opts.clientID != "" {
 		tf.ClientID = opts.clientID
 	}
-	if opts.clientSecret != "" && opts.clientSecret != defaultGoogleClientSecret {
+	if opts.clientSecret != "" {
 		tf.ClientSecret = opts.clientSecret
 	}
 	if opts.tokenURL != "" && opts.tokenURL != defaultGoogleTokenURL {
@@ -253,6 +248,9 @@ func refreshOAuthToken(ctx context.Context, tf *OAuthTokenFile, opts oauthLoginO
 	}
 	if tokenURL == "" {
 		tokenURL = resolved.tokenURL
+	}
+	if clientID == "" {
+		return fmt.Errorf("no OAuth client ID configured (-client-id / INVARIANT_OAUTH_CLIENT_ID)")
 	}
 	if tokenURL == "" {
 		return fmt.Errorf("no OAuth token URL configured")
