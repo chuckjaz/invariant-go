@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -43,13 +44,20 @@ func NewRunner(rc RunnerConfig) (*Runner, error) {
 	}, nil
 }
 
-// Start launches all configured services and blocks until the context is canceled.
+// Start launches all configured services and blocks until the context is canceled
+// and all service goroutines have exited.
 func (r *Runner) Start(ctx context.Context) {
+	var wg sync.WaitGroup
 	for i := range r.rc.Config.Services {
 		sc := r.rc.Config.Services[i]
-		go r.runService(ctx, sc)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.runService(ctx, sc)
+		}()
 	}
 	<-ctx.Done()
+	wg.Wait()
 }
 
 func (r *Runner) runService(ctx context.Context, sc ServiceConfig) {

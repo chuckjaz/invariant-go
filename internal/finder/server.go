@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/chuckjaz/invariant-go/internal/discovery"
 	"github.com/chuckjaz/invariant-go/internal/notify"
@@ -121,8 +122,11 @@ func (s *FinderServer) handlePeer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Look up the new finder in discovery
-	desc, ok := s.discovery.Get(context.Background(), newFinderID)
+	desc, ok := s.discovery.Get(ctx, newFinderID)
 	if !ok {
 		return // Discovery doesn't know about them, can't push
 	}
@@ -167,6 +171,6 @@ func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 
 	// Send batches to the new finder
 	for sID, addrs := range pushMap {
-		remoteClient.Notify(context.Background(), sID, addrs)
+		_ = remoteClient.Notify(ctx, sID, addrs)
 	}
 }

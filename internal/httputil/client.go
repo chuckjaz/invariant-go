@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
+
+var diagnosticLogMu sync.Mutex
 
 // DiagnosticTransport wraps an http.RoundTripper and logs requests that take longer
 // than 2 seconds, which helps in debugging unresponsive services.
@@ -16,6 +19,7 @@ type DiagnosticTransport struct {
 func (t *DiagnosticTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 	done := make(chan struct{})
+	defer close(done)
 
 	// Start a goroutine to log if the request hangs
 	go func() {
@@ -33,7 +37,6 @@ func (t *DiagnosticTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}()
 
 	res, err := t.Transport.RoundTrip(req)
-	close(done)
 	duration := time.Since(start)
 
 	if duration > 2*time.Second {
@@ -44,11 +47,13 @@ func (t *DiagnosticTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func logDiagnostic(msg string) {
+	diagnosticLogMu.Lock()
+	defer diagnosticLogMu.Unlock()
 	f, err := os.OpenFile("/tmp/invariant-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err == nil {
 		timestamp := time.Now().Format(time.RFC3339)
-		f.WriteString(fmt.Sprintf("[%s] %s", timestamp, msg))
-		f.Close()
+		_, _ = f.WriteString(fmt.Sprintf("[%s] %s", timestamp, msg))
+		_ = f.Close()
 	}
 }
 

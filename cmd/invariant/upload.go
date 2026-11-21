@@ -290,6 +290,7 @@ func runUpload(globalCfg *config.InvariantConfig, args []string) {
 	go up.progressLoop(ctx)
 
 	batchingStore := NewBatchingTrackingStorage(storageClient, &up.BytesUploaded)
+	defer batchingStore.Close()
 
 	rootEntry, err := up.processDirectory(ctx, absPath, absPath, batchingStore, rules, opts)
 	batchingStore.FlushHas(ctx)

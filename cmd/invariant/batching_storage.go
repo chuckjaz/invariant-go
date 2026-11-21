@@ -26,6 +26,9 @@ type BatchingTrackingStorage struct {
 	hasMu      sync.Mutex
 	hasWaiters map[string][]chan bool
 	hasTimer   *time.Timer
+
+	stopOnce sync.Once
+	stopCh   chan struct{}
 }
 
 func NewBatchingTrackingStorage(store storage.Storage, bytesUploaded *uint64) *BatchingTrackingStorage {
@@ -40,17 +43,31 @@ func NewBatchingTrackingStorage(store storage.Storage, bytesUploaded *uint64) *B
 		BytesUploaded: bytesUploaded,
 		storeBuffer:   make(map[string][]byte),
 		hasWaiters:    make(map[string][]chan bool),
+		stopCh:        make(chan struct{}),
 	}
 
 	// Start a background flusher for StoreAt just in case it doesn't reach the size limit
 	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
 		for {
-			time.Sleep(20 * time.Millisecond)
-			b.FlushStore(context.Background())
+			select {
+			case <-ticker.C:
+				b.FlushStore(context.Background())
+			case <-b.stopCh:
+				return
+			}
 		}
 	}()
 
 	return b
+}
+
+// Close stops the background store flusher goroutine.
+func (b *BatchingTrackingStorage) Close() {
+	b.stopOnce.Do(func() {
+		close(b.stopCh)
+	})
 }
 
 func (b *BatchingTrackingStorage) Size(ctx context.Context, address string) (int64, bool) {
