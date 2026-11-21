@@ -331,17 +331,21 @@ func (h *Handler) downloadToDisk(link content.ContentLink, diskPath string) erro
 	}
 	defer rc.Close()
 
-	tmpPath := diskPath + ".tmp"
-	f, err := os.Create(tmpPath)
+	f, err := os.CreateTemp(filepath.Dir(diskPath), filepath.Base(diskPath)+".*.tmp")
 	if err != nil {
 		return err
 	}
+	tmpPath := f.Name()
 
 	_, copyErr := io.Copy(f, rc)
-	f.Close()
+	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmpPath)
 		return copyErr
+	}
+	if closeErr != nil {
+		os.Remove(tmpPath)
+		return closeErr
 	}
 
 	if err := os.Rename(tmpPath, diskPath); err != nil {
@@ -360,9 +364,19 @@ func (h *Handler) handlePut(ctx context.Context, req Request, bodyData []byte) R
 	fileName := hex.EncodeToString(req.ActionID)
 	diskPath := filepath.Join(h.cfg.CacheDir, fileName)
 
-	tmpPath := diskPath + ".tmp"
-	if err := os.WriteFile(tmpPath, bodyData, 0644); err != nil {
+	tmpFile, err := os.CreateTemp(h.cfg.CacheDir, fileName+".*.tmp")
+	if err != nil {
+		return Response{ID: req.ID, Err: fmt.Sprintf("failed to create temp file: %v", err)}
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(bodyData); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
 		return Response{ID: req.ID, Err: fmt.Sprintf("failed to write local file: %v", err)}
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return Response{ID: req.ID, Err: fmt.Sprintf("failed to close local file: %v", err)}
 	}
 	if err := os.Rename(tmpPath, diskPath); err != nil {
 		os.Remove(tmpPath)

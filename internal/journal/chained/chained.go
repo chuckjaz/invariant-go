@@ -400,13 +400,18 @@ func (j *ChainedJournal[T]) LoadLocalEntries() ([]T, error) {
 				continue
 			}
 			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 			for scanner.Scan() {
 				var entry ChainedEntry[T]
 				if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil && entry.Record != nil {
 					records = append(records, *entry.Record)
 				}
 			}
+			scanErr := scanner.Err()
 			file.Close()
+			if scanErr != nil {
+				return nil, scanErr
+			}
 		}
 	}
 	return records, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -36,7 +37,9 @@ func NewFileSystemNames(baseDir string, snapshotInterval time.Duration) (*FileSy
 		idBytes := make([]byte, 32)
 		rand.Read(idBytes)
 		id = hex.EncodeToString(idBytes)
-		os.WriteFile(idPath, []byte(id), 0644)
+		if err := os.WriteFile(idPath, []byte(id), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write names server id: %w", err)
+		}
 	}
 
 	store, err := journal.NewStore[string, NameEntry](baseDir, snapshotInterval)
