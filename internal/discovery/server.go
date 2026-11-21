@@ -29,6 +29,7 @@ type DiscoveryServer struct {
 	peerResolver      PeerKeyResolver
 	controlPlaneURL   string
 	oauthAuth         Authenticator
+	keysMu            sync.RWMutex
 	staticKeys        map[string]struct{}
 	requireAuth       bool
 	handler           http.Handler
@@ -107,11 +108,13 @@ func (s *DiscoveryServer) WithOAuthAuthenticator(auth Authenticator) *DiscoveryS
 
 // WithServiceKeys adds static service keys allowed to authenticate.
 func (s *DiscoveryServer) WithServiceKeys(keys ...string) *DiscoveryServer {
+	s.keysMu.Lock()
 	for _, k := range keys {
 		if k != "" {
 			s.staticKeys[k] = struct{}{}
 		}
 	}
+	s.keysMu.Unlock()
 	s.handler = s.Handler()
 	return s
 }
@@ -173,14 +176,19 @@ func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		mustAuth := s.requireAuth || len(s.staticKeys) > 0 || s.oauthAuth != nil
-
 		authHeader := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		token = strings.TrimSpace(token)
 		if token == "" && authHeader != "" && !strings.HasPrefix(authHeader, "Bearer ") {
 			token = strings.TrimSpace(authHeader)
 		}
+
+		s.keysMu.RLock()
+		hasStaticKeys := len(s.staticKeys) > 0
+		_, staticKeyOK := s.staticKeys[token]
+		s.keysMu.RUnlock()
+
+		mustAuth := s.requireAuth || hasStaticKeys || s.oauthAuth != nil
 
 		if token == "" {
 			if mustAuth {
@@ -196,7 +204,7 @@ func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 1. Check static service keys
-		if _, ok := s.staticKeys[token]; ok {
+		if staticKeyOK {
 			caller := Caller{
 				Kind:     CallerKindService,
 				Identity: NodeIdentity{Name: "service"},
@@ -210,11 +218,10 @@ func (s *DiscoveryServer) authMiddleware(next http.Handler) http.Handler {
 			if ok, tokRec, err := s.invitations.VerifyAccessToken(r.Context(), token); err == nil && ok && tokRec != nil {
 				// Enforce WireGuard public key pinning if peerResolver is configured and the token has a pinned key
 				if s.peerResolver != nil && tokRec.PublicKey != "" {
-					if peerKey, hasPeerKey := s.peerResolver.PeerKey(r.RemoteAddr); hasPeerKey && !peerKey.IsZero() {
-						if peerKey.String() != tokRec.PublicKey {
-							http.Error(w, "Unauthorized: peer WireGuard key does not match pinned token key", http.StatusUnauthorized)
-							return
-						}
+					peerKey, hasPeerKey := s.peerResolver.PeerKey(r.RemoteAddr)
+					if !hasPeerKey || peerKey.IsZero() || peerKey.String() != tokRec.PublicKey {
+						http.Error(w, "Unauthorized: peer WireGuard key does not match pinned token key", http.StatusUnauthorized)
+						return
 					}
 				}
 
@@ -488,7 +495,10 @@ func (s *DiscoveryServer) isAdminCaller(caller Caller) bool {
 	if caller.Kind == CallerKindUser && caller.TokenRecord == nil {
 		return true
 	}
-	if !s.requireAuth && len(s.staticKeys) == 0 && s.oauthAuth == nil && caller.Kind == CallerKindAnonymous {
+	s.keysMu.RLock()
+	hasStaticKeys := len(s.staticKeys) > 0
+	s.keysMu.RUnlock()
+	if !s.requireAuth && !hasStaticKeys && s.oauthAuth == nil && caller.Kind == CallerKindAnonymous {
 		return true
 	}
 	return false
@@ -661,12 +671,30 @@ func (s *DiscoveryServer) peerRateLimitKey(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+func (s *DiscoveryServer) pruneExpiredRedemptionsLocked(cutoff time.Time) {
+	for k, attempts := range s.failedRedemptions {
+		valid := attempts[:0]
+		for _, t := range attempts {
+			if t.After(cutoff) {
+				valid = append(valid, t)
+			}
+		}
+		if len(valid) == 0 {
+			delete(s.failedRedemptions, k)
+		} else {
+			s.failedRedemptions[k] = valid
+		}
+	}
+}
+
 func (s *DiscoveryServer) isRateLimited(peerKey string) bool {
 	s.rateMu.Lock()
 	defer s.rateMu.Unlock()
 
-	now := time.Now()
-	cutoff := now.Add(-redeemFailureWindow)
+	cutoff := time.Now().Add(-redeemFailureWindow)
+	if len(s.failedRedemptions) > 1024 {
+		s.pruneExpiredRedemptionsLocked(cutoff)
+	}
 	attempts := s.failedRedemptions[peerKey]
 	valid := attempts[:0]
 	for _, t := range attempts {
@@ -685,7 +713,11 @@ func (s *DiscoveryServer) isRateLimited(peerKey string) bool {
 func (s *DiscoveryServer) recordFailedRedemption(peerKey string) {
 	s.rateMu.Lock()
 	defer s.rateMu.Unlock()
-	s.failedRedemptions[peerKey] = append(s.failedRedemptions[peerKey], time.Now())
+	now := time.Now()
+	if len(s.failedRedemptions) > 1024 {
+		s.pruneExpiredRedemptionsLocked(now.Add(-redeemFailureWindow))
+	}
+	s.failedRedemptions[peerKey] = append(s.failedRedemptions[peerKey], now)
 }
 
 func (s *DiscoveryServer) handleCreateInvitation(w http.ResponseWriter, r *http.Request) {
