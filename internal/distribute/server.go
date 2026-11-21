@@ -89,6 +89,7 @@ func (s *DistributeServer) handleNotify(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	var req notify.NotifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request: invalid JSON", http.StatusBadRequest)

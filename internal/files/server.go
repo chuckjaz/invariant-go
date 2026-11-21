@@ -242,6 +242,7 @@ func (s *Server) handleSetAttributes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var attrs EntryAttributes
 	if err := json.NewDecoder(r.Body).Decode(&attrs); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
