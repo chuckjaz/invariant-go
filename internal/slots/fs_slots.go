@@ -127,10 +127,23 @@ func (s *FileSystemSlots) List(ctx context.Context, chunkSize int) <-chan []stri
 
 // Subscribe returns a channel that yields the IDs of newly created slots.
 func (s *FileSystemSlots) Subscribe(ctx context.Context) <-chan string {
-	s.subMu.Lock()
-	defer s.subMu.Unlock()
 	ch := make(chan string, 100)
+	s.subMu.Lock()
 	s.subscribers = append(s.subscribers, ch)
+	s.subMu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		s.subMu.Lock()
+		for i, sub := range s.subscribers {
+			if sub == ch {
+				s.subscribers = append(s.subscribers[:i], s.subscribers[i+1:]...)
+				break
+			}
+		}
+		close(ch)
+		s.subMu.Unlock()
+	}()
 	return ch
 }
 

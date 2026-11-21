@@ -124,10 +124,23 @@ func (m *MemorySlots) List(ctx context.Context, chunkSize int) <-chan []string {
 
 // Subscribe returns a channel that yields the IDs of newly created slots.
 func (m *MemorySlots) Subscribe(ctx context.Context) <-chan string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	ch := make(chan string, 100)
+	m.mu.Lock()
 	m.subscribers = append(m.subscribers, ch)
+	m.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		m.mu.Lock()
+		for i, sub := range m.subscribers {
+			if sub == ch {
+				m.subscribers = append(m.subscribers[:i], m.subscribers[i+1:]...)
+				break
+			}
+		}
+		close(ch)
+		m.mu.Unlock()
+	}()
 	return ch
 }
 

@@ -129,10 +129,23 @@ func (s *InMemoryStorage) List(ctx context.Context, chunkSize int) <-chan []stri
 }
 
 func (s *InMemoryStorage) Subscribe(ctx context.Context) <-chan string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	ch := make(chan string, 100)
+	s.mu.Lock()
 	s.subscribers = append(s.subscribers, ch)
+	s.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		s.mu.Lock()
+		for i, sub := range s.subscribers {
+			if sub == ch {
+				s.subscribers = append(s.subscribers[:i], s.subscribers[i+1:]...)
+				break
+			}
+		}
+		close(ch)
+		s.mu.Unlock()
+	}()
 	return ch
 }
 
