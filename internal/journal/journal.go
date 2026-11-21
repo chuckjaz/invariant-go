@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -158,7 +159,11 @@ func (s *Store[K, V]) Close() error {
 
 // Snapshot creates an immediate snapshot of the in-memory store and starts a new journal.
 func (s *Store[K, V]) Snapshot() error {
-	return s.doSnapshot()
+	if err := s.doSnapshot(); err != nil {
+		log.Printf("journal: snapshot failed: %v", err)
+		return err
+	}
+	return nil
 }
 
 // Get safely retrieves a value from the store.
@@ -243,7 +248,9 @@ func (s *Store[K, V]) snapshotLoop() {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
-			_ = s.doSnapshot()
+			if err := s.doSnapshot(); err != nil {
+				log.Printf("journal: background snapshot failed: %v", err)
+			}
 		}
 	}
 }

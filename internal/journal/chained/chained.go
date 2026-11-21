@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -291,7 +292,9 @@ func (j *ChainedJournal[T]) rotateLocked() (string, error) {
 	if j.currentFile == nil {
 		return "", nil
 	}
-	_ = j.currentWriter.Flush()
+	if err := j.currentWriter.Flush(); err != nil {
+		log.Printf("chainedjournal: flush failed before rotate: %v", err)
+	}
 	j.currentFile.Close()
 	rotatedPath := j.currentPath
 
@@ -356,7 +359,9 @@ func (j *ChainedJournal[T]) Close() error {
 	j.mu.Lock()
 	var closeErr error
 	if j.currentFile != nil {
-		_ = j.currentWriter.Flush()
+		if err := j.currentWriter.Flush(); err != nil {
+			log.Printf("chainedjournal: flush failed before close: %v", err)
+		}
 		closeErr = j.currentFile.Close()
 		j.currentFile = nil
 	}
