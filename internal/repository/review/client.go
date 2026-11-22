@@ -277,3 +277,6 @@ func (c *Client) AbandonReview(ctx context.Context, token string, author repoid.
 	}
 	return nil
 }
+
+// AssociateCommit is a no-op for the remote HTTP review client.
+func (c *Client) AssociateCommit(token string, commitHash string) {}

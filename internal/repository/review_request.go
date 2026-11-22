@@ -57,9 +57,7 @@ func RequestReview(
 				}
 				c.Tags["review"] = rec.Token
 			}
-			if localRev, ok := reviewSvc.(*review.LocalService); ok {
-				localRev.AssociateCommit(rec.Token, currCommitHash)
-			}
+			reviewSvc.AssociateCommit(rec.Token, currCommitHash)
 		}
 	}
 

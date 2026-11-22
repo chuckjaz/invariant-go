@@ -111,6 +111,8 @@ func (m *mockReviewService) AbandonReview(ctx context.Context, token string, aut
 	return nil
 }
 
+func (m *mockReviewService) AssociateCommit(token string, commitHash string) {}
+
 func TestReviewServerAndClient(t *testing.T) {
 	ctx := context.Background()
 	mockSvc := newMockReviewService()

@@ -204,9 +204,7 @@ func UpdateReview(
 		currCommitHash, err := slotsClient.Get(ctx, meta.SlotID)
 		if err == nil && currCommitHash != "" {
 			rec.HeadCommit = currCommitHash
-			if localRev, ok := reviewSvc.(*review.LocalService); ok {
-				localRev.AssociateCommit(rec.Token, currCommitHash)
-			}
+			reviewSvc.AssociateCommit(rec.Token, currCommitHash)
 		}
 	}
 

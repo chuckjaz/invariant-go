@@ -75,4 +75,7 @@ type Service interface {
 
 	// AbandonReview marks the review as abandoned.
 	AbandonReview(ctx context.Context, token string, author identity.Identity) error
+
+	// AssociateCommit maps a commit hash to a review token for commit-based lookups.
+	AssociateCommit(token string, commitHash string)
 }
