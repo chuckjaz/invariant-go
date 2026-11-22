@@ -74,6 +74,10 @@ type ReplayTarget interface {
 	Register(ctx context.Context, reg discovery.ServiceRegistration) error
 	RegisterClient(ctx context.Context, publicKey string, id discovery.NodeIdentity) error
 	RevokeServiceKey(ctx context.Context, keyOrID string, revoker discovery.NodeIdentity) error
+	RevokeInvitation(ctx context.Context, codeOrID string, revoker discovery.NodeIdentity) error
+	RevokeAccessToken(ctx context.Context, tokenOrID string, revoker discovery.NodeIdentity) error
+	discovery.ServiceKeyRestorer
+	discovery.InvitationRestorer
 }
 
 // Replay reads all historical events from CAS storage via slot and unflushed local files,
@@ -107,10 +111,8 @@ func (b *ChainedBackup) Replay(ctx context.Context, target ReplayTarget) error {
 			}
 		case discovery.EventCreateServiceKey:
 			if event.ServiceKey != nil {
-				if restorer, ok := target.(discovery.ServiceKeyRestorer); ok {
-					if err := restorer.RestoreServiceKey(ctx, *event.ServiceKey); err != nil {
-						return fmt.Errorf("failed to restore service key: %w", err)
-					}
+				if err := target.RestoreServiceKey(ctx, *event.ServiceKey); err != nil {
+					return fmt.Errorf("failed to restore service key: %w", err)
 				}
 			}
 		case discovery.EventRevokeServiceKey:
@@ -123,44 +125,36 @@ func (b *ChainedBackup) Replay(ctx context.Context, target ReplayTarget) error {
 			}
 		case discovery.EventCreateInvitation:
 			if event.Invitation != nil {
-				if restorer, ok := target.(discovery.InvitationRestorer); ok {
-					if err := restorer.RestoreInvitation(ctx, *event.Invitation); err != nil {
-						log.Printf("discovery backup: replay restore invitation %s failed: %v", event.Invitation.ID, err)
-					}
+				if err := target.RestoreInvitation(ctx, *event.Invitation); err != nil {
+					log.Printf("discovery backup: replay restore invitation %s failed: %v", event.Invitation.ID, err)
 				}
 			}
 		case discovery.EventRedeemInvitation:
-			if restorer, ok := target.(discovery.InvitationRestorer); ok {
-				if event.Invitation != nil {
-					if err := restorer.RestoreInvitation(ctx, *event.Invitation); err != nil {
-						log.Printf("discovery backup: replay restore redeemed invitation %s failed: %v", event.Invitation.ID, err)
-					}
+			if event.Invitation != nil {
+				if err := target.RestoreInvitation(ctx, *event.Invitation); err != nil {
+					log.Printf("discovery backup: replay restore redeemed invitation %s failed: %v", event.Invitation.ID, err)
 				}
-				if event.AccessToken != nil {
-					if err := restorer.RestoreAccessToken(ctx, *event.AccessToken); err != nil {
-						log.Printf("discovery backup: replay restore access token %s failed: %v", event.AccessToken.ID, err)
-					}
+			}
+			if event.AccessToken != nil {
+				if err := target.RestoreAccessToken(ctx, *event.AccessToken); err != nil {
+					log.Printf("discovery backup: replay restore access token %s failed: %v", event.AccessToken.ID, err)
 				}
 			}
 		case discovery.EventRevokeInvitation:
-			if invMgr, ok := target.(discovery.InvitationManager); ok {
-				revoker := discovery.NodeIdentity{Name: "system"}
-				if event.RevokedBy != nil {
-					revoker = *event.RevokedBy
-				}
-				if err := invMgr.RevokeInvitation(ctx, event.RevokeKey, revoker); err != nil {
-					log.Printf("discovery backup: replay revoke invitation %s failed: %v", event.RevokeKey, err)
-				}
+			revoker := discovery.NodeIdentity{Name: "system"}
+			if event.RevokedBy != nil {
+				revoker = *event.RevokedBy
+			}
+			if err := target.RevokeInvitation(ctx, event.RevokeKey, revoker); err != nil {
+				log.Printf("discovery backup: replay revoke invitation %s failed: %v", event.RevokeKey, err)
 			}
 		case discovery.EventRevokeAccessToken:
-			if invMgr, ok := target.(discovery.InvitationManager); ok {
-				revoker := discovery.NodeIdentity{Name: "system"}
-				if event.RevokedBy != nil {
-					revoker = *event.RevokedBy
-				}
-				if err := invMgr.RevokeAccessToken(ctx, event.RevokeKey, revoker); err != nil {
-					log.Printf("discovery backup: replay revoke access token %s failed: %v", event.RevokeKey, err)
-				}
+			revoker := discovery.NodeIdentity{Name: "system"}
+			if event.RevokedBy != nil {
+				revoker = *event.RevokedBy
+			}
+			if err := target.RevokeAccessToken(ctx, event.RevokeKey, revoker); err != nil {
+				log.Printf("discovery backup: replay revoke access token %s failed: %v", event.RevokeKey, err)
 			}
 		}
 	}
