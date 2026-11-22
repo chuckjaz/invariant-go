@@ -13,16 +13,16 @@ import (
 	"github.com/chuckjaz/invariant-go/internal/trace"
 )
 
-// FinderServer wraps a Finder implementation and provides HTTP endpoints.
+// FinderServer wraps a LocalFinder implementation and provides HTTP endpoints.
 type FinderServer struct {
-	finder    Finder
+	finder    LocalFinder
 	discovery discovery.Discovery
 	handler   http.Handler
 	tracer    *trace.Tracer
 }
 
 // NewFinderServer creates a new Finder HTTP server.
-func NewFinderServer(finder Finder, disc discovery.Discovery) *FinderServer {
+func NewFinderServer(finder LocalFinder, disc discovery.Discovery) *FinderServer {
 	s := &FinderServer{
 		finder:    finder,
 		discovery: disc,
@@ -146,11 +146,7 @@ func (s *FinderServer) pushBlocksToCloserFinder(newFinderID string) {
 	}
 
 	// Iterate through our knowledge base
-	ft, ok := s.finder.(FinderTest)
-	if !ok {
-		return
-	}
-	knownBlocks := ft.SnapshotBlocks()
+	knownBlocks := s.finder.SnapshotBlocks()
 
 	// Batch blocks by storage ID
 	// storageID -> list of addresses

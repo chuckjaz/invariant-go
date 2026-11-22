@@ -25,6 +25,12 @@ type Finder interface {
 	Peer(ctx context.Context, finderID string) error
 }
 
+// LocalFinder extends Finder with local block snapshot access required by FinderServer.
+type LocalFinder interface {
+	Finder
+	SnapshotBlocks() map[string][]string
+}
+
 // FinderTest provides testing and diagnostic methods.
 type FinderTest interface {
 	SnapshotBlocks() map[string][]string
